@@ -1,130 +1,256 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:file_picker/file_picker.dart';
 
-class ContentArea extends StatelessWidget {
+class ContentArea extends StatefulWidget {
   const ContentArea({super.key});
 
   @override
+  State<ContentArea> createState() => _ContentAreaState();
+}
+
+class _ContentAreaState extends State<ContentArea> {
+  final TextEditingController _controller = TextEditingController(
+    text: """
+# Deployment Plan
+
+We need to update the `nginx.conf` before pushing to prod.
+
+## Tasks
+
+- [x] Backup DB
+- [ ] Run migration
+
+```
+sudo systemctl restart nginx
+```
+""",
+  );
+
+  String _lastText = "";
+
+  @override
+  void initState() {
+    super.initState();
+    _lastText = _controller.text;
+  }
+
+  void _handleAutoList(String newText) {
+    // Only trigger if we added exactly one character (the newline)
+    // and that character is indeed a newline at the current cursor position.
+    if (newText.length != _lastText.length + 1) return;
+
+    final selection = _controller.selection;
+    if (!selection.isValid || selection.start == 0) return;
+
+    // Check if the character before the cursor is a newline
+    if (newText[selection.start - 1] == '\n') {
+      // Find the start of the previous line
+      final currentPos = selection.start;
+      final previousNewlinePos = newText.lastIndexOf('\n', currentPos - 2);
+      final lineStart = previousNewlinePos == -1 ? 0 : previousNewlinePos + 1;
+
+      // Extract the previous line content
+      final previousLine = newText.substring(lineStart, currentPos - 1);
+
+      // Regex for Bullet: ^(\s*)([*+-])\s
+      final bulletMatch = RegExp(r'^(\s*)([*+-])\s').firstMatch(previousLine);
+      if (bulletMatch != null) {
+        final indent = bulletMatch.group(1) ?? "";
+        final bullet = bulletMatch.group(2) ?? "";
+        _insertText('$indent$bullet ');
+        return;
+      }
+
+      // Regex for Number: ^(\s*)(\d+)\.\s
+      final numberMatch = RegExp(r'^(\s*)(\d+)\.\s').firstMatch(previousLine);
+      if (numberMatch != null) {
+        final indent = numberMatch.group(1) ?? "";
+        final numberStr = numberMatch.group(2) ?? "0";
+        final number = int.tryParse(numberStr) ?? 0;
+        _insertText('$indent${number + 1}. ');
+        return;
+      }
+    }
+  }
+
+  Future<void> _pickFile() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles();
+
+    if (result != null) {
+      final fileName = result.files.single.name;
+      // In a real app, you would upload this file and get a URL.
+      // Here we just insert a placeholder link.
+      final textToAdd = '\n\n![Attachment: $fileName]($fileName)';
+      _insertText(textToAdd);
+    }
+  }
+
+  void _insertText(String text) {
+    final textSelection = _controller.selection;
+    if (textSelection.isValid) {
+      final newText = _controller.text.replaceRange(
+        textSelection.start,
+        textSelection.end,
+        text,
+      );
+      final newSelection = textSelection.copyWith(
+        baseOffset: textSelection.start + text.length,
+        extentOffset: textSelection.start + text.length,
+      );
+      _controller.value = TextEditingValue(
+        text: newText,
+        selection: newSelection,
+      );
+    } else {
+      _controller.text += text;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // Determine screen width to decide layout
+    final isDesktop = MediaQuery.of(context).size.width > 900;
+
     return Container(
-      color: const Color(0xFF1B2535), // Main background
+      color: const Color(0xFF1B2535),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Top Bar (Settings/Actions)
-          Padding(
-            padding: const EdgeInsets.all(16.0),
+          // Toolbar
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: Color(0xFF334155))),
+            ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                _buildIconButton(Icons.terminal),
+                const Text(
+                  'Editing: Deployment Plan',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  onPressed: _pickFile,
+                  icon: const Icon(Icons.attach_file, color: Colors.grey),
+                  tooltip: 'Attach File',
+                ),
                 const SizedBox(width: 8),
-                _buildIconButton(Icons.settings_outlined),
+                IconButton(
+                  onPressed: () {},
+                  icon: const Icon(Icons.lock_outline, color: Colors.grey),
+                  tooltip: 'Password',
+                ),
+                IconButton(
+                  onPressed: () {},
+                  icon: const Icon(Icons.terminal, color: Colors.grey),
+                  tooltip: 'Terminal',
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: () {},
+                  icon: const Icon(Icons.settings_outlined, color: Colors.grey),
+                  tooltip: 'Settings',
+                ),
               ],
             ),
           ),
 
+          // Editor Area
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(48.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Title
-                  const Text(
-                    '# Deployment Plan',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      fontFamily: 'monospace', // Monospaced for the '#'
+            child: isDesktop
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(child: _buildInputArea()),
+                      const VerticalDivider(width: 1, color: Color(0xFF334155)),
+                      Expanded(child: _buildPreviewArea()),
+                    ],
+                  )
+                : DefaultTabController(
+                    length: 2,
+                    child: Column(
+                      children: [
+                        const TabBar(
+                          tabs: [
+                            Tab(text: 'Edit'),
+                            Tab(text: 'Preview'),
+                          ],
+                          labelColor: Colors.blueAccent,
+                          unselectedLabelColor: Colors.grey,
+                          indicatorColor: Colors.blueAccent,
+                        ),
+                        Expanded(
+                          child: TabBarView(
+                            children: [_buildInputArea(), _buildPreviewArea()],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 16),
-
-                  // Description
-                  const Text(
-                    "We need to update the `nginx.conf` before pushing to prod.",
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 16,
-                      height: 1.5,
-                    ),
-                  ),
-                  const SizedBox(height: 48),
-
-                  // Tasks Header
-                  const Text(
-                    '## Tasks',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Checkboxes
-                  _buildTaskItem("Backup DB", true),
-                  _buildTaskItem("Run migration", false),
-
-                  const SizedBox(height: 48),
-
-                  // Code Block
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0F172A), // Darker code block
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF334155)),
-                    ),
-                    child: const Text(
-                      'sudo systemctl restart nginx',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontFamily: 'monospace',
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildIconButton(IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF283548),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Icon(icon, color: Colors.grey, size: 20),
-    );
-  }
-
-  Widget _buildTaskItem(String label, bool isChecked) {
+  Widget _buildInputArea() {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Row(
-        children: [
-          Icon(
-            isChecked
-                ? Icons.check_box_outlined
-                : Icons.check_box_outline_blank,
-            color: isChecked ? Colors.blueAccent : Colors.grey,
+      padding: const EdgeInsets.all(16.0),
+      child: TextField(
+        controller: _controller,
+        maxLines: null,
+        expands: true,
+        style: const TextStyle(
+          color: Colors.white,
+          fontFamily: 'monospace',
+          fontSize: 14,
+        ),
+        decoration: const InputDecoration(
+          border: InputBorder.none,
+          hintText: 'Type markdown here...',
+          hintStyle: TextStyle(color: Colors.grey),
+        ),
+        onChanged: (text) {
+          _handleAutoList(text);
+          _lastText = text;
+          setState(() {}); // Rebuild to update preview
+        },
+      ),
+    );
+  }
+
+  Widget _buildPreviewArea() {
+    return Container(
+      color: const Color(0xFF0F172A), // Slightly darker for preview
+      child: Markdown(
+        data: _controller.text,
+        selectable: true,
+        styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+          p: const TextStyle(color: Colors.white70, fontSize: 16),
+          h1: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 32,
           ),
-          const SizedBox(width: 12),
-          Text(
-            label,
-            style: const TextStyle(color: Colors.white, fontSize: 16),
+          h2: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 24,
           ),
-        ],
+          code: const TextStyle(
+            backgroundColor: Color(0xFF1E293B),
+            color: Colors.greenAccent,
+            fontFamily: 'monospace',
+          ),
+          codeblockDecoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          checkbox: const TextStyle(color: Colors.blueAccent),
+        ),
       ),
     );
   }

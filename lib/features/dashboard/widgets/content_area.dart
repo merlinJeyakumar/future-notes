@@ -132,27 +132,43 @@ sudo systemctl restart nginx
                   ),
                 ),
                 const Spacer(),
-                IconButton(
+                ElevatedButton(
+                  onPressed: () {},
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueAccent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    elevation: 0,
+                  ),
+                  child: const Text(
+                    'Save Note',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                _buildToolbarIcon(
+                  Icons.attach_file,
+                  'Attach File',
                   onPressed: _pickFile,
-                  icon: const Icon(Icons.attach_file, color: Colors.grey),
-                  tooltip: 'Attach File',
                 ),
                 const SizedBox(width: 8),
-                IconButton(
+                _buildToolbarIcon(
+                  Icons.lock_outline,
+                  'Password',
                   onPressed: () {},
-                  icon: const Icon(Icons.lock_outline, color: Colors.grey),
-                  tooltip: 'Password',
                 ),
-                IconButton(
-                  onPressed: () {},
-                  icon: const Icon(Icons.terminal, color: Colors.grey),
-                  tooltip: 'Terminal',
-                ),
+                _buildToolbarIcon(Icons.terminal, 'Terminal', onPressed: () {}),
                 const SizedBox(width: 8),
-                IconButton(
+                _buildToolbarIcon(
+                  Icons.settings_outlined,
+                  'Settings',
                   onPressed: () {},
-                  icon: const Icon(Icons.settings_outlined, color: Colors.grey),
-                  tooltip: 'Settings',
                 ),
               ],
             ),
@@ -193,6 +209,21 @@ sudo systemctl restart nginx
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildToolbarIcon(
+    IconData icon,
+    String tooltip, {
+    required VoidCallback onPressed,
+  }) {
+    return IconButton(
+      onPressed: onPressed,
+      icon: Icon(icon, color: Colors.grey, size: 20),
+      tooltip: tooltip,
+      constraints: const BoxConstraints(), // Compact constraints
+      padding: const EdgeInsets.all(8), // Consistent padding
+      splashRadius: 20,
     );
   }
 

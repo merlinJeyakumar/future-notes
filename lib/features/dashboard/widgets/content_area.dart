@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import '../viewmodels/content_viewmodel.dart';
 import '../services/file_service.dart';
+import '../services/encryption_service.dart';
 
 class ContentArea extends StatefulWidget {
   const ContentArea({super.key});
@@ -14,6 +15,7 @@ class _ContentAreaState extends State<ContentArea> {
   // Dependency Injection could also happen in main.dart or a provider
   final ContentViewModel _viewModel = ContentViewModel(
     fileService: FileService(),
+    encryptionService: EncryptionService(),
   );
 
   @override
@@ -55,7 +57,10 @@ class _ContentAreaState extends State<ContentArea> {
                     ),
                     const Spacer(),
                     ElevatedButton(
-                      onPressed: () {},
+                      // Call _showPasswordDialog instead of saveNote directly
+                      onPressed: _viewModel.isBusy
+                          ? null
+                          : () => _showPasswordDialog(context),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blueAccent,
                         foregroundColor: Colors.white,
@@ -68,10 +73,19 @@ class _ContentAreaState extends State<ContentArea> {
                         ),
                         elevation: 0,
                       ),
-                      child: const Text(
-                        'Save Note',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
+                      child: _viewModel.isBusy
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text(
+                              'Save Note',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
                     ),
                     const SizedBox(width: 16),
                     _buildToolbarIcon(
@@ -158,6 +172,109 @@ class _ContentAreaState extends State<ContentArea> {
       constraints: const BoxConstraints(), // Compact constraints
       padding: const EdgeInsets.all(8), // Consistent padding
       splashRadius: 20,
+    );
+  }
+
+  Future<void> _showPasswordDialog(BuildContext context) async {
+    final passwordController = TextEditingController();
+    bool obscureText = true;
+
+    return showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1E293B),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: Color(0xFF334155)),
+              ),
+              title: const Text(
+                'Enter Password',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'This note will be encrypted using the password below.',
+                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: obscureText,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: 'Password',
+                      labelStyle: const TextStyle(color: Colors.blueAccent),
+                      hintText: 'Enter secure password',
+                      hintStyle: const TextStyle(color: Colors.white30),
+                      filled: true,
+                      fillColor: const Color(0xFF0F172A),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                          color: Colors.blueAccent,
+                          width: 2,
+                        ),
+                      ),
+                      prefixIcon: const Icon(
+                        Icons.lock_outline,
+                        color: Colors.blueAccent,
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          obscureText ? Icons.visibility : Icons.visibility_off,
+                          color: Colors.grey,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            obscureText = !obscureText;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    if (passwordController.text.isNotEmpty) {
+                      _viewModel.saveNote(passwordController.text);
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueAccent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: const Text('Save & Encrypt'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 

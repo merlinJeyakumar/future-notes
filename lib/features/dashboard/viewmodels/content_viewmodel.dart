@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import '../../../core/viewmodels/base_viewmodel.dart';
 import '../services/file_service.dart';
+import '../services/encryption_service.dart';
+
+import 'package:uuid/uuid.dart';
 
 class ContentViewModel extends BaseViewModel {
   final IFileService _fileService;
+  final IEncryptionService _encryptionService;
+
   final TextEditingController textController = TextEditingController();
 
   String _lastText = "";
@@ -12,10 +17,38 @@ class ContentViewModel extends BaseViewModel {
   // Expose for UI if needed, but logic should mainly happen here
   // List<TextRange> get checkboxRanges => _checkboxRanges;
 
-  ContentViewModel({required IFileService fileService})
-    : _fileService = fileService {
+  ContentViewModel({
+    required IFileService fileService,
+    required IEncryptionService encryptionService,
+  }) : _fileService = fileService,
+       _encryptionService = encryptionService {
     _lastText = textController.text;
     parseCheckboxes(textController.text);
+  }
+
+  Future<void> saveNote(String password) async {
+    setBusy(true);
+
+    // Simulate Network/Disk delay
+    await Future.delayed(const Duration(seconds: 1));
+
+    final encryptedText = _encryptionService.encrypt(
+      textController.text,
+      password: password,
+    );
+
+    // Generate unique filename
+    final uuid = const Uuid().v4();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final fileName = 'note_${timestamp}_$uuid.enc';
+
+    await _fileService.saveFile(encryptedText, fileName);
+
+    // For verification, we log it to the console and keep the editor text AS-IS.
+    print("SAVED FILE: $fileName (Password: $password)");
+    print("ENCRYPTED DATA: $encryptedText");
+
+    setBusy(false);
   }
 
   @override
@@ -133,8 +166,9 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<void> pickFile() async {
-    final fileName = await _fileService.pickFileName();
-    if (fileName != null) {
+    final result = await _fileService.pickFile();
+    if (result != null) {
+      final fileName = result.files.single.name;
       final textToAdd = '\n\n![Attachment: $fileName]($fileName)';
       _insertText(textToAdd);
     }

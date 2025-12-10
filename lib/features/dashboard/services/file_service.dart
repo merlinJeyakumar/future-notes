@@ -1,16 +1,40 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:path_provider/path_provider.dart';
+import 'package:universal_html/html.dart' as html;
 
 abstract class IFileService {
-  Future<String?> pickFileName();
+  Future<FilePickerResult?> pickFile();
+  Future<void> saveFile(String content, String fileName);
 }
 
 class FileService implements IFileService {
   @override
-  Future<String?> pickFileName() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles();
-    if (result != null) {
-      return result.files.single.name;
+  Future<FilePickerResult?> pickFile() async {
+    return await FilePicker.platform.pickFiles();
+  }
+
+  @override
+  Future<void> saveFile(String content, String fileName) async {
+    if (kIsWeb) {
+      final bytes = utf8.encode(content);
+      final blob = html.Blob([bytes]);
+      final url = html.Url.createObjectUrlFromBlob(blob);
+      html.AnchorElement(href: url)
+        ..setAttribute("download", fileName)
+        ..click();
+      html.Url.revokeObjectUrl(url);
+    } else {
+      final directory = await getApplicationDocumentsDirectory();
+      final userDataDir = Directory('${directory.path}/UserData');
+      if (!await userDataDir.exists()) {
+        await userDataDir.create(recursive: true);
+      }
+      final file = File('${userDataDir.path}/$fileName');
+      await file.writeAsString(content);
+      print('Saved to: ${file.path}');
     }
-    return null;
   }
 }

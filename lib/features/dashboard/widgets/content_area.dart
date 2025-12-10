@@ -29,10 +29,86 @@ sudo systemctl restart nginx
 
   String _lastText = "";
 
+  // Stores the text range of the "[ ]" or "[x]" for each checkbox found.
+  List<TextRange> _checkboxRanges = [];
+
   @override
   void initState() {
     super.initState();
     _lastText = _controller.text;
+    _parseCheckboxes(_controller.text);
+  }
+
+  void _parseCheckboxes(String text) {
+    _checkboxRanges.clear();
+
+    // 1. Identify ranges to exclude (code blocks)
+    final List<TextRange> exclusions = [];
+    final codeBlockRegex = RegExp(r'```[\s\S]*?```');
+    for (final match in codeBlockRegex.allMatches(text)) {
+      exclusions.add(TextRange(start: match.start, end: match.end));
+    }
+
+    // 2. Find all potential checkboxes
+    // Regex to match GFM task list items:
+    // ^ (start of line)
+    // \s* (optional indentation)
+    // [-*+] (list marker)
+    // \s+ (space)
+    // (\[[ xX]\]) (capture group 1: the checkbox itself)
+    final RegExp regex = RegExp(r'^\s*[-*+]\s+(\[[ xX]\])', multiLine: true);
+
+    for (final match in regex.allMatches(text)) {
+      if (match.groupCount >= 1) {
+        // We want the range of the brackets e.g. "[ ]" or "[x]"
+        final start =
+            match.start + (match.group(0)!.lastIndexOf(match.group(1)!));
+        final end = start + match.group(1)!.length;
+
+        // 3. Check if this checkbox is inside a code block
+        bool isExcluded = false;
+        for (final exclusion in exclusions) {
+          if (start >= exclusion.start && end <= exclusion.end) {
+            isExcluded = true;
+            break;
+          }
+        }
+
+        if (!isExcluded) {
+          _checkboxRanges.add(TextRange(start: start, end: end));
+        }
+      }
+    }
+  }
+
+  void _toggleCheckbox(int index) {
+    if (index < 0 || index >= _checkboxRanges.length) return;
+
+    final range = _checkboxRanges[index];
+    final currentText = _controller.text;
+
+    // Safety check ensuring range is still valid
+    if (range.end > currentText.length) return;
+
+    final currentCheckbox = currentText.substring(range.start, range.end);
+    final isChecked = currentCheckbox.toLowerCase().contains('x');
+    final newCheckbox = isChecked ? '[ ]' : '[x]';
+
+    final newText = currentText.replaceRange(
+      range.start,
+      range.end,
+      newCheckbox,
+    );
+
+    // Update controller without losing selection if possible, though user is clicking preview
+    _controller.value = TextEditingValue(
+      text: newText,
+      selection: _controller.selection,
+    );
+
+    // Re-parse immediately
+    _parseCheckboxes(newText);
+    setState(() {});
   }
 
   void _handleAutoList(String newText) {
@@ -105,6 +181,7 @@ sudo systemctl restart nginx
     } else {
       _controller.text += text;
     }
+    _parseCheckboxes(_controller.text);
   }
 
   @override
@@ -247,6 +324,7 @@ sudo systemctl restart nginx
         onChanged: (text) {
           _handleAutoList(text);
           _lastText = text;
+          _parseCheckboxes(text);
           setState(() {}); // Rebuild to update preview
         },
       ),
@@ -254,6 +332,10 @@ sudo systemctl restart nginx
   }
 
   Widget _buildPreviewArea() {
+    // We rely on the fact that flutter_markdown builds widgets specifically in order.
+    // So we can maintain an index that increments each time the builder is called.
+    int checkboxIndex = 0;
+
     return Container(
       color: const Color(0xFF0F172A), // Slightly darker for preview
       child: Markdown(
@@ -282,6 +364,23 @@ sudo systemctl restart nginx
           ),
           checkbox: const TextStyle(color: Colors.blueAccent),
         ),
+        checkboxBuilder: (bool value) {
+          final currentIndex = checkboxIndex++;
+          return GestureDetector(
+            onTap: () {
+              // Toggle logic
+              _toggleCheckbox(currentIndex);
+            },
+            child: Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: Icon(
+                value ? Icons.check_box : Icons.check_box_outline_blank,
+                color: value ? Colors.blueAccent : Colors.grey,
+                size: 20,
+              ),
+            ),
+          );
+        },
       ),
     );
   }

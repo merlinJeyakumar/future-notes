@@ -4,22 +4,7 @@ import '../services/file_service.dart';
 
 class ContentViewModel extends BaseViewModel {
   final IFileService _fileService;
-  final TextEditingController textController = TextEditingController(
-    text: """
-# Deployment Plan
-
-We need to update the `nginx.conf` before pushing to prod.
-
-## Tasks
-
-- [x] Backup DB
-- [ ] Run migration
-
-```
-sudo systemctl restart nginx
-```
-""",
-  );
+  final TextEditingController textController = TextEditingController();
 
   String _lastText = "";
   List<TextRange> _checkboxRanges = [];

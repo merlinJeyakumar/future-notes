@@ -14,8 +14,44 @@ class Sidebar extends StatelessWidget {
           // Logo Area
           Padding(
             padding: const EdgeInsets.all(20.0),
-            child: Icon(Icons.inbox, color: Colors.blueAccent, size: 32),
+            child: Row(
+              children: [
+                Icon(Icons.inbox, color: Colors.blueAccent, size: 32),
+                const SizedBox(width: 12),
+                const Text(
+                  'Notes',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
           ),
+
+          // New Note Button
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {},
+                icon: const Icon(Icons.add),
+                label: const Text('New Note'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueAccent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 24),
 
           // Search Bar
           Padding(
@@ -42,16 +78,9 @@ class Sidebar extends StatelessWidget {
 
           const SizedBox(height: 24),
 
-          // TODAY Section
-          _buildSectionHeader('TODAY'),
-          _buildNavItem('Meeting Notes', '10:00 AM', isSelected: true),
-          _buildNavItem('API Config', '09:15 AM'),
-
-          const SizedBox(height: 24),
-
-          // YESTERDAY Section
-          _buildSectionHeader('YESTERDAY'),
-          _buildNavItem('Bug Fix #404', '4:50 PM'),
+          // List is now empty by default as requested
+          _buildSectionHeader('RECENT'),
+          // No items here
         ],
       ),
     );
@@ -68,41 +97,6 @@ class Sidebar extends StatelessWidget {
           fontWeight: FontWeight.bold,
           letterSpacing: 1.2,
         ),
-      ),
-    );
-  }
-
-  Widget _buildNavItem(
-    String title,
-    String subtitle, {
-    bool isSelected = false,
-  }) {
-    return Container(
-      decoration: isSelected
-          ? const BoxDecoration(
-              border: Border(
-                left: BorderSide(color: Colors.blueAccent, width: 3),
-              ),
-              color: Color(0xFF1E293B), // Slightly lighter for selection
-            )
-          : null,
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 24.0),
-        title: Text(
-          title,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        subtitle: Text(
-          subtitle,
-          style: TextStyle(
-            color: isSelected ? Colors.blueAccent[100] : Colors.grey,
-            fontSize: 12,
-          ),
-        ),
-        onTap: () {},
       ),
     );
   }

@@ -59,10 +59,10 @@ class _ContentAreaState extends State<ContentArea> {
                     ),
                     const SizedBox(width: 16),
                     ElevatedButton(
-                      // Call _showPasswordDialog instead of saveNote directly
+                      // Call _viewModel.saveNote directly
                       onPressed: _viewModel.isBusy
                           ? null
-                          : () => _showPasswordDialog(context),
+                          : () => _viewModel.saveNote(),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blueAccent,
                         foregroundColor: Colors.white,
@@ -112,9 +112,51 @@ class _ContentAreaState extends State<ContentArea> {
                     ),
                     const SizedBox(width: 8),
                     _buildToolbarIcon(
-                      Icons.lock_outline,
-                      'Password',
-                      onPressed: () {},
+                      _viewModel.isPasswordSet
+                          ? Icons.lock
+                          : Icons.lock_outline,
+                      _viewModel.isPasswordSet
+                          ? 'Remove Password'
+                          : 'Set Password',
+                      onPressed: () {
+                        if (_viewModel.isPasswordSet) {
+                          showDialog(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              backgroundColor: const Color(0xFF1E293B),
+                              title: const Text(
+                                'Remove Password?',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                              content: const Text(
+                                'Are you sure you want to remove the password protection?',
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context),
+                                  child: const Text('Cancel'),
+                                ),
+                                TextButton(
+                                  onPressed: () {
+                                    _viewModel.clearPassword();
+                                    Navigator.pop(context);
+                                  },
+                                  child: const Text(
+                                    'Remove',
+                                    style: TextStyle(color: Colors.redAccent),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        } else {
+                          _showPasswordDialog(context);
+                        }
+                      },
+                      color: _viewModel.isPasswordSet
+                          ? Colors.blueAccent
+                          : Colors.grey,
                     ),
                     _buildToolbarIcon(
                       Icons.terminal,
@@ -181,10 +223,11 @@ class _ContentAreaState extends State<ContentArea> {
     IconData icon,
     String tooltip, {
     required VoidCallback onPressed,
+    Color? color,
   }) {
     return IconButton(
       onPressed: onPressed,
-      icon: Icon(icon, color: Colors.grey, size: 20),
+      icon: Icon(icon, color: color ?? Colors.grey, size: 20),
       tooltip: tooltip,
       constraints: const BoxConstraints(), // Compact constraints
       padding: const EdgeInsets.all(8), // Consistent padding
@@ -276,7 +319,7 @@ class _ContentAreaState extends State<ContentArea> {
                   onPressed: () {
                     Navigator.pop(context);
                     if (passwordController.text.isNotEmpty) {
-                      _viewModel.saveNote(passwordController.text);
+                      _viewModel.setPassword(passwordController.text);
                     }
                   },
                   style: ElevatedButton.styleFrom(
@@ -286,7 +329,7 @@ class _ContentAreaState extends State<ContentArea> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                  child: const Text('Save & Encrypt'),
+                  child: const Text('Set Password'),
                 ),
               ],
             );

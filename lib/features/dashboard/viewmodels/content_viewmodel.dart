@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../core/viewmodels/base_viewmodel.dart';
 import '../services/file_service.dart';
@@ -13,9 +14,14 @@ class ContentViewModel extends BaseViewModel {
 
   String _lastText = "";
   final List<TextRange> _checkboxRanges = [];
+  String? _currentPassword;
+  String? _currentFileName;
+  Timer? _autoSaveTimer;
 
   // Expose for UI if needed, but logic should mainly happen here
   // List<TextRange> get checkboxRanges => _checkboxRanges;
+
+  bool get isPasswordSet => _currentPassword != null;
 
   ContentViewModel({
     required IFileService fileService,
@@ -26,33 +32,56 @@ class ContentViewModel extends BaseViewModel {
     parseCheckboxes(textController.text);
   }
 
-  Future<void> saveNote(String password) async {
-    setBusy(true);
+  void setPassword(String password) {
+    _currentPassword = password;
+    notifyListeners();
+    _scheduleAutoSave();
+  }
 
-    // Simulate Network/Disk delay
-    await Future.delayed(const Duration(seconds: 1));
+  void clearPassword() {
+    _currentPassword = null;
+    notifyListeners();
+    // Decide if valid strategy: keep auto-saving if file exists?
+    // Request says: "once saved it will auto save".
+    // If file exists, we continue auto-saving even if password cleared.
+    _scheduleAutoSave();
+  }
+
+  Future<void> saveNote({bool isAutoSave = false}) async {
+    if (!isAutoSave) setBusy(true);
+
+    // Simulate Network/Disk delay only for manual saves or if critical
+    // For auto-save we might want to be silent or faster?
+    // Keeping delay for consistency but could be removed for isAutoSave.
+    if (!isAutoSave) await Future.delayed(const Duration(seconds: 1));
+
+    final passwordToUse = _currentPassword ?? "default";
 
     final encryptedText = _encryptionService.encrypt(
       textController.text,
-      password: password,
+      password: passwordToUse,
     );
 
-    // Generate unique filename
-    final uuid = const Uuid().v4();
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final fileName = 'note_${timestamp}_$uuid.enc';
+    if (_currentFileName == null) {
+      final uuid = const Uuid().v4();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      _currentFileName = 'note_${timestamp}_$uuid.enc';
+    }
 
-    await _fileService.saveFile(encryptedText, fileName);
+    await _fileService.saveFile(encryptedText, _currentFileName!);
 
     // For verification, we log it to the console and keep the editor text AS-IS.
-    print("SAVED FILE: $fileName (Password: $password)");
+    print(
+      "SAVED FILE: $_currentFileName (Password: $passwordToUse, Auto: $isAutoSave)",
+    );
     print("ENCRYPTED DATA: $encryptedText");
 
-    setBusy(false);
+    if (!isAutoSave) setBusy(false);
   }
 
   @override
   void dispose() {
+    _autoSaveTimer?.cancel();
     textController.dispose();
     super.dispose();
   }
@@ -62,6 +91,16 @@ class ContentViewModel extends BaseViewModel {
     _lastText = text;
     parseCheckboxes(text);
     notifyListeners();
+    _scheduleAutoSave();
+  }
+
+  void _scheduleAutoSave() {
+    if (_currentFileName != null || isPasswordSet) {
+      _autoSaveTimer?.cancel();
+      _autoSaveTimer = Timer(const Duration(seconds: 2), () {
+        saveNote(isAutoSave: true);
+      });
+    }
   }
 
   void parseCheckboxes(String text) {
@@ -127,6 +166,7 @@ class ContentViewModel extends BaseViewModel {
     // Re-parse immediately
     parseCheckboxes(newText);
     notifyListeners();
+    _scheduleAutoSave();
   }
 
   /// Handles auto-formatting list items (bullets/numbers) when Enter is pressed
@@ -195,5 +235,6 @@ class ContentViewModel extends BaseViewModel {
     }
     parseCheckboxes(textController.text);
     notifyListeners();
+    _scheduleAutoSave();
   }
 }

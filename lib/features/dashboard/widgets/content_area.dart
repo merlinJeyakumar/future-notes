@@ -37,25 +37,27 @@ class _ContentAreaState extends State<ContentArea> {
           color: const Color(0xFF1B2535),
           child: Column(
             children: [
-              // Toolbar
+              // Toolbar - Row 1: Title & Primary Action
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 8,
                 ),
-                decoration: const BoxDecoration(
-                  border: Border(bottom: BorderSide(color: Color(0xFF334155))),
-                ),
+                color: const Color(0xFF1B2535),
                 child: Row(
                   children: [
-                    const Text(
-                      'Editing: Deployment Plan',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontWeight: FontWeight.bold,
+                    Expanded(
+                      child: Text(
+                        'Editing: Deployment Plan',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const Spacer(),
+                    const SizedBox(width: 16),
                     ElevatedButton(
                       // Call _showPasswordDialog instead of saveNote directly
                       onPressed: _viewModel.isBusy
@@ -69,7 +71,7 @@ class _ContentAreaState extends State<ContentArea> {
                         ),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
-                          vertical: 12,
+                          vertical: 8,
                         ),
                         elevation: 0,
                       ),
@@ -87,7 +89,22 @@ class _ContentAreaState extends State<ContentArea> {
                               style: TextStyle(fontWeight: FontWeight.bold),
                             ),
                     ),
-                    const SizedBox(width: 16),
+                  ],
+                ),
+              ),
+
+              // Toolbar - Row 2: Tools
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Color(0xFF334155))),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
                     _buildToolbarIcon(
                       Icons.attach_file,
                       'Attach File',
@@ -208,6 +225,7 @@ class _ContentAreaState extends State<ContentArea> {
                   TextField(
                     controller: passwordController,
                     obscureText: obscureText,
+                    autofocus: true,
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
                       labelText: 'Password',

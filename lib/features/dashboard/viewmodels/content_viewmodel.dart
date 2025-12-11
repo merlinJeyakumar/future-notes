@@ -12,7 +12,7 @@ class ContentViewModel extends BaseViewModel {
   final TextEditingController textController = TextEditingController();
 
   String _lastText = "";
-  List<TextRange> _checkboxRanges = [];
+  final List<TextRange> _checkboxRanges = [];
 
   // Expose for UI if needed, but logic should mainly happen here
   // List<TextRange> get checkboxRanges => _checkboxRanges;

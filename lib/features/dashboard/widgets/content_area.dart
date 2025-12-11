@@ -326,6 +326,7 @@ class _ContentAreaState extends State<ContentArea> {
       child: Markdown(
         data: _viewModel.textController.text,
         selectable: true,
+        softLineBreak: true,
         styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
           p: const TextStyle(color: Colors.white70, fontSize: 16),
           h1: const TextStyle(

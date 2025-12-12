@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 class Sidebar extends StatelessWidget {
   final List<String> recentFiles;
   final Function(String) onFileSelected;
+  final VoidCallback onNewNote;
 
   const Sidebar({
     super.key,
     this.recentFiles = const [],
     required this.onFileSelected,
+    required this.onNewNote,
   });
 
   @override
@@ -43,7 +45,7 @@ class Sidebar extends StatelessWidget {
             child: SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: () {},
+                onPressed: onNewNote,
                 icon: const Icon(Icons.add),
                 label: const Text('New Note'),
                 style: ElevatedButton.styleFrom(

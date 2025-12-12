@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../../core/viewmodels/base_viewmodel.dart';
 import '../services/file_service.dart';
 import '../services/encryption_service.dart';
+import '../models/note_model.dart';
+import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
 
@@ -21,6 +23,12 @@ class ContentViewModel extends BaseViewModel {
   String? _currentFileName;
   Timer? _autoSaveTimer;
   List<String> _recentFiles = [];
+  final Map<String, String> _sessionPasswords = {};
+  bool _isLocked = false;
+
+  bool get isLocked => _isLocked;
+
+  // Expose for UI if needed, but logic should mainly happen here
 
   // Expose for UI if needed, but logic should mainly happen here
   // List<TextRange> get checkboxRanges => _checkboxRanges;
@@ -45,42 +53,51 @@ class ContentViewModel extends BaseViewModel {
 
   Future<void> loadNote(String fileName) async {
     setBusy(true);
+    _currentFileName = fileName;
+
     final content = await _fileService.readFile(fileName);
     if (content != null) {
-      // Attempt to decrypt if encrypted
       try {
-        final decryptedText = _encryptionService.decrypt(
-          content,
-          password: _currentPassword,
-        );
-        // If decryption fails (returns error string usually in our service mock),
-        // we might want to handle it.
-        // Our service returns "Error decrypting: ..." on failure.
-        // For now, checks if it looks like the error message or just show text.
-        // Improve in future.
-        if (decryptedText.startsWith("Error decrypting:")) {
-          // If password was wrong or not set, maybe show raw or prompt?
-          // For now, show result (which is error msg) or try with default?
+        // 1. Decrypt with APP SECRET KEY
+        final appDecrypted = _encryptionService.decryptApp(content);
 
-          // Retry with default if password was null?
-          if (_currentPassword == null) {
-            final retry = _encryptionService.decrypt(content, password: null);
-            if (!retry.startsWith("Error decrypting:")) {
-              textController.text = retry;
+        if (appDecrypted.isNotEmpty) {
+          // It's a valid JSON note
+          final jsonMap = json.decode(appDecrypted);
+          final note = NoteModel.fromJson(jsonMap);
+
+          _isLocked = note.isLocked;
+
+          if (note.isLocked) {
+            // Check if we have a session password
+            final sessionPass = _sessionPasswords[fileName];
+            if (sessionPass != null) {
+              // Unlock automatically
+              _unlockContent(note.content, sessionPass);
+              _currentPassword = sessionPass;
             } else {
-              textController.text = decryptedText;
+              // Locked state - clear editor
+              textController.text = "";
+              _currentPassword = null;
+              notifyListeners();
             }
           } else {
-            textController.text = decryptedText;
+            // Not locked, content is plain
+            textController.text = note.content;
+            _currentPassword = null;
           }
+
+          titleController.text = note.title;
         } else {
-          textController.text = decryptedText;
+          // Legacy file or bad key
+          print("App decryption failed, trying legacy...");
+          textController.text = "Error: Invalid file format.";
         }
       } catch (e) {
-        textController.text = content; // Fallback to raw content
+        print("Error loading note: $e");
+        textController.text = "Error loading file.";
       }
 
-      _currentFileName = fileName;
       _lastText = textController.text;
       parseCheckboxes(textController.text);
       notifyListeners();
@@ -106,37 +123,107 @@ class ContentViewModel extends BaseViewModel {
   Future<void> saveNote({bool isAutoSave = false}) async {
     if (!isAutoSave) setBusy(true);
 
-    // Simulate Network/Disk delay only for manual saves or if critical
-    // For auto-save we might want to be silent or faster?
-    // Keeping delay for consistency but could be removed for isAutoSave.
     if (!isAutoSave) await Future.delayed(const Duration(seconds: 1));
 
-    final passwordToUse = _currentPassword ?? "default";
+    // Determine current ID (if new file, ID is UUID)
+    final uuid = _currentFileName != null
+        ? _currentFileName!
+              .replaceAll('.enc', '')
+              .replaceAll(RegExp(r'note_\d+_'), '')
+        : const Uuid().v4();
 
-    final encryptedText = _encryptionService.encrypt(
-      textController.text,
-      password: passwordToUse,
+    String contentToSave = textController.text;
+    bool locked = false;
+
+    // If password set, encrypt content with USER PASSWORD
+    if (_currentPassword != null) {
+      contentToSave = _encryptionService.encrypt(
+        textController.text,
+        password: _currentPassword,
+      );
+      locked = true;
+    }
+
+    // Create NoteModel
+    final note = NoteModel(
+      id: uuid,
+      title: titleController.text, // Could be dynamic
+      content: contentToSave,
+      isLocked: locked,
+      timestamp: DateTime.now().millisecondsSinceEpoch,
     );
 
+    // Convert to JSON
+    final jsonString = json.encode(note.toJson());
+
+    // Encrypt JSON with APP SECRET KEY
+    final appEncrypted = _encryptionService.encryptApp(jsonString);
+
     if (_currentFileName == null) {
-      final uuid = const Uuid().v4();
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final timestamp = note.timestamp;
       _currentFileName = 'note_${timestamp}_$uuid.enc';
     }
 
-    await _fileService.saveFile(encryptedText, _currentFileName!);
+    await _fileService.saveFile(appEncrypted, _currentFileName!);
 
-    // For verification, we log it to the console and keep the editor text AS-IS.
-    print(
-      "SAVED FILE: $_currentFileName (Password: $passwordToUse, Auto: $isAutoSave)",
-    );
-    print("ENCRYPTED DATA: $encryptedText");
+    // Update session password for this file if saving with a password
+    if (_currentFileName != null && _currentPassword != null) {
+      _sessionPasswords[_currentFileName!] = _currentPassword!;
+    }
 
-    print("ENCRYPTED DATA: $encryptedText");
+    // For verification
+    print("SAVED FILE: $_currentFileName (Locked: $locked, Auto: $isAutoSave)");
 
     await loadRecentFiles();
 
     if (!isAutoSave) setBusy(false);
+  }
+
+  void unlockNote(String password) {
+    // Re-read logic or just store `_tempEncryptedContent`?
+    // To be safe, we should reload/re-decrypt using the password.
+    // However, we don't hold the encrypted content in memory here optimally.
+    // Let's reload the file to be safe and clean.
+    if (_currentFileName != null) {
+      _sessionPasswords[_currentFileName!] = password;
+      loadNote(_currentFileName!);
+    }
+  }
+
+  void _unlockContent(String encryptedContent, String password) {
+    final decrypted = _encryptionService.decrypt(
+      encryptedContent,
+      password: password,
+    );
+    if (decrypted.startsWith("Error decrypting:")) {
+      textController.text = "Incorrect Password";
+      _sessionPasswords.remove(_currentFileName); // Invalid pass
+      _isLocked = true;
+    } else {
+      textController.text = decrypted;
+      _isLocked = false;
+    }
+  }
+
+  void manualLock() {
+    if (_currentFileName != null) {
+      _sessionPasswords.remove(_currentFileName);
+      _currentPassword = null;
+      _isLocked = true;
+      textController.clear();
+      notifyListeners();
+    }
+  }
+
+  void reset() {
+    _currentFileName = null;
+    _currentPassword = null;
+    _isLocked = false;
+    textController.clear();
+    titleController.text = "New Note";
+    _checkboxRanges.clear();
+    _lastText = "";
+    notifyListeners();
   }
 
   @override

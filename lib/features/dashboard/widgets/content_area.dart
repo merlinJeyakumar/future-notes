@@ -159,7 +159,7 @@ class ContentArea extends StatelessWidget {
                 ? Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(child: _buildInputArea()),
+                      Expanded(child: _buildInputArea(context)),
                       const VerticalDivider(width: 1, color: Color(0xFF334155)),
                       Expanded(child: _buildPreviewArea(context)),
                     ],
@@ -180,7 +180,7 @@ class ContentArea extends StatelessWidget {
                         Expanded(
                           child: TabBarView(
                             children: [
-                              _buildInputArea(),
+                              _buildInputArea(context),
                               _buildPreviewArea(context),
                             ],
                           ),
@@ -210,7 +210,10 @@ class ContentArea extends StatelessWidget {
     );
   }
 
-  Future<void> _showPasswordDialog(BuildContext context) async {
+  Future<void> _showPasswordDialog(
+    BuildContext context, {
+    bool isUnlock = false,
+  }) async {
     final passwordController = TextEditingController();
     bool obscureText = true;
 
@@ -225,9 +228,9 @@ class ContentArea extends StatelessWidget {
                 borderRadius: BorderRadius.circular(16),
                 side: const BorderSide(color: Color(0xFF334155)),
               ),
-              title: const Text(
-                'Enter Password',
-                style: TextStyle(
+              title: Text(
+                isUnlock ? 'Unlock Note' : 'Set Password',
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                 ),
@@ -235,9 +238,11 @@ class ContentArea extends StatelessWidget {
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    'This note will be encrypted using the password below.',
-                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                  Text(
+                    isUnlock
+                        ? 'Enter password to unlock this note.'
+                        : 'This note will be encrypted using the password below.',
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
                   ),
                   const SizedBox(height: 16),
                   TextField(
@@ -248,7 +253,7 @@ class ContentArea extends StatelessWidget {
                     decoration: InputDecoration(
                       labelText: 'Password',
                       labelStyle: const TextStyle(color: Colors.blueAccent),
-                      hintText: 'Enter secure password',
+                      hintText: 'Enter password',
                       hintStyle: const TextStyle(color: Colors.white30),
                       filled: true,
                       fillColor: const Color(0xFF0F172A),
@@ -294,7 +299,11 @@ class ContentArea extends StatelessWidget {
                   onPressed: () {
                     Navigator.pop(context);
                     if (passwordController.text.isNotEmpty) {
-                      viewModel.setPassword(passwordController.text);
+                      if (isUnlock) {
+                        viewModel.unlockNote(passwordController.text);
+                      } else {
+                        viewModel.setPassword(passwordController.text);
+                      }
                     }
                   },
                   style: ElevatedButton.styleFrom(
@@ -304,7 +313,7 @@ class ContentArea extends StatelessWidget {
                       borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                  child: const Text('Set Password'),
+                  child: Text(isUnlock ? 'Unlock' : 'Set Password'),
                 ),
               ],
             );
@@ -314,7 +323,31 @@ class ContentArea extends StatelessWidget {
     );
   }
 
-  Widget _buildInputArea() {
+  Widget _buildInputArea(BuildContext context) {
+    if (viewModel.isLocked) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.lock, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            const Text(
+              "This note is locked.",
+              style: TextStyle(color: Colors.grey, fontSize: 18),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () => _showPasswordDialog(context, isUnlock: true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueAccent,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text("Unlock"),
+            ),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: TextField(

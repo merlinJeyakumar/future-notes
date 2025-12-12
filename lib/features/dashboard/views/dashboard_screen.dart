@@ -60,6 +60,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     _viewModel.loadNote(file);
                     Navigator.pop(context); // Close drawer
                   },
+                  onNewNote: () {
+                    _viewModel.reset();
+                    Navigator.pop(context);
+                  },
                 ),
           body: Row(
             children: [
@@ -68,6 +72,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Sidebar(
                   recentFiles: _viewModel.recentFiles,
                   onFileSelected: (file) => _viewModel.loadNote(file),
+                  onNewNote: _viewModel.reset,
                 ),
 
               // Main Content Area

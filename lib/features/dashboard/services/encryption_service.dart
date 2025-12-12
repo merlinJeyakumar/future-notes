@@ -5,11 +5,17 @@ import 'dart:typed_data'; // For Uint8List
 abstract class IEncryptionService {
   String encrypt(String plainText, {String? password});
   String decrypt(String encryptedText, {String? password});
+  String encryptApp(String plainText);
+  String decryptApp(String encryptedText);
 }
 
 class EncryptionService implements IEncryptionService {
   late final Key _defaultKey;
   late final IV _defaultIV;
+
+  // Hardcoded App Secret Key (32 chars) for demonstration.
+  // In production, obfuscate or use secure storage if possible, though static analysis can find it.
+  static const String _appSecretKey = 'MySuperSecretAppKeyForJsonStore!';
 
   EncryptionService() {
     // Default key/IV for when no password is provided
@@ -55,6 +61,30 @@ class EncryptionService implements IEncryptionService {
       return encrypter.decrypt(encrypted, iv: iv);
     } catch (e) {
       return "Error decrypting: $e";
+    }
+  }
+
+  @override
+  String encryptApp(String plainText) {
+    final key = Key.fromUtf8(_appSecretKey);
+    final iv = IV.fromLength(16); // Fixed IV for app-level encryption (simple)
+    final encrypter = Encrypter(AES(key));
+    final encrypted = encrypter.encrypt(plainText, iv: iv);
+    return encrypted.base64;
+  }
+
+  @override
+  String decryptApp(String encryptedText) {
+    try {
+      final key = Key.fromUtf8(_appSecretKey);
+      final iv = IV.fromLength(16);
+      final encrypter = Encrypter(AES(key));
+      final encrypted = Encrypted.fromBase64(encryptedText);
+      return encrypter.decrypt(encrypted, iv: iv);
+    } catch (e) {
+      // Return null or empty or throw?
+      // Returning empty string to signify failure/invalid format for now.
+      return "";
     }
   }
 }

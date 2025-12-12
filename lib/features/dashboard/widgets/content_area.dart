@@ -49,6 +49,28 @@ class ContentArea extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 16),
+                if (viewModel.isPasswordSet) ...[
+                  OutlinedButton.icon(
+                    onPressed: () => viewModel.manualLock(),
+                    icon: const Icon(
+                      Icons.lock,
+                      size: 16,
+                      color: Colors.blueAccent,
+                    ),
+                    label: const Text(
+                      "Lock",
+                      style: TextStyle(color: Colors.blueAccent),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.blueAccent),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12, // Match height of ElevatedButton
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 ElevatedButton(
                   // Call viewModel.saveNote directly
                   onPressed: viewModel.isBusy

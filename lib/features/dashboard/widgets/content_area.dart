@@ -1,221 +1,196 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import '../viewmodels/content_viewmodel.dart';
-import '../services/file_service.dart';
-import '../services/encryption_service.dart';
 
-class ContentArea extends StatefulWidget {
-  const ContentArea({super.key});
+class ContentArea extends StatelessWidget {
+  final ContentViewModel viewModel;
 
-  @override
-  State<ContentArea> createState() => _ContentAreaState();
-}
-
-class _ContentAreaState extends State<ContentArea> {
-  // Dependency Injection could also happen in main.dart or a provider
-  final ContentViewModel _viewModel = ContentViewModel(
-    fileService: FileService(),
-    encryptionService: EncryptionService(),
-  );
-
-  @override
-  void dispose() {
-    _viewModel.dispose();
-    super.dispose();
-  }
+  const ContentArea({super.key, required this.viewModel});
 
   @override
   Widget build(BuildContext context) {
     // Determine screen width to decide layout
     final isDesktop = MediaQuery.of(context).size.width > 900;
 
-    // ListenableBuilder rebuilds whenever the viewModel notifies listeners
-    return ListenableBuilder(
-      listenable: _viewModel,
-      builder: (context, child) {
-        return Container(
-          color: const Color(0xFF1B2535),
-          child: Column(
-            children: [
-              // Toolbar - Row 1: Title & Primary Action
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                color: const Color(0xFF1B2535),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Editing: Deployment Plan',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+    // ListenableBuilder might be redundant if parent rebuilds, but safe to keep or remove if parent ensures rebuild.
+    // Given DashboardScreen uses ListenableBuilder, this widget will be rebuilt with new state.
+    // However, to be cleaner let's just use the vm directly.
+    // Actually, if DashboardScreen rebuilds, this widget constructor is called again.
+
+    return Container(
+      color: const Color(0xFF1B2535),
+      child: Column(
+        children: [
+          // Toolbar - Row 1: Title & Primary Action
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: const Color(0xFF1B2535),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: viewModel.titleController,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                    decoration: const InputDecoration(
+                      hintText: 'Enter Message Title',
+                      hintStyle: TextStyle(color: Colors.white30),
+                      border: InputBorder.none,
+                      prefixText: 'Editing: ',
+                      prefixStyle: TextStyle(
+                        color: Colors.white70,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
                       ),
                     ),
-                    const SizedBox(width: 16),
-                    ElevatedButton(
-                      // Call _viewModel.saveNote directly
-                      onPressed: _viewModel.isBusy
-                          ? null
-                          : () => _viewModel.saveNote(),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueAccent,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        elevation: 0,
-                      ),
-                      child: _viewModel.isBusy
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text(
-                              'Save Note',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-
-              // Toolbar - Row 2: Tools
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 4,
-                ),
-                decoration: const BoxDecoration(
-                  border: Border(bottom: BorderSide(color: Color(0xFF334155))),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    _buildToolbarIcon(
-                      Icons.attach_file,
-                      'Attach File',
-                      onPressed: _viewModel.pickFile,
+                const SizedBox(width: 16),
+                ElevatedButton(
+                  // Call viewModel.saveNote directly
+                  onPressed: viewModel.isBusy
+                      ? null
+                      : () => viewModel.saveNote(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueAccent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    const SizedBox(width: 8),
-                    _buildToolbarIcon(
-                      _viewModel.isPasswordSet
-                          ? Icons.lock
-                          : Icons.lock_outline,
-                      _viewModel.isPasswordSet
-                          ? 'Remove Password'
-                          : 'Set Password',
-                      onPressed: () {
-                        if (_viewModel.isPasswordSet) {
-                          showDialog(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              backgroundColor: const Color(0xFF1E293B),
-                              title: const Text(
-                                'Remove Password?',
-                                style: TextStyle(color: Colors.white),
-                              ),
-                              content: const Text(
-                                'Are you sure you want to remove the password protection?',
-                                style: TextStyle(color: Colors.white70),
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context),
-                                  child: const Text('Cancel'),
-                                ),
-                                TextButton(
-                                  onPressed: () {
-                                    _viewModel.clearPassword();
-                                    Navigator.pop(context);
-                                  },
-                                  child: const Text(
-                                    'Remove',
-                                    style: TextStyle(color: Colors.redAccent),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        } else {
-                          _showPasswordDialog(context);
-                        }
-                      },
-                      color: _viewModel.isPasswordSet
-                          ? Colors.blueAccent
-                          : Colors.grey,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
                     ),
-                    _buildToolbarIcon(
-                      Icons.terminal,
-                      'Terminal',
-                      onPressed: () {},
-                    ),
-                    const SizedBox(width: 8),
-                    _buildToolbarIcon(
-                      Icons.settings_outlined,
-                      'Settings',
-                      onPressed: () {},
-                    ),
-                  ],
-                ),
-              ),
-
-              // Editor Area
-              Expanded(
-                child: isDesktop
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(child: _buildInputArea()),
-                          const VerticalDivider(
-                            width: 1,
-                            color: Color(0xFF334155),
+                    elevation: 0,
+                  ),
+                  child: viewModel.isBusy
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
                           ),
-                          Expanded(child: _buildPreviewArea()),
-                        ],
-                      )
-                    : DefaultTabController(
-                        length: 2,
-                        child: Column(
-                          children: [
-                            const TabBar(
-                              tabs: [
-                                Tab(text: 'Edit'),
-                                Tab(text: 'Preview'),
-                              ],
-                              labelColor: Colors.blueAccent,
-                              unselectedLabelColor: Colors.grey,
-                              indicatorColor: Colors.blueAccent,
+                        )
+                      : const Text(
+                          'Save Note',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                ),
+              ],
+            ),
+          ),
+
+          // Toolbar - Row 2: Tools
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: Color(0xFF334155))),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                _buildToolbarIcon(
+                  Icons.attach_file,
+                  'Attach File',
+                  onPressed: viewModel.pickFile,
+                ),
+                const SizedBox(width: 8),
+                _buildToolbarIcon(
+                  viewModel.isPasswordSet ? Icons.lock : Icons.lock_outline,
+                  viewModel.isPasswordSet ? 'Remove Password' : 'Set Password',
+                  onPressed: () {
+                    if (viewModel.isPasswordSet) {
+                      showDialog(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          backgroundColor: const Color(0xFF1E293B),
+                          title: const Text(
+                            'Remove Password?',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          content: const Text(
+                            'Are you sure you want to remove the password protection?',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('Cancel'),
                             ),
-                            Expanded(
-                              child: TabBarView(
-                                children: [
-                                  _buildInputArea(),
-                                  _buildPreviewArea(),
-                                ],
+                            TextButton(
+                              onPressed: () {
+                                viewModel.clearPassword();
+                                Navigator.pop(context);
+                              },
+                              child: const Text(
+                                'Remove',
+                                style: TextStyle(color: Colors.redAccent),
                               ),
                             ),
                           ],
                         ),
-                      ),
-              ),
-            ],
+                      );
+                    } else {
+                      _showPasswordDialog(context);
+                    }
+                  },
+                  color: viewModel.isPasswordSet
+                      ? Colors.blueAccent
+                      : Colors.grey,
+                ),
+                _buildToolbarIcon(Icons.terminal, 'Terminal', onPressed: () {}),
+                const SizedBox(width: 8),
+                _buildToolbarIcon(
+                  Icons.settings_outlined,
+                  'Settings',
+                  onPressed: () {},
+                ),
+              ],
+            ),
           ),
-        );
-      },
+
+          // Editor Area
+          Expanded(
+            child: isDesktop
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(child: _buildInputArea()),
+                      const VerticalDivider(width: 1, color: Color(0xFF334155)),
+                      Expanded(child: _buildPreviewArea(context)),
+                    ],
+                  )
+                : DefaultTabController(
+                    length: 2,
+                    child: Column(
+                      children: [
+                        const TabBar(
+                          tabs: [
+                            Tab(text: 'Edit'),
+                            Tab(text: 'Preview'),
+                          ],
+                          labelColor: Colors.blueAccent,
+                          unselectedLabelColor: Colors.grey,
+                          indicatorColor: Colors.blueAccent,
+                        ),
+                        Expanded(
+                          child: TabBarView(
+                            children: [
+                              _buildInputArea(),
+                              _buildPreviewArea(context),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -319,7 +294,7 @@ class _ContentAreaState extends State<ContentArea> {
                   onPressed: () {
                     Navigator.pop(context);
                     if (passwordController.text.isNotEmpty) {
-                      _viewModel.setPassword(passwordController.text);
+                      viewModel.setPassword(passwordController.text);
                     }
                   },
                   style: ElevatedButton.styleFrom(
@@ -343,7 +318,7 @@ class _ContentAreaState extends State<ContentArea> {
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: TextField(
-        controller: _viewModel.textController,
+        controller: viewModel.textController,
         maxLines: null,
         expands: true,
         style: const TextStyle(
@@ -356,18 +331,18 @@ class _ContentAreaState extends State<ContentArea> {
           hintText: 'Type markdown here...',
           hintStyle: TextStyle(color: Colors.grey),
         ),
-        onChanged: _viewModel.onTextChanged,
+        onChanged: viewModel.onTextChanged,
       ),
     );
   }
 
-  Widget _buildPreviewArea() {
+  Widget _buildPreviewArea(BuildContext context) {
     int checkboxIndex = 0;
 
     return Container(
       color: const Color(0xFF0F172A), // Slightly darker for preview
       child: Markdown(
-        data: _viewModel.textController.text,
+        data: viewModel.textController.text,
         selectable: true,
         softLineBreak: true,
         styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
@@ -397,7 +372,7 @@ class _ContentAreaState extends State<ContentArea> {
           final currentIndex = checkboxIndex++;
           return GestureDetector(
             onTap: () {
-              _viewModel.toggleCheckbox(currentIndex);
+              viewModel.toggleCheckbox(currentIndex);
             },
             child: Padding(
               padding: const EdgeInsets.only(right: 8.0),

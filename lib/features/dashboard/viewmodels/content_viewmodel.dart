@@ -11,15 +11,20 @@ class ContentViewModel extends BaseViewModel {
   final IEncryptionService _encryptionService;
 
   final TextEditingController textController = TextEditingController();
+  final TextEditingController titleController = TextEditingController(
+    text: "Deployment Plan",
+  );
 
   String _lastText = "";
   final List<TextRange> _checkboxRanges = [];
   String? _currentPassword;
   String? _currentFileName;
   Timer? _autoSaveTimer;
+  List<String> _recentFiles = [];
 
   // Expose for UI if needed, but logic should mainly happen here
   // List<TextRange> get checkboxRanges => _checkboxRanges;
+  List<String> get recentFiles => _recentFiles;
 
   bool get isPasswordSet => _currentPassword != null;
 
@@ -30,6 +35,57 @@ class ContentViewModel extends BaseViewModel {
        _encryptionService = encryptionService {
     _lastText = textController.text;
     parseCheckboxes(textController.text);
+    loadRecentFiles();
+  }
+
+  Future<void> loadRecentFiles() async {
+    _recentFiles = await _fileService.getRecentFiles();
+    notifyListeners();
+  }
+
+  Future<void> loadNote(String fileName) async {
+    setBusy(true);
+    final content = await _fileService.readFile(fileName);
+    if (content != null) {
+      // Attempt to decrypt if encrypted
+      try {
+        final decryptedText = _encryptionService.decrypt(
+          content,
+          password: _currentPassword,
+        );
+        // If decryption fails (returns error string usually in our service mock),
+        // we might want to handle it.
+        // Our service returns "Error decrypting: ..." on failure.
+        // For now, checks if it looks like the error message or just show text.
+        // Improve in future.
+        if (decryptedText.startsWith("Error decrypting:")) {
+          // If password was wrong or not set, maybe show raw or prompt?
+          // For now, show result (which is error msg) or try with default?
+
+          // Retry with default if password was null?
+          if (_currentPassword == null) {
+            final retry = _encryptionService.decrypt(content, password: null);
+            if (!retry.startsWith("Error decrypting:")) {
+              textController.text = retry;
+            } else {
+              textController.text = decryptedText;
+            }
+          } else {
+            textController.text = decryptedText;
+          }
+        } else {
+          textController.text = decryptedText;
+        }
+      } catch (e) {
+        textController.text = content; // Fallback to raw content
+      }
+
+      _currentFileName = fileName;
+      _lastText = textController.text;
+      parseCheckboxes(textController.text);
+      notifyListeners();
+    }
+    setBusy(false);
   }
 
   void setPassword(String password) {
@@ -76,6 +132,10 @@ class ContentViewModel extends BaseViewModel {
     );
     print("ENCRYPTED DATA: $encryptedText");
 
+    print("ENCRYPTED DATA: $encryptedText");
+
+    await loadRecentFiles();
+
     if (!isAutoSave) setBusy(false);
   }
 
@@ -83,6 +143,7 @@ class ContentViewModel extends BaseViewModel {
   void dispose() {
     _autoSaveTimer?.cancel();
     textController.dispose();
+    titleController.dispose();
     super.dispose();
   }
 

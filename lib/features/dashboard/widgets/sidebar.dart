@@ -1,7 +1,14 @@
 import 'package:flutter/material.dart';
 
 class Sidebar extends StatelessWidget {
-  const Sidebar({super.key});
+  final List<String> recentFiles;
+  final Function(String) onFileSelected;
+
+  const Sidebar({
+    super.key,
+    this.recentFiles = const [],
+    required this.onFileSelected,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -78,9 +85,30 @@ class Sidebar extends StatelessWidget {
 
           const SizedBox(height: 24),
 
-          // List is now empty by default as requested
           _buildSectionHeader('RECENT'),
-          // No items here
+          Expanded(
+            child: ListView.builder(
+              itemCount: recentFiles.length,
+              itemBuilder: (context, index) {
+                final file = recentFiles[index];
+                return ListTile(
+                  leading: const Icon(
+                    Icons.description,
+                    color: Colors.white70,
+                    size: 20,
+                  ),
+                  title: Text(
+                    file,
+                    style: const TextStyle(color: Colors.white70),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () => onFileSelected(file),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                  dense: true,
+                );
+              },
+            ),
+          ),
         ],
       ),
     );

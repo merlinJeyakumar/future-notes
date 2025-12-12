@@ -22,6 +22,8 @@ class ContentViewModel extends BaseViewModel {
   String? _currentPassword;
   String? _currentFileName;
   Timer? _autoSaveTimer;
+  Timer? _debounceTimer; // For file watching
+  StreamSubscription? _fileWatcherSubscription;
   List<String> _recentFiles = [];
   final Map<String, String> _sessionPasswords = {};
   bool _isLocked = false;
@@ -44,6 +46,17 @@ class ContentViewModel extends BaseViewModel {
     _lastText = textController.text;
     parseCheckboxes(textController.text);
     loadRecentFiles();
+    _initFileWatcher();
+  }
+
+  void _initFileWatcher() {
+    _fileWatcherSubscription = _fileService.watchRecentFiles().listen((_) {
+      // Debounce reload
+      if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
+      _debounceTimer = Timer(const Duration(seconds: 2), () {
+        loadRecentFiles();
+      });
+    });
   }
 
   Future<void> loadRecentFiles() async {
@@ -229,6 +242,8 @@ class ContentViewModel extends BaseViewModel {
   @override
   void dispose() {
     _autoSaveTimer?.cancel();
+    _debounceTimer?.cancel();
+    _fileWatcherSubscription?.cancel();
     textController.dispose();
     titleController.dispose();
     super.dispose();

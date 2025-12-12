@@ -10,6 +10,7 @@ abstract class IFileService {
   Future<void> saveFile(String content, String fileName);
   Future<List<String>> getRecentFiles();
   Future<String?> readFile(String fileName);
+  Stream<void> watchRecentFiles();
 }
 
 class FileService implements IFileService {
@@ -37,6 +38,20 @@ class FileService implements IFileService {
       final file = File('${userDataDir.path}/$fileName');
       await file.writeAsString(content);
       print('Saved to: ${file.path}');
+    }
+  }
+
+  @override
+  Stream<void> watchRecentFiles() async* {
+    if (kIsWeb) return;
+
+    final directory = await getApplicationDocumentsDirectory();
+    final userDataDir = Directory('${directory.path}/UserData');
+
+    if (await userDataDir.exists()) {
+      yield* userDataDir.watch(events: FileSystemEvent.all).where((event) {
+        return event.path.endsWith('.enc');
+      });
     }
   }
 

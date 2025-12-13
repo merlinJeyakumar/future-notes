@@ -1,9 +1,12 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/content_area.dart';
 import '../viewmodels/content_viewmodel.dart';
 import '../services/file_service.dart';
 import '../services/encryption_service.dart';
+import '../models/note_model.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -28,6 +31,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void dispose() {
     _viewModel.dispose();
     super.dispose();
+  }
+
+  Future<void> _handleOpenFolder(RecentFile file) async {
+    // Assuming file.path is just filename (from getRecentFiles in ViewModel)
+    // We need to reconstruct full path.
+    // OR: Update ViewModel/Service to provide full path?
+    // Current IMPL: recentFiles are filenames.
+    // FileService puts them in UserData.
+
+    // We can duplicate the path logic here or use a helper.
+    // Replicating logic for expediency as FileService does hardcode 'UserData'.
+    final directory = await getApplicationDocumentsDirectory();
+    final fullPath = '${directory.path}/UserData/${file.path}';
+    final normalizedPath = fullPath.replaceAll(
+      '/',
+      '\\',
+    ); // Windows consistency
+
+    if (Platform.isWindows) {
+      await Process.run('explorer.exe', ['/select,', normalizedPath]);
+    } else {
+      // Fallback or other platforms
+      print("Show in folder not implemented for this platform");
+    }
+  }
+
+  void _handleDelete(RecentFile file) {
+    _viewModel.deleteNote(file.path);
   }
 
   @override
@@ -56,10 +87,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ? null
               : Sidebar(
                   recentFiles: _viewModel.recentFiles,
-                  onFileSelected: (file) {
-                    _viewModel.loadNote(file);
+                  onFileSelected: (path) {
+                    _viewModel.loadNote(path);
                     Navigator.pop(context); // Close drawer
                   },
+                  onOpenFolder: _handleOpenFolder,
+                  onDelete: _handleDelete,
                   onNewNote: () {
                     _viewModel.reset();
                     Navigator.pop(context);
@@ -71,7 +104,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               if (isDesktop)
                 Sidebar(
                   recentFiles: _viewModel.recentFiles,
-                  onFileSelected: (file) => _viewModel.loadNote(file),
+                  onFileSelected: (path) => _viewModel.loadNote(path),
+                  onOpenFolder: _handleOpenFolder,
+                  onDelete: _handleDelete,
                   onNewNote: _viewModel.reset,
                 ),
 

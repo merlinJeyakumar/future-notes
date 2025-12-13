@@ -10,6 +10,9 @@ abstract class IFileService {
   Future<void> saveFile(String content, String fileName);
   Future<List<String>> getRecentFiles();
   Future<String?> readFile(String fileName);
+  Future<void> deleteFile(String fileName);
+  Future<FileStat?> getFileStats(String fileName);
+  Future<String> getFullPath(String fileName);
   Stream<void> watchRecentFiles();
 }
 
@@ -89,6 +92,47 @@ class FileService implements IFileService {
         print("Error reading file: $e");
       }
       return null;
+    }
+  }
+
+  @override
+  Future<void> deleteFile(String fileName) async {
+    if (kIsWeb) return; // Not supported directly
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/UserData/$fileName');
+      if (await file.exists()) {
+        await file.delete();
+        print("Deleted file: ${file.path}");
+      }
+    } catch (e) {
+      print("Error deleting file: $e");
+    }
+  }
+
+  @override
+  Future<FileStat?> getFileStats(String fileName) async {
+    if (kIsWeb) return null;
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/UserData/$fileName');
+      if (await file.exists()) {
+        return await file.stat();
+      }
+    } catch (e) {
+      print("Error getting stats: $e");
+    }
+    return null;
+  }
+
+  @override
+  Future<String> getFullPath(String fileName) async {
+    if (kIsWeb) return fileName;
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      return '${directory.path}/UserData/$fileName';
+    } catch (e) {
+      return fileName;
     }
   }
 }

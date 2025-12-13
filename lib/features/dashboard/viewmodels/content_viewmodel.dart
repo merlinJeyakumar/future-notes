@@ -66,8 +66,20 @@ class ContentViewModel extends BaseViewModel {
 
     for (final file in files) {
       String displayTitle = file;
+      bool isLocked = false;
+      DateTime? created; // From note timestamp
+      DateTime? modified;
+      int? sizeBytes;
+
       try {
         final content = await _fileService.readFile(file);
+        final stats = await _fileService.getFileStats(file);
+
+        if (stats != null) {
+          modified = stats.modified;
+          sizeBytes = stats.size;
+        }
+
         if (content != null) {
           final appDecrypted = _encryptionService.decryptApp(content);
           if (appDecrypted.isNotEmpty) {
@@ -77,12 +89,38 @@ class ContentViewModel extends BaseViewModel {
             if (note.title.isNotEmpty) {
               displayTitle = note.title;
             }
+            isLocked = note.isLocked;
+            created = DateTime.fromMillisecondsSinceEpoch(note.timestamp);
           }
+
+          // Approximate size from content string length relative to bytes?
+          // Not accurate for encrypted/binary, but okay-ish.
+          // Better: just leave modified/size null if too hard without path.
+          // The user really wants details.
+          // Let's rely on the service later or just leave null for now if I can't easily get File object.
+          // Wait, `_fileService.readFile` reads from `UserData/$file`.
+          // I can't easily get `File` stats without the directory.
+          // I will skip 'modified' and 'size' implementation in this ViewModel loop for now
+          // to avoid breaking clean architecture or duplicate path logic.
+          // I will focus on `isLocked` (critical) and `created` (from note).
+          // I will try to implement `deleteNote` next.
         }
       } catch (e) {
         print("Error reading title for $file: $e");
       }
-      loadedFiles.add(RecentFile(path: file, title: displayTitle));
+      final fullPath = await _fileService.getFullPath(file);
+
+      loadedFiles.add(
+        RecentFile(
+          path: file,
+          fullPath: fullPath,
+          title: displayTitle,
+          isLocked: isLocked,
+          created: created,
+          modified: modified,
+          sizeBytes: sizeBytes,
+        ),
+      );
     }
     _recentFiles = loadedFiles;
     notifyListeners();
@@ -216,6 +254,14 @@ class ContentViewModel extends BaseViewModel {
     await loadRecentFiles();
 
     if (!isAutoSave) setBusy(false);
+  }
+
+  Future<void> deleteNote(String fileName) async {
+    await _fileService.deleteFile(fileName);
+    if (_currentFileName == fileName) {
+      reset();
+    }
+    await loadRecentFiles();
   }
 
   void unlockNote(String password) {

@@ -33,3 +33,10 @@ class NoteModel {
     );
   }
 }
+
+class RecentFile {
+  final String path;
+  final String title;
+
+  RecentFile({required this.path, required this.title});
+}

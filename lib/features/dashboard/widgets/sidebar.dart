@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import '../models/note_model.dart';
 
 class Sidebar extends StatelessWidget {
-  final List<String> recentFiles;
+  final List<RecentFile> recentFiles;
+
   final Function(String) onFileSelected;
   final VoidCallback onNewNote;
 
@@ -100,11 +102,12 @@ class Sidebar extends StatelessWidget {
                     size: 20,
                   ),
                   title: Text(
-                    file,
+                    file.title,
                     style: const TextStyle(color: Colors.white70),
                     overflow: TextOverflow.ellipsis,
                   ),
-                  onTap: () => onFileSelected(file),
+                  onTap: () => onFileSelected(file.path),
+
                   contentPadding: const EdgeInsets.symmetric(horizontal: 24),
                   dense: true,
                 );

@@ -14,7 +14,7 @@ class ContentViewModel extends BaseViewModel {
 
   final TextEditingController textController = TextEditingController();
   final TextEditingController titleController = TextEditingController(
-    text: "Deployment Plan",
+    text: "New Note",
   );
 
   String _lastText = "";
@@ -24,7 +24,8 @@ class ContentViewModel extends BaseViewModel {
   Timer? _autoSaveTimer;
   Timer? _debounceTimer; // For file watching
   StreamSubscription? _fileWatcherSubscription;
-  List<String> _recentFiles = [];
+  List<RecentFile> _recentFiles = [];
+
   final Map<String, String> _sessionPasswords = {};
   bool _isLocked = false;
 
@@ -34,7 +35,7 @@ class ContentViewModel extends BaseViewModel {
 
   // Expose for UI if needed, but logic should mainly happen here
   // List<TextRange> get checkboxRanges => _checkboxRanges;
-  List<String> get recentFiles => _recentFiles;
+  List<RecentFile> get recentFiles => _recentFiles;
 
   bool get isPasswordSet => _currentPassword != null;
 
@@ -60,7 +61,30 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<void> loadRecentFiles() async {
-    _recentFiles = await _fileService.getRecentFiles();
+    final files = await _fileService.getRecentFiles();
+    List<RecentFile> loadedFiles = [];
+
+    for (final file in files) {
+      String displayTitle = file;
+      try {
+        final content = await _fileService.readFile(file);
+        if (content != null) {
+          final appDecrypted = _encryptionService.decryptApp(content);
+          if (appDecrypted.isNotEmpty) {
+            final jsonMap = json.decode(appDecrypted);
+            final note = NoteModel.fromJson(jsonMap);
+            // Use the title from the note if available and not default "New Note" (unless that's what user wants)
+            if (note.title.isNotEmpty) {
+              displayTitle = note.title;
+            }
+          }
+        }
+      } catch (e) {
+        print("Error reading title for $file: $e");
+      }
+      loadedFiles.add(RecentFile(path: file, title: displayTitle));
+    }
+    _recentFiles = loadedFiles;
     notifyListeners();
   }
 
@@ -252,6 +276,12 @@ class ContentViewModel extends BaseViewModel {
   void onTextChanged(String text) {
     handleAutoList(text);
     _lastText = text;
+
+    // Auto-update title if it's currently default or empty
+    if (titleController.text.isEmpty ||
+        titleController.text == "New Note" ||
+        titleController.text == "Deployment Plan") {}
+
     parseCheckboxes(text);
     notifyListeners();
     _scheduleAutoSave();

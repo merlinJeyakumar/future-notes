@@ -184,7 +184,9 @@ class ContentViewModel extends BaseViewModel {
     // Create NoteModel
     final note = NoteModel(
       id: uuid,
-      title: titleController.text, // Could be dynamic
+      title: (titleController.text.trim().length < 40)
+          ? _generateTitleFromContent(textController.text)
+          : titleController.text,
       content: contentToSave,
       isLocked: locked,
       timestamp: DateTime.now().millisecondsSinceEpoch,
@@ -277,10 +279,12 @@ class ContentViewModel extends BaseViewModel {
     handleAutoList(text);
     _lastText = text;
 
-    // Auto-update title if it's currently default or empty
-    if (titleController.text.isEmpty ||
-        titleController.text == "New Note" ||
-        titleController.text == "Deployment Plan") {}
+    if (titleController.text.trim().length < 40) {
+      final generatedTitle = _generateTitleFromContent(text);
+      if (generatedTitle != "New Note") {
+        titleController.text = generatedTitle;
+      }
+    }
 
     parseCheckboxes(text);
     notifyListeners();
@@ -429,5 +433,42 @@ class ContentViewModel extends BaseViewModel {
     parseCheckboxes(textController.text);
     notifyListeners();
     _scheduleAutoSave();
+  }
+
+  String _generateTitleFromContent(String content) {
+    if (content.trim().isEmpty) return "New Note";
+
+    final lines = content.split('\n');
+    final contentLines = lines.where((line) => line.trim().isNotEmpty).toList();
+
+    if (contentLines.isEmpty) return "New Note";
+
+    String title = "";
+
+    for (var line in contentLines) {
+      String cleaned = _cleanTitleLine(line);
+      if (cleaned.isEmpty) continue;
+
+      if (title.isNotEmpty) {
+        title += " ";
+      }
+      title += cleaned;
+
+      if (title.length >= 40) break;
+    }
+
+    if (title.length > 40) {
+      title = title.substring(0, 40);
+    }
+
+    return title.isEmpty ? "New Note" : title;
+  }
+
+  String _cleanTitleLine(String line) {
+    // Remove leading markdown symbols (e.g., #, -, *, >)
+    line = line.replaceAll(RegExp(r'^[\s#\*\->]+'), '');
+    // Remove leading numbering (e.g., 1., 2.)
+    line = line.replaceAll(RegExp(r'^\s*\d+\.\s*'), '');
+    return line.trim();
   }
 }

@@ -173,7 +173,10 @@ class Sidebar extends StatelessWidget {
                 file.modified?.toString().split('.').first ?? "Unknown",
               ),
               _buildDetailRow("Locked:", file.isLocked ? "Yes" : "No"),
-              _buildDetailRow("Encrypted:", "AES-256 (App Key)"),
+              _buildDetailRow(
+                "Encrypted:",
+                file.isLocked ? "User Encrypted" : "AES-256 (App Key)",
+              ),
               _buildDetailRow(
                 "Size:",
                 file.sizeBytes != null ? "${file.sizeBytes} B" : "Unknown",

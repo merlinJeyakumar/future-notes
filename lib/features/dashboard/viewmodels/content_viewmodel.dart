@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import '../../../core/viewmodels/base_viewmodel.dart';
 import '../services/file_service.dart';
 import '../services/encryption_service.dart';
@@ -122,6 +124,15 @@ class ContentViewModel extends BaseViewModel {
         ),
       );
     }
+
+    // Sort by modified date descending (newest first)
+    loadedFiles.sort((a, b) {
+      if (a.modified == null && b.modified == null) return 0;
+      if (a.modified == null) return 1; // Nulls last
+      if (b.modified == null) return -1;
+      return b.modified!.compareTo(a.modified!);
+    });
+
     _recentFiles = loadedFiles;
     notifyListeners();
   }
@@ -457,6 +468,74 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
+  Future<PlatformFile?> pickImportFile() async {
+    final result = await _fileService.pickFile(
+      allowedExtensions: ['txt', 'enc'],
+    );
+    return result?.files.single;
+  }
+
+  Future<ImportVerificationResult> verifyImportFile(PlatformFile file) async {
+    if (file.path == null) {
+      return ImportVerificationResult(
+        isValid: false,
+        message: "File path not found",
+      );
+    }
+
+    try {
+      final fileObj = File(file.path!);
+      final content = await fileObj.readAsString();
+      final ext = file.name.split('.').last.toLowerCase();
+
+      if (ext == 'enc') {
+        try {
+          final appDecrypted = _encryptionService.decryptApp(content);
+          if (appDecrypted.isNotEmpty) {
+            final jsonMap = json.decode(appDecrypted);
+            final note = NoteModel.fromJson(jsonMap);
+            return ImportVerificationResult(
+              isValid: true,
+              message: "Valid Encrypted Note",
+              previewInfo:
+                  "Title: ${note.title}\nDate: ${DateTime.fromMillisecondsSinceEpoch(note.timestamp)}",
+            );
+          }
+        } catch (e) {
+          return ImportVerificationResult(
+            isValid: false,
+            message: "Invalid Encryption or Corrupt File",
+          );
+        }
+      } else if (ext == 'txt') {
+        // Valid text file
+        return ImportVerificationResult(
+          isValid: true,
+          message: "Plain Text File",
+          previewInfo:
+              "Size: ${await fileObj.length()} bytes\nPreview: ${content.length > 50 ? content.substring(0, 50) + "..." : content}",
+        );
+      }
+
+      return ImportVerificationResult(
+        isValid: false,
+        message: "Unsupported format",
+      );
+    } catch (e) {
+      return ImportVerificationResult(
+        isValid: false,
+        message: "Error reading file: $e",
+      );
+    }
+  }
+
+  Future<void> performImport(PlatformFile file) async {
+    final importedName = await _fileService.importFile(file);
+    if (importedName != null) {
+      await loadRecentFiles();
+    }
+  }
+
   void _insertText(String text) {
     final textSelection = textController.selection;
     if (textSelection.isValid) {
@@ -517,4 +596,16 @@ class ContentViewModel extends BaseViewModel {
     line = line.replaceAll(RegExp(r'^\s*\d+\.\s*'), '');
     return line.trim();
   }
+}
+
+class ImportVerificationResult {
+  final bool isValid;
+  final String message;
+  final String? previewInfo;
+
+  ImportVerificationResult({
+    required this.isValid,
+    required this.message,
+    this.previewInfo,
+  });
 }

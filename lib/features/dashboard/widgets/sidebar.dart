@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:share_plus/share_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/note_model.dart';
@@ -9,6 +11,7 @@ class Sidebar extends StatelessWidget {
   final Function(RecentFile) onOpenFolder;
   final Function(RecentFile) onDelete;
   final VoidCallback onNewNote;
+  final VoidCallback? onImportNote; // Added callback
 
   const Sidebar({
     super.key,
@@ -17,6 +20,7 @@ class Sidebar extends StatelessWidget {
     required this.onOpenFolder,
     required this.onDelete,
     required this.onNewNote,
+    this.onImportNote,
   });
 
   @override
@@ -66,6 +70,26 @@ class Sidebar extends StatelessWidget {
               ),
             ),
           ),
+          if (Platform.isAndroid || Platform.isIOS) // Only show on mobile
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16.0, 8.0, 16.0, 0),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: onImportNote,
+                  icon: const Icon(Icons.file_upload),
+                  label: const Text('Import Note'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white70,
+                    side: const BorderSide(color: Colors.white24),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ),
 
           const SizedBox(height: 24),
 
@@ -195,10 +219,27 @@ class Sidebar extends StatelessWidget {
                   style: TextStyle(color: Colors.white),
                 ),
                 onTap: () {
-                  onOpenFolder(file);
-                  Navigator.pop(context);
+                  if (Platform.isAndroid || Platform.isIOS) {
+                    Navigator.pop(context);
+                    _showMobileFolderInfo(context, file);
+                  } else {
+                    onOpenFolder(file);
+                    Navigator.pop(context);
+                  }
                 },
               ),
+              if (Platform.isAndroid || Platform.isIOS)
+                ListTile(
+                  leading: const Icon(Icons.share, color: Colors.greenAccent),
+                  title: const Text(
+                    "Export File",
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Share.shareXFiles([XFile(file.fullPath)], text: file.title);
+                  },
+                ),
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.redAccent),
                 title: const Text(
@@ -320,6 +361,79 @@ class Sidebar extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  void _showMobileFolderInfo(BuildContext context, RecentFile file) {
+    // Basic safety check in case path is somehow invalid or just a filename
+    String folderPath = "Unknown";
+    try {
+      folderPath = File(file.fullPath).parent.path;
+    } catch (e) {
+      folderPath = file.path; // Fallback
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF161E2D),
+          title: const Text(
+            "Folder Location",
+            style: TextStyle(color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "File is located at:",
+                style: TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF334155)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: SelectableText(
+                        folderPath,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.copy, color: Colors.blueAccent),
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: folderPath));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Path copied to clipboard'),
+                          ),
+                        );
+                      },
+                      tooltip: 'Copy path',
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Close"),
+            ),
+          ],
+        );
+      },
     );
   }
 }

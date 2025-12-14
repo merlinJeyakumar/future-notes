@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import '../widgets/sidebar.dart';
@@ -61,6 +62,89 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _viewModel.deleteNote(file.path);
   }
 
+  Future<void> _handleImport() async {
+    final file = await _viewModel.pickImportFile();
+    if (file != null) {
+      // Show loading? Logic is fast enough usually.
+      final verification = await _viewModel.verifyImportFile(file);
+
+      if (!mounted) return;
+
+      if (!verification.isValid) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(verification.message),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Show confirmation dialog
+      final shouldImport = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text("Import File"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("File: ${file.name}"),
+              const SizedBox(height: 8),
+              Text(
+                "Type: ${verification.message}",
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              if (verification.previewInfo != null) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  "Preview Details:",
+                  style: TextStyle(color: Colors.grey),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    verification.previewInfo!,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      color: Colors.black87,
+                    ),
+                    maxLines: 5,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Cancel"),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Import"),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldImport == true) {
+        await _viewModel.performImport(file);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("File imported successfully")),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Basic responsive check
@@ -97,6 +181,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     _viewModel.reset();
                     Navigator.pop(context);
                   },
+                  onImportNote: _handleImport,
                 ),
           body: Row(
             children: [
@@ -108,6 +193,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   onOpenFolder: _handleOpenFolder,
                   onDelete: _handleDelete,
                   onNewNote: _viewModel.reset,
+                  // Import not needed on desktop per request (or add if consistently needed)
+                  // Request was "on mobile app give an option"
+                  // But Sidebar logic handles Platform check internally for button visibility.
+                  // We can pass it anyway.
+                  onImportNote: _handleImport,
                 ),
 
               // Main Content Area

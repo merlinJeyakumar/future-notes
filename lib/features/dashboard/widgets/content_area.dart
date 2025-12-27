@@ -115,17 +115,29 @@ class ContentArea extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                if (!viewModel.isLocked) ...[
+                  _buildToolbarIcon(
+                    Icons.attach_file,
+                    'Attach File',
+                    onPressed: viewModel.pickFile,
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 _buildToolbarIcon(
-                  Icons.attach_file,
-                  'Attach File',
-                  onPressed: viewModel.pickFile,
-                ),
-                const SizedBox(width: 8),
-                _buildToolbarIcon(
-                  viewModel.isPasswordSet ? Icons.lock : Icons.lock_outline,
-                  viewModel.isPasswordSet ? 'Remove Password' : 'Set Password',
+                  viewModel.isLocked
+                      ? Icons.lock
+                      : (viewModel.isPasswordSet
+                            ? Icons.lock
+                            : Icons.lock_outline),
+                  viewModel.isLocked
+                      ? 'Unlock Note'
+                      : (viewModel.isPasswordSet
+                            ? 'Remove Password'
+                            : 'Set Password'),
                   onPressed: () {
-                    if (viewModel.isPasswordSet) {
+                    if (viewModel.isLocked) {
+                      _showPasswordDialog(context, isUnlock: true);
+                    } else if (viewModel.isPasswordSet) {
                       showDialog(
                         context: context,
                         builder: (context) => AlertDialog(
@@ -160,7 +172,7 @@ class ContentArea extends StatelessWidget {
                       _showPasswordDialog(context);
                     }
                   },
-                  color: viewModel.isPasswordSet
+                  color: (viewModel.isLocked || viewModel.isPasswordSet)
                       ? Colors.blueAccent
                       : Colors.grey,
                 ),

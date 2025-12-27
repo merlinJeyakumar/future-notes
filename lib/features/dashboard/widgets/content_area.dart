@@ -244,6 +244,17 @@ class ContentArea extends StatelessWidget {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
+            void submit() {
+              Navigator.pop(context);
+              if (passwordController.text.isNotEmpty) {
+                if (isUnlock) {
+                  viewModel.unlockNote(passwordController.text);
+                } else {
+                  viewModel.setPassword(passwordController.text);
+                }
+              }
+            }
+
             return AlertDialog(
               backgroundColor: const Color(0xFF1E293B),
               shape: RoundedRectangleBorder(
@@ -271,6 +282,8 @@ class ContentArea extends StatelessWidget {
                     controller: passwordController,
                     obscureText: obscureText,
                     autofocus: true,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => submit(),
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
                       labelText: 'Password',
@@ -318,16 +331,7 @@ class ContentArea extends StatelessWidget {
                   ),
                 ),
                 ElevatedButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    if (passwordController.text.isNotEmpty) {
-                      if (isUnlock) {
-                        viewModel.unlockNote(passwordController.text);
-                      } else {
-                        viewModel.setPassword(passwordController.text);
-                      }
-                    }
-                  },
+                  onPressed: submit,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueAccent,
                     foregroundColor: Colors.white,

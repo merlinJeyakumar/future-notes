@@ -218,22 +218,52 @@ class ContentViewModel extends BaseViewModel {
   void syncToRich() {
     try {
       final markdown = textController.text;
+      print("=== SYNC TO RICH ===");
+      print("Input Markdown:\n$markdown");
+
+      // Preserve blank lines by replacing them with a special placeholder
+      // The markdown parser collapses multiple blank lines, so we need to work around this
+      // We insert a zero-width space character on "empty" lines to preserve them
+      final preservedMarkdown = markdown
+          .split('\n')
+          .map(
+            (line) => line.trim().isEmpty ? '\u200B' : line,
+          ) // Zero-width space for empty lines
+          .join('\n');
+
+      final mdDocument = md.Document(
+        encodeHtml: false,
+        extensionSet: md.ExtensionSet.gitHubFlavored,
+      );
       final delta = MarkdownToDelta(
-        markdownDocument: md.Document(),
-      ).convert(markdown);
+        markdownDocument: mdDocument,
+      ).convert(preservedMarkdown);
+
+      print("Output Delta: ${delta.toJson()}");
       quillController.document = quill.Document.fromDelta(delta);
-    } catch (e) {
+    } catch (e, stack) {
       print("Error syncing to rich editor: $e");
+      print("Stack: $stack");
     }
   }
 
   void syncToMarkdown() {
     try {
       final delta = quillController.document.toDelta();
-      final markdown = DeltaToMarkdown().convert(delta);
+      print("=== SYNC TO MARKDOWN ===");
+      print("Input Delta: ${delta.toJson()}");
+
+      final deltaToMd = DeltaToMarkdown();
+      var markdown = deltaToMd.convert(delta);
+
+      // Remove zero-width space characters that were used to preserve blank lines
+      markdown = markdown.replaceAll('\u200B', '');
+
+      print("Output Markdown:\n$markdown");
       textController.text = markdown;
-    } catch (e) {
+    } catch (e, stack) {
       print("Error syncing to markdown: $e");
+      print("Stack: $stack");
     }
   }
 

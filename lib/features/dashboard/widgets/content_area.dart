@@ -23,7 +23,8 @@ class _ContentAreaState extends State<ContentArea>
   }
 
   void _handleTabSelection() {
-    if (_tabController.indexIsChanging ||
+    // Only trigger sync when tab animation is complete, not during animation
+    if (!_tabController.indexIsChanging &&
         _tabController.index != widget.viewModel.activeTabIndex) {
       widget.viewModel.setActiveTab(_tabController.index);
       setState(() {}); // Rebuild to update toolbar
@@ -314,14 +315,33 @@ class _ContentAreaState extends State<ContentArea>
   }
 
   Widget _buildRichEditor(BuildContext context) {
+    // Use simpler customStyles that work with the flutter_quill API
+    final baseTextStyle = const TextStyle(
+      color: Colors.white,
+      fontSize: 16,
+      height: 1.5,
+    );
+
     return Container(
-      color: const Color(0xFF1B2535), // Dark background to match app theme
+      color: const Color(0xFF1B2535),
       padding: const EdgeInsets.all(16),
       child: Theme(
         data: ThemeData.dark().copyWith(
-          textTheme: const TextTheme(
-            bodyLarge: TextStyle(color: Colors.white),
-            bodyMedium: TextStyle(color: Colors.white),
+          textTheme: TextTheme(
+            bodyLarge: baseTextStyle,
+            bodyMedium: baseTextStyle,
+            titleLarge: baseTextStyle.copyWith(
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+            ),
+            titleMedium: baseTextStyle.copyWith(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+            titleSmall: baseTextStyle.copyWith(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
         child: quill.QuillEditor.basic(

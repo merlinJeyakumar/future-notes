@@ -1,21 +1,45 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_quill/flutter_quill.dart' as quill;
 import '../viewmodels/content_viewmodel.dart';
 
-class ContentArea extends StatelessWidget {
+class ContentArea extends StatefulWidget {
   final ContentViewModel viewModel;
 
   const ContentArea({super.key, required this.viewModel});
 
   @override
-  Widget build(BuildContext context) {
-    // Determine screen width to decide layout
-    final isDesktop = MediaQuery.of(context).size.width > 900;
+  State<ContentArea> createState() => _ContentAreaState();
+}
 
-    // ListenableBuilder might be redundant if parent rebuilds, but safe to keep or remove if parent ensures rebuild.
-    // Given DashboardScreen uses ListenableBuilder, this widget will be rebuilt with new state.
-    // However, to be cleaner let's just use the vm directly.
-    // Actually, if DashboardScreen rebuilds, this widget constructor is called again.
+class _ContentAreaState extends State<ContentArea>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(_handleTabSelection);
+  }
+
+  void _handleTabSelection() {
+    if (_tabController.indexIsChanging ||
+        _tabController.index != widget.viewModel.activeTabIndex) {
+      widget.viewModel.setActiveTab(_tabController.index);
+      setState(() {}); // Rebuild to update toolbar
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Determine screen width to decide layout if needed, though now unified.
+    // final isDesktop = MediaQuery.of(context).size.width > 900;
 
     return Container(
       color: const Color(0xFF1B2535),
@@ -29,7 +53,7 @@ class ContentArea extends StatelessWidget {
               children: [
                 Expanded(
                   child: TextField(
-                    controller: viewModel.titleController,
+                    controller: widget.viewModel.titleController,
                     style: const TextStyle(
                       color: Colors.white70,
                       fontWeight: FontWeight.bold,
@@ -49,9 +73,9 @@ class ContentArea extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 16),
-                if (viewModel.isPasswordSet) ...[
+                if (widget.viewModel.isPasswordSet) ...[
                   OutlinedButton.icon(
-                    onPressed: () => viewModel.manualLock(),
+                    onPressed: () => widget.viewModel.manualLock(),
                     icon: const Icon(
                       Icons.lock,
                       size: 16,
@@ -73,9 +97,9 @@ class ContentArea extends StatelessWidget {
                 ],
                 ElevatedButton(
                   // Call viewModel.saveNote directly
-                  onPressed: viewModel.isBusy
+                  onPressed: widget.viewModel.isBusy
                       ? null
-                      : () => viewModel.saveNote(),
+                      : () => widget.viewModel.saveNote(),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueAccent,
                     foregroundColor: Colors.white,
@@ -88,7 +112,7 @@ class ContentArea extends StatelessWidget {
                     ),
                     elevation: 0,
                   ),
-                  child: viewModel.isBusy
+                  child: widget.viewModel.isBusy
                       ? const SizedBox(
                           width: 20,
                           height: 20,
@@ -106,122 +130,203 @@ class ContentArea extends StatelessWidget {
             ),
           ),
 
-          // Toolbar - Row 2: Tools
+          // Toolbar - Row 2: Tabs & Tools
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: Color(0xFF334155))),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+            color: const Color(0xFF0F172A),
+            child: Column(
               children: [
-                if (!viewModel.isLocked) ...[
-                  _buildToolbarIcon(
-                    Icons.attach_file,
-                    'Attach File',
-                    onPressed: viewModel.pickFile,
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                _buildToolbarIcon(
-                  viewModel.isLocked
-                      ? Icons.lock
-                      : (viewModel.isPasswordSet
-                            ? Icons.lock
-                            : Icons.lock_outline),
-                  viewModel.isLocked
-                      ? 'Unlock Note'
-                      : (viewModel.isPasswordSet
-                            ? 'Remove Password'
-                            : 'Set Password'),
-                  onPressed: () {
-                    if (viewModel.isLocked) {
-                      _showPasswordDialog(context, isUnlock: true);
-                    } else if (viewModel.isPasswordSet) {
-                      showDialog(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          backgroundColor: const Color(0xFF1E293B),
-                          title: const Text(
-                            'Remove Password?',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                          content: const Text(
-                            'Are you sure you want to remove the password protection?',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('Cancel'),
-                            ),
-                            TextButton(
-                              onPressed: () {
-                                viewModel.clearPassword();
-                                Navigator.pop(context);
-                              },
-                              child: const Text(
-                                'Remove',
-                                style: TextStyle(color: Colors.redAccent),
-                              ),
-                            ),
-                          ],
+                // Top Tab Bar
+                TabBar(
+                  controller: _tabController,
+                  tabs: const [
+                    Tab(text: 'Editor'),
+                    Tab(text: 'Text'),
+                  ],
+                  labelColor: Colors.blueAccent,
+                  unselectedLabelColor: Colors.grey,
+                  indicatorColor: Colors.blueAccent,
+                  indicatorSize: TabBarIndicatorSize.tab,
+                  dividerColor: const Color(0xFF334155),
+                ),
+                // Tool buttons / Quill Toolbar
+                if (!widget.viewModel.isLocked) ...[
+                  if (_tabController.index == 0) ...[
+                    Container(
+                      color: Colors
+                          .white, // Quill toolbar usually needs light background or custom theme
+                      width: double.infinity,
+                      // Theme override for dark mode if needed
+                      child: Theme(
+                        data: Theme.of(context).copyWith(
+                          iconTheme: IconThemeData(color: Colors.black87),
                         ),
-                      );
-                    } else {
-                      _showPasswordDialog(context);
-                    }
-                  },
-                  color: (viewModel.isLocked || viewModel.isPasswordSet)
-                      ? Colors.blueAccent
-                      : Colors.grey,
-                ),
-                _buildToolbarIcon(Icons.terminal, 'Terminal', onPressed: () {}),
-                const SizedBox(width: 8),
-                _buildToolbarIcon(
-                  Icons.settings_outlined,
-                  'Settings',
-                  onPressed: () {},
-                ),
+                        child: quill.QuillSimpleToolbar(
+                          controller: widget.viewModel.quillController,
+                          // configurations removed to fix compilation
+                          // Will add back if needed once correct API is found
+                          // configurations: const quill.QuillSimpleToolbarConfigurations( ... ),
+                        ),
+                      ),
+                    ),
+                  ] else ...[
+                    // Markdown tools (reused existing logic essentially, or simplified)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
+                      decoration: const BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(color: Color(0xFF334155)),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          _buildToolbarIcon(
+                            Icons.attach_file,
+                            'Attach File',
+                            onPressed: widget.viewModel.pickFile,
+                          ),
+                          const SizedBox(width: 8),
+                          _buildToolbarIcon(
+                            widget.viewModel.isLocked
+                                ? Icons.lock
+                                : (widget.viewModel.isPasswordSet
+                                      ? Icons.lock
+                                      : Icons.lock_outline),
+                            widget.viewModel.isLocked
+                                ? 'Unlock Note'
+                                : (widget.viewModel.isPasswordSet
+                                      ? 'Remove Password'
+                                      : 'Set Password'),
+                            onPressed: () {
+                              if (widget.viewModel.isLocked) {
+                                _showPasswordDialog(context, isUnlock: true);
+                              } else if (widget.viewModel.isPasswordSet) {
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    backgroundColor: const Color(0xFF1E293B),
+                                    title: const Text(
+                                      'Remove Password?',
+                                      style: TextStyle(color: Colors.white),
+                                    ),
+                                    content: const Text(
+                                      'Are you sure you want to remove the password protection?',
+                                      style: TextStyle(color: Colors.white70),
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context),
+                                        child: const Text('Cancel'),
+                                      ),
+                                      TextButton(
+                                        onPressed: () {
+                                          widget.viewModel.clearPassword();
+                                          Navigator.pop(context);
+                                        },
+                                        child: const Text(
+                                          'Remove',
+                                          style: TextStyle(
+                                            color: Colors.redAccent,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              } else {
+                                _showPasswordDialog(context);
+                              }
+                            },
+                            color:
+                                (widget.viewModel.isLocked ||
+                                    widget.viewModel.isPasswordSet)
+                                ? Colors.blueAccent
+                                : Colors.grey,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
               ],
             ),
           ),
 
           // Editor Area
           Expanded(
-            child: isDesktop
-                ? Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+            child: widget.viewModel.isLocked
+                ? _buildLockedView(context)
+                : TabBarView(
+                    controller: _tabController,
+                    physics:
+                        const NeverScrollableScrollPhysics(), // Disable swipe to avoid conflict with editor
                     children: [
-                      Expanded(child: _buildInputArea(context)),
-                      const VerticalDivider(width: 1, color: Color(0xFF334155)),
-                      Expanded(child: _buildPreviewArea(context)),
+                      _buildRichEditor(context),
+                      _buildMarkdownEditor(context),
                     ],
-                  )
-                : DefaultTabController(
-                    length: 2,
-                    child: Column(
-                      children: [
-                        const TabBar(
-                          tabs: [
-                            Tab(text: 'Edit'),
-                            Tab(text: 'Preview'),
-                          ],
-                          labelColor: Colors.blueAccent,
-                          unselectedLabelColor: Colors.grey,
-                          indicatorColor: Colors.blueAccent,
-                        ),
-                        Expanded(
-                          child: TabBarView(
-                            children: [
-                              _buildInputArea(context),
-                              _buildPreviewArea(context),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
                   ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRichEditor(BuildContext context) {
+    return Container(
+      color: Colors.white, // Edit in white for WYSIWYG standard
+      padding: const EdgeInsets.all(16),
+      child: quill.QuillEditor.basic(
+        controller: widget.viewModel.quillController,
+        // configurations removed
+      ),
+    );
+  }
+
+  Widget _buildMarkdownEditor(BuildContext context) {
+    return Container(
+      color: const Color(0xFF1B2535),
+      padding: const EdgeInsets.all(16.0),
+      child: TextField(
+        controller: widget.viewModel.textController,
+        maxLines: null,
+        expands: true,
+        style: const TextStyle(
+          color: Colors.white,
+          fontFamily: 'monospace',
+          fontSize: 14,
+        ),
+        decoration: const InputDecoration(
+          border: InputBorder.none,
+          hintText: 'Type markdown here...',
+          hintStyle: TextStyle(color: Colors.grey),
+        ),
+        onChanged: widget.viewModel.onTextChanged,
+      ),
+    );
+  }
+
+  Widget _buildLockedView(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.lock, size: 64, color: Colors.grey),
+          const SizedBox(height: 16),
+          const Text(
+            "This note is locked.",
+            style: TextStyle(color: Colors.grey, fontSize: 18),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () => _showPasswordDialog(context, isUnlock: true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blueAccent,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text("Unlock"),
           ),
         ],
       ),
@@ -260,9 +365,9 @@ class ContentArea extends StatelessWidget {
               Navigator.pop(context);
               if (passwordController.text.isNotEmpty) {
                 if (isUnlock) {
-                  viewModel.unlockNote(passwordController.text);
+                  widget.viewModel.unlockNote(passwordController.text);
                 } else {
-                  viewModel.setPassword(passwordController.text);
+                  widget.viewModel.setPassword(passwordController.text);
                 }
               }
             }
@@ -358,104 +463,6 @@ class ContentArea extends StatelessWidget {
           },
         );
       },
-    );
-  }
-
-  Widget _buildInputArea(BuildContext context) {
-    if (viewModel.isLocked) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.lock, size: 64, color: Colors.grey),
-            const SizedBox(height: 16),
-            const Text(
-              "This note is locked.",
-              style: TextStyle(color: Colors.grey, fontSize: 18),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () => _showPasswordDialog(context, isUnlock: true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blueAccent,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text("Unlock"),
-            ),
-          ],
-        ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: TextField(
-        controller: viewModel.textController,
-        maxLines: null,
-        expands: true,
-        style: const TextStyle(
-          color: Colors.white,
-          fontFamily: 'monospace',
-          fontSize: 14,
-        ),
-        decoration: const InputDecoration(
-          border: InputBorder.none,
-          hintText: 'Type markdown here...',
-          hintStyle: TextStyle(color: Colors.grey),
-        ),
-        onChanged: viewModel.onTextChanged,
-      ),
-    );
-  }
-
-  Widget _buildPreviewArea(BuildContext context) {
-    int checkboxIndex = 0;
-
-    return Container(
-      color: const Color(0xFF0F172A), // Slightly darker for preview
-      child: Markdown(
-        data: viewModel.textController.text,
-        selectable: true,
-        softLineBreak: true,
-        styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-          p: const TextStyle(color: Colors.white70, fontSize: 16),
-          h1: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 32,
-          ),
-          h2: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 24,
-          ),
-          code: const TextStyle(
-            backgroundColor: Color(0xFF1E293B),
-            color: Colors.greenAccent,
-            fontFamily: 'monospace',
-          ),
-          codeblockDecoration: BoxDecoration(
-            color: const Color(0xFF1E293B),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          checkbox: const TextStyle(color: Colors.blueAccent),
-        ),
-        checkboxBuilder: (bool value) {
-          final currentIndex = checkboxIndex++;
-          return GestureDetector(
-            onTap: () {
-              viewModel.toggleCheckbox(currentIndex);
-            },
-            child: Padding(
-              padding: const EdgeInsets.only(right: 8.0),
-              child: Icon(
-                value ? Icons.check_box : Icons.check_box_outline_blank,
-                color: value ? Colors.blueAccent : Colors.grey,
-                size: 20,
-              ),
-            ),
-          );
-        },
-      ),
     );
   }
 }

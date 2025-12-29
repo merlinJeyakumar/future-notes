@@ -7,6 +7,9 @@ import '../services/file_service.dart';
 import '../services/encryption_service.dart';
 import '../models/note_model.dart';
 import 'dart:convert';
+import 'package:flutter_quill/flutter_quill.dart' as quill;
+import 'package:markdown_quill/markdown_quill.dart';
+import 'package:markdown/markdown.dart' as md;
 
 import 'package:uuid/uuid.dart';
 
@@ -15,6 +18,8 @@ class ContentViewModel extends BaseViewModel {
   final IEncryptionService _encryptionService;
 
   final TextEditingController textController = TextEditingController();
+  final quill.QuillController quillController = quill.QuillController.basic();
+
   final TextEditingController titleController = TextEditingController(
     text: "New Note",
   );
@@ -31,9 +36,11 @@ class ContentViewModel extends BaseViewModel {
   final Map<String, String> _sessionPasswords = {};
   bool _isLocked = false;
 
-  bool get isLocked => _isLocked;
+  // Track active tab index (0: Rich, 1: Markdown)
+  int _activeTabIndex = 0;
+  int get activeTabIndex => _activeTabIndex;
 
-  // Expose for UI if needed, but logic should mainly happen here
+  bool get isLocked => _isLocked;
 
   // Expose for UI if needed, but logic should mainly happen here
   // List<TextRange> get checkboxRanges => _checkboxRanges;
@@ -50,6 +57,14 @@ class ContentViewModel extends BaseViewModel {
     parseCheckboxes(textController.text);
     loadRecentFiles();
     _initFileWatcher();
+
+    // Listen to changes in Quill to mark as modified/autosave?
+    quillController.document.changes.listen((change) {
+      // We could auto-sync here, but expensive.
+      // Just schedule autosave? Autosave triggers saveNote which needs textController to be updated.
+      // So verify logic in saveNote.
+      _scheduleAutoSave();
+    });
   }
 
   void _initFileWatcher() {
@@ -94,18 +109,6 @@ class ContentViewModel extends BaseViewModel {
             isLocked = note.isLocked;
             created = DateTime.fromMillisecondsSinceEpoch(note.timestamp);
           }
-
-          // Approximate size from content string length relative to bytes?
-          // Not accurate for encrypted/binary, but okay-ish.
-          // Better: just leave modified/size null if too hard without path.
-          // The user really wants details.
-          // Let's rely on the service later or just leave null for now if I can't easily get File object.
-          // Wait, `_fileService.readFile` reads from `UserData/$file`.
-          // I can't easily get `File` stats without the directory.
-          // I will skip 'modified' and 'size' implementation in this ViewModel loop for now
-          // to avoid breaking clean architecture or duplicate path logic.
-          // I will focus on `isLocked` (critical) and `created` (from note).
-          // I will try to implement `deleteNote` next.
         }
       } catch (e) {
         print("Error reading title for $file: $e");
@@ -164,13 +167,17 @@ class ContentViewModel extends BaseViewModel {
             } else {
               // Locked state - clear editor
               textController.text = "";
+              quillController.clear();
               _currentPassword = null;
               notifyListeners();
             }
           } else {
             // Not locked, content is plain
+            // Set text controller
             textController.text = note.content;
             _currentPassword = null;
+            // Also sync to rich editor
+            syncToRich();
           }
 
           titleController.text = note.title;
@@ -178,10 +185,12 @@ class ContentViewModel extends BaseViewModel {
           // Legacy file or bad key
           print("App decryption failed, trying legacy...");
           textController.text = "Error: Invalid file format.";
+          quillController.clear();
         }
       } catch (e) {
         print("Error loading note: $e");
         textController.text = "Error loading file.";
+        quillController.clear();
       }
 
       _lastText = textController.text;
@@ -189,6 +198,43 @@ class ContentViewModel extends BaseViewModel {
       notifyListeners();
     }
     setBusy(false);
+  }
+
+  void setActiveTab(int index) {
+    if (_activeTabIndex == index) return;
+    _activeTabIndex = index;
+
+    // Sync logic based on direction
+    if (index == 0) {
+      // Switching TO Rich Editor (from Markdown)
+      syncToRich();
+    } else {
+      // Switching TO Markdown (from Rich Editor)
+      syncToMarkdown();
+    }
+    notifyListeners();
+  }
+
+  void syncToRich() {
+    try {
+      final markdown = textController.text;
+      final delta = MarkdownToDelta(
+        markdownDocument: md.Document(),
+      ).convert(markdown);
+      quillController.document = quill.Document.fromDelta(delta);
+    } catch (e) {
+      print("Error syncing to rich editor: $e");
+    }
+  }
+
+  void syncToMarkdown() {
+    try {
+      final delta = quillController.document.toDelta();
+      final markdown = DeltaToMarkdown().convert(delta);
+      textController.text = markdown;
+    } catch (e) {
+      print("Error syncing to markdown: $e");
+    }
   }
 
   void setPassword(String password) {
@@ -200,13 +246,15 @@ class ContentViewModel extends BaseViewModel {
   void clearPassword() {
     _currentPassword = null;
     notifyListeners();
-    // Decide if valid strategy: keep auto-saving if file exists?
-    // Request says: "once saved it will auto save".
-    // If file exists, we continue auto-saving even if password cleared.
     _scheduleAutoSave();
   }
 
   Future<void> saveNote({bool isAutoSave = false}) async {
+    // Before saving, ensure textController is up to date if we are in Rich Mode
+    if (_activeTabIndex == 0) {
+      syncToMarkdown();
+    }
+
     if (!isAutoSave) setBusy(true);
 
     if (!isAutoSave) await Future.delayed(const Duration(seconds: 1));
@@ -276,10 +324,6 @@ class ContentViewModel extends BaseViewModel {
   }
 
   void unlockNote(String password) {
-    // Re-read logic or just store `_tempEncryptedContent`?
-    // To be safe, we should reload/re-decrypt using the password.
-    // However, we don't hold the encrypted content in memory here optimally.
-    // Let's reload the file to be safe and clean.
     if (_currentFileName != null) {
       _sessionPasswords[_currentFileName!] = password;
       loadNote(_currentFileName!);
@@ -298,6 +342,8 @@ class ContentViewModel extends BaseViewModel {
     } else {
       textController.text = decrypted;
       _isLocked = false;
+      // Also sync to rich
+      syncToRich();
     }
   }
 
@@ -307,6 +353,7 @@ class ContentViewModel extends BaseViewModel {
       _currentPassword = null;
       _isLocked = true;
       textController.clear();
+      quillController.clear();
       notifyListeners();
     }
   }
@@ -316,6 +363,7 @@ class ContentViewModel extends BaseViewModel {
     _currentPassword = null;
     _isLocked = false;
     textController.clear();
+    quillController.clear();
     titleController.text = "New Note";
     _checkboxRanges.clear();
     _lastText = "";
@@ -328,6 +376,7 @@ class ContentViewModel extends BaseViewModel {
     _debounceTimer?.cancel();
     _fileWatcherSubscription?.cancel();
     textController.dispose();
+    quillController.dispose();
     titleController.dispose();
     super.dispose();
   }
@@ -465,6 +514,13 @@ class ContentViewModel extends BaseViewModel {
       final fileName = result.files.single.name;
       final textToAdd = '\n\n![Attachment: $fileName]($fileName)';
       _insertText(textToAdd);
+
+      // If rich editor is active, we should also insert it there technically.
+      // But syncToRich calling next time might handle it?
+      // Better to sync immediately if active.
+      if (_activeTabIndex == 0) {
+        syncToRich();
+      }
     }
   }
 

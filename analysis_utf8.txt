@@ -1,0 +1,29 @@
+﻿Analyzing flutter_application_1...                              
+
+   info - Don't invoke 'print' in production code - lib\features\dashboard\services\file_service.dart:47:7 - avoid_print
+   info - Don't invoke 'print' in production code - lib\features\dashboard\services\file_service.dart:96:9 - avoid_print
+   info - Don't invoke 'print' in production code - lib\features\dashboard\services\file_service.dart:110:9 - avoid_print
+   info - Don't invoke 'print' in production code - lib\features\dashboard\services\file_service.dart:113:7 - avoid_print
+   info - Don't invoke 'print' in production code - lib\features\dashboard\services\file_service.dart:127:7 - avoid_print
+   info - Don't invoke 'print' in production code - lib\features\dashboard\services\file_service.dart:164:9 - avoid_print
+   info - Don't invoke 'print' in production code - lib\features\dashboard\services\file_service.dart:168:7 - avoid_print
+   info - Don't invoke 'print' in production code - lib\features\dashboard\viewmodels\content_viewmodel.dart:113:9 - avoid_print
+   info - Don't invoke 'print' in production code - lib\features\dashboard\viewmodels\content_viewmodel.dart:185:11 - avoid_print
+   info - Don't invoke 'print' in production code - lib\features\dashboard\viewmodels\content_viewmodel.dart:190:9 - avoid_print
+  error - The named parameter 'markdownDocument' is required, but there's no corresponding argument - lib\features\dashboard\viewmodels\content_viewmodel.dart:220:21 - missing_required_argument
+  error - The named parameter 'markdown' isn't defined - lib\features\dashboard\viewmodels\content_viewmodel.dart:220:37 - undefined_named_parameter
+  error - The method 'toDelta' isn't defined for the type 'MarkdownToDelta' - lib\features\dashboard\viewmodels\content_viewmodel.dart:220:57 - undefined_method
+   info - Don't invoke 'print' in production code - lib\features\dashboard\viewmodels\content_viewmodel.dart:223:7 - avoid_print
+  error - The method 'toMarkdown' isn't defined for the type 'DeltaToMarkdown' - lib\features\dashboard\viewmodels\content_viewmodel.dart:231:42 - undefined_method
+   info - Don't invoke 'print' in production code - lib\features\dashboard\viewmodels\content_viewmodel.dart:235:7 - avoid_print
+   info - Don't invoke 'print' in production code - lib\features\dashboard\viewmodels\content_viewmodel.dart:313:5 - avoid_print
+   info - Use interpolation to compose strings and values - lib\features\dashboard\viewmodels\content_viewmodel.dart:574:88 - prefer_interpolation_to_compose_strings
+warning - Unused import: 'package:file_picker/file_picker.dart' - lib\features\dashboard\views\dashboard_screen.dart:2:8 - unused_import
+   info - Don't invoke 'print' in production code - lib\features\dashboard\views\dashboard_screen.dart:57:7 - avoid_print
+  error - The named parameter 'configurations' isn't defined - lib\features\dashboard\widgets\content_area.dart:165:27 - undefined_named_parameter
+  error - The name 'QuillSimpleToolbarConfigurations' isn't a class - lib\features\dashboard\widgets\content_area.dart:166:43 - creation_with_non_type
+  error - The named parameter 'configurations' isn't defined - lib\features\dashboard\widgets\content_area.dart:296:9 - undefined_named_parameter
+  error - The name 'QuillEditorConfigurations' isn't a class - lib\features\dashboard\widgets\content_area.dart:296:37 - creation_with_non_type
+   info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\features\dashboard\widgets\sidebar.dart:240:21 - deprecated_member_use
+   info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\features\dashboard\widgets\sidebar.dart:240:27 - deprecated_member_use
+

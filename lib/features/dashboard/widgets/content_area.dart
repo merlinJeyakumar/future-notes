@@ -152,19 +152,18 @@ class _ContentAreaState extends State<ContentArea>
                 if (!widget.viewModel.isLocked) ...[
                   if (_tabController.index == 0) ...[
                     Container(
-                      color: Colors
-                          .white, // Quill toolbar usually needs light background or custom theme
+                      color: const Color(
+                        0xFF1B2535,
+                      ), // Dark background to match app theme
                       width: double.infinity,
-                      // Theme override for dark mode if needed
                       child: Theme(
                         data: Theme.of(context).copyWith(
-                          iconTheme: IconThemeData(color: Colors.black87),
+                          iconTheme: const IconThemeData(color: Colors.white70),
+                          canvasColor: const Color(0xFF1B2535),
                         ),
                         child: quill.QuillSimpleToolbar(
                           controller: widget.viewModel.quillController,
-                          // configurations removed to fix compilation
-                          // Will add back if needed once correct API is found
-                          // configurations: const quill.QuillSimpleToolbarConfigurations( ... ),
+                          config: const quill.QuillSimpleToolbarConfig(),
                         ),
                       ),
                     ),
@@ -276,11 +275,22 @@ class _ContentAreaState extends State<ContentArea>
 
   Widget _buildRichEditor(BuildContext context) {
     return Container(
-      color: Colors.white, // Edit in white for WYSIWYG standard
+      color: const Color(0xFF1B2535), // Dark background to match app theme
       padding: const EdgeInsets.all(16),
-      child: quill.QuillEditor.basic(
-        controller: widget.viewModel.quillController,
-        // configurations removed
+      child: Theme(
+        data: ThemeData.dark().copyWith(
+          textTheme: const TextTheme(
+            bodyLarge: TextStyle(color: Colors.white),
+            bodyMedium: TextStyle(color: Colors.white),
+          ),
+        ),
+        child: quill.QuillEditor.basic(
+          controller: widget.viewModel.quillController,
+          config: quill.QuillEditorConfig(
+            placeholder: 'Start writing...',
+            padding: EdgeInsets.zero,
+          ),
+        ),
       ),
     );
   }

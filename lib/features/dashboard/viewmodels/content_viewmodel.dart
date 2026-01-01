@@ -40,6 +40,10 @@ class ContentViewModel extends BaseViewModel {
   int _activeTabIndex = 0;
   int get activeTabIndex => _activeTabIndex;
 
+  // Track whether each editor has been modified since last sync
+  bool _richEditorDirty = false;
+  bool _markdownEditorDirty = false;
+
   bool get isLocked => _isLocked;
 
   // Expose for UI if needed, but logic should mainly happen here
@@ -58,11 +62,10 @@ class ContentViewModel extends BaseViewModel {
     loadRecentFiles();
     _initFileWatcher();
 
-    // Listen to changes in Quill to mark as modified/autosave?
+    // Listen to changes in Quill to mark as modified/autosave
     quillController.document.changes.listen((change) {
-      // We could auto-sync here, but expensive.
-      // Just schedule autosave? Autosave triggers saveNote which needs textController to be updated.
-      // So verify logic in saveNote.
+      // Mark rich editor as dirty when user makes changes
+      _richEditorDirty = true;
       _scheduleAutoSave();
     });
   }
@@ -195,6 +198,9 @@ class ContentViewModel extends BaseViewModel {
 
       _lastText = textController.text;
       parseCheckboxes(textController.text);
+      // Reset dirty flags since content was just loaded
+      _richEditorDirty = false;
+      _markdownEditorDirty = false;
       notifyListeners();
     }
     setBusy(false);
@@ -202,16 +208,19 @@ class ContentViewModel extends BaseViewModel {
 
   void setActiveTab(int index) {
     if (_activeTabIndex == index) return;
-    _activeTabIndex = index;
 
-    // Sync logic based on direction
-    if (index == 0) {
-      // Switching TO Rich Editor (from Markdown)
-      syncToRich();
-    } else {
-      // Switching TO Markdown (from Rich Editor)
+    // Only sync when switching away from a dirty editor
+    if (_activeTabIndex == 0 && _richEditorDirty) {
+      // Leaving Rich Editor that was modified -> sync to Markdown
       syncToMarkdown();
+      _richEditorDirty = false;
+    } else if (_activeTabIndex == 1 && _markdownEditorDirty) {
+      // Leaving Markdown Editor that was modified -> sync to Rich
+      syncToRich();
+      _markdownEditorDirty = false;
     }
+
+    _activeTabIndex = index;
     notifyListeners();
   }
 
@@ -397,6 +406,9 @@ class ContentViewModel extends BaseViewModel {
     titleController.text = "New Note";
     _checkboxRanges.clear();
     _lastText = "";
+    // Reset dirty flags
+    _richEditorDirty = false;
+    _markdownEditorDirty = false;
     notifyListeners();
   }
 
@@ -414,6 +426,9 @@ class ContentViewModel extends BaseViewModel {
   void onTextChanged(String text) {
     handleAutoList(text);
     _lastText = text;
+
+    // Mark markdown editor as dirty when user makes changes
+    _markdownEditorDirty = true;
 
     if (titleController.text.trim().length < 40) {
       final generatedTitle = _generateTitleFromContent(text);

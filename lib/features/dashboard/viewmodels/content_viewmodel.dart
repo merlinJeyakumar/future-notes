@@ -209,13 +209,13 @@ class ContentViewModel extends BaseViewModel {
   void setActiveTab(int index) {
     if (_activeTabIndex == index) return;
 
-    // Only sync when switching away from a dirty editor
-    if (_activeTabIndex == 0 && _richEditorDirty) {
-      // Leaving Rich Editor that was modified -> sync to Markdown
+    // Always sync when switching tabs to keep both editors in sync
+    if (_activeTabIndex == 0) {
+      // Leaving Rich Editor -> sync to Markdown
       syncToMarkdown();
       _richEditorDirty = false;
-    } else if (_activeTabIndex == 1 && _markdownEditorDirty) {
-      // Leaving Markdown Editor that was modified -> sync to Rich
+    } else if (_activeTabIndex == 1) {
+      // Leaving Markdown Editor -> sync to Rich
       syncToRich();
       _markdownEditorDirty = false;
     }
@@ -230,23 +230,13 @@ class ContentViewModel extends BaseViewModel {
       print("=== SYNC TO RICH ===");
       print("Input Markdown:\n$markdown");
 
-      // Preserve blank lines by replacing them with a special placeholder
-      // The markdown parser collapses multiple blank lines, so we need to work around this
-      // We insert a zero-width space character on "empty" lines to preserve them
-      final preservedMarkdown = markdown
-          .split('\n')
-          .map(
-            (line) => line.trim().isEmpty ? '\u200B' : line,
-          ) // Zero-width space for empty lines
-          .join('\n');
-
       final mdDocument = md.Document(
         encodeHtml: false,
         extensionSet: md.ExtensionSet.gitHubFlavored,
       );
       final delta = MarkdownToDelta(
         markdownDocument: mdDocument,
-      ).convert(preservedMarkdown);
+      ).convert(markdown);
 
       print("Output Delta: ${delta.toJson()}");
       quillController.document = quill.Document.fromDelta(delta);
@@ -263,10 +253,7 @@ class ContentViewModel extends BaseViewModel {
       print("Input Delta: ${delta.toJson()}");
 
       final deltaToMd = DeltaToMarkdown();
-      var markdown = deltaToMd.convert(delta);
-
-      // Remove zero-width space characters that were used to preserve blank lines
-      markdown = markdown.replaceAll('\u200B', '');
+      final markdown = deltaToMd.convert(delta);
 
       print("Output Markdown:\n$markdown");
       textController.text = markdown;

@@ -23,7 +23,7 @@ class _ContentAreaState extends State<ContentArea>
   }
 
   void _handleTabSelection() {
-    // Only trigger sync when tab animation is complete, not during animation
+    // Update viewModel when tab change is complete
     if (!_tabController.indexIsChanging &&
         _tabController.index != widget.viewModel.activeTabIndex) {
       widget.viewModel.setActiveTab(_tabController.index);
@@ -39,9 +39,6 @@ class _ContentAreaState extends State<ContentArea>
 
   @override
   Widget build(BuildContext context) {
-    // Determine screen width to decide layout if needed, though now unified.
-    // final isDesktop = MediaQuery.of(context).size.width > 900;
-
     return Container(
       color: const Color(0xFF1B2535),
       child: Column(
@@ -90,14 +87,13 @@ class _ContentAreaState extends State<ContentArea>
                       side: const BorderSide(color: Colors.blueAccent),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
-                        vertical: 12, // Match height of ElevatedButton
+                        vertical: 12,
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
                 ],
                 ElevatedButton(
-                  // Call viewModel.saveNote directly
                   onPressed: widget.viewModel.isBusy
                       ? null
                       : () => widget.viewModel.saveNote(),
@@ -141,7 +137,7 @@ class _ContentAreaState extends State<ContentArea>
                   controller: _tabController,
                   tabs: const [
                     Tab(text: 'Editor'),
-                    Tab(text: 'Text'),
+                    Tab(text: 'HTML'),
                   ],
                   labelColor: Colors.blueAccent,
                   unselectedLabelColor: Colors.grey,
@@ -153,9 +149,7 @@ class _ContentAreaState extends State<ContentArea>
                 if (!widget.viewModel.isLocked) ...[
                   if (_tabController.index == 0) ...[
                     Container(
-                      color: const Color(
-                        0xFF1B2535,
-                      ), // Dark background to match app theme
+                      color: const Color(0xFF1B2535),
                       width: double.infinity,
                       child: Theme(
                         data: Theme.of(context).copyWith(
@@ -165,14 +159,15 @@ class _ContentAreaState extends State<ContentArea>
                         child: quill.QuillSimpleToolbar(
                           controller: widget.viewModel.quillController,
                           config: const quill.QuillSimpleToolbarConfig(
-                            // Text formatting supported by markdown
+                            // Text formatting
                             showBoldButton: true,
                             showItalicButton: true,
+                            showUnderLineButton: true,
                             showStrikeThrough: true,
                             showInlineCode: true,
                             showCodeBlock: true,
 
-                            // Headers/structure supported by markdown
+                            // Headers/structure
                             showHeaderStyle: true,
                             showListNumbers: true,
                             showListBullets: true,
@@ -180,14 +175,13 @@ class _ContentAreaState extends State<ContentArea>
                             showQuote: true,
                             showLink: true,
 
-                            // Not supported by markdown - hide these
-                            showUnderLineButton: false,
+                            // Hide unsupported for HTML
                             showSubscript: false,
                             showSuperscript: false,
                             showSmallButton: false,
                             showColorButton: false,
                             showBackgroundColorButton: false,
-                            showClearFormat: false,
+                            showClearFormat: true,
                             showAlignmentButtons: false,
                             showLeftAlignment: false,
                             showCenterAlignment: false,
@@ -202,14 +196,14 @@ class _ContentAreaState extends State<ContentArea>
                             showClipboardCut: false,
                             showClipboardCopy: false,
                             showClipboardPaste: false,
-                            showUndo: false,
-                            showRedo: false,
+                            showUndo: true,
+                            showRedo: true,
                           ),
                         ),
                       ),
                     ),
                   ] else ...[
-                    // Markdown tools (reused existing logic essentially, or simplified)
+                    // HTML view tools (minimal)
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
@@ -301,11 +295,10 @@ class _ContentAreaState extends State<ContentArea>
                 ? _buildLockedView(context)
                 : TabBarView(
                     controller: _tabController,
-                    physics:
-                        const NeverScrollableScrollPhysics(), // Disable swipe to avoid conflict with editor
+                    physics: const NeverScrollableScrollPhysics(),
                     children: [
                       _buildRichEditor(context),
-                      _buildMarkdownEditor(context),
+                      _buildHtmlEditor(context),
                     ],
                   ),
           ),
@@ -315,7 +308,6 @@ class _ContentAreaState extends State<ContentArea>
   }
 
   Widget _buildRichEditor(BuildContext context) {
-    // Use simpler customStyles that work with the flutter_quill API
     final baseTextStyle = const TextStyle(
       color: Colors.white,
       fontSize: 16,
@@ -355,7 +347,7 @@ class _ContentAreaState extends State<ContentArea>
     );
   }
 
-  Widget _buildMarkdownEditor(BuildContext context) {
+  Widget _buildHtmlEditor(BuildContext context) {
     return Container(
       color: const Color(0xFF1B2535),
       padding: const EdgeInsets.all(16.0),
@@ -370,7 +362,7 @@ class _ContentAreaState extends State<ContentArea>
         ),
         decoration: const InputDecoration(
           border: InputBorder.none,
-          hintText: 'Type markdown here...',
+          hintText: 'Type HTML here...',
           hintStyle: TextStyle(color: Colors.grey),
         ),
         onChanged: widget.viewModel.onTextChanged,
@@ -413,8 +405,8 @@ class _ContentAreaState extends State<ContentArea>
       onPressed: onPressed,
       icon: Icon(icon, color: color ?? Colors.grey, size: 20),
       tooltip: tooltip,
-      constraints: const BoxConstraints(), // Compact constraints
-      padding: const EdgeInsets.all(8), // Consistent padding
+      constraints: const BoxConstraints(),
+      padding: const EdgeInsets.all(8),
       splashRadius: 20,
     );
   }

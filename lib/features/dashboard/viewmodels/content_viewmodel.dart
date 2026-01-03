@@ -8,8 +8,7 @@ import '../services/encryption_service.dart';
 import '../models/note_model.dart';
 import 'dart:convert';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
-import 'package:markdown_quill/markdown_quill.dart';
-import 'package:markdown/markdown.dart' as md;
+import 'package:vsc_quill_delta_to_html/vsc_quill_delta_to_html.dart';
 
 import 'package:uuid/uuid.dart';
 
@@ -30,24 +29,23 @@ class ContentViewModel extends BaseViewModel {
   String? _currentFileName;
   Timer? _autoSaveTimer;
   Timer? _debounceTimer; // For file watching
+  Timer? _htmlSyncDebounceTimer; // For syncing Quill -> HTML
   StreamSubscription? _fileWatcherSubscription;
   List<RecentFile> _recentFiles = [];
 
   final Map<String, String> _sessionPasswords = {};
   bool _isLocked = false;
 
-  // Track active tab index (0: Rich, 1: Markdown)
+  // Track active tab index (0: Rich Editor, 1: HTML)
   int _activeTabIndex = 0;
   int get activeTabIndex => _activeTabIndex;
 
-  // Track whether each editor has been modified since last sync
-  bool _richEditorDirty = false;
-  bool _markdownEditorDirty = false;
+  // Flag to prevent sync loops
+  bool _isSyncingFromQuill = false;
+  bool _isSyncingFromText = false;
 
   bool get isLocked => _isLocked;
 
-  // Expose for UI if needed, but logic should mainly happen here
-  // List<TextRange> get checkboxRanges => _checkboxRanges;
   List<RecentFile> get recentFiles => _recentFiles;
 
   bool get isPasswordSet => _currentPassword != null;
@@ -62,12 +60,103 @@ class ContentViewModel extends BaseViewModel {
     loadRecentFiles();
     _initFileWatcher();
 
-    // Listen to changes in Quill to mark as modified/autosave
+    // Listen to changes in Quill and IMMEDIATELY sync to HTML
+    // This ensures textController always has the latest HTML
     quillController.document.changes.listen((change) {
-      // Mark rich editor as dirty when user makes changes
-      _richEditorDirty = true;
+      _onQuillChanged();
+    });
+  }
+
+  /// Called whenever Quill content changes - syncs to HTML immediately
+  void _onQuillChanged() {
+    if (_isSyncingFromText) return; // Prevent loop
+
+    // Debounce to avoid excessive syncing during rapid typing
+    _htmlSyncDebounceTimer?.cancel();
+    _htmlSyncDebounceTimer = Timer(const Duration(milliseconds: 100), () {
+      _syncQuillToHtml();
+
+      // Generate title from plain text
+      if (titleController.text.trim().length < 40) {
+        final plainText = quillController.document.toPlainText();
+        final generatedTitle = _generateTitleFromContent(plainText);
+        if (generatedTitle != "New Note") {
+          titleController.text = generatedTitle;
+        }
+      }
+
+      notifyListeners();
       _scheduleAutoSave();
     });
+  }
+
+  /// Syncs QuillController content to textController as HTML
+  void _syncQuillToHtml() {
+    if (_isSyncingFromText) return;
+
+    try {
+      _isSyncingFromQuill = true;
+
+      final delta = quillController.document.toDelta();
+      final List<Map<String, dynamic>> ops = [];
+
+      for (final op in delta.toList()) {
+        final Map<String, dynamic> opMap = {};
+        if (op.isInsert) {
+          opMap['insert'] = op.data;
+          if (op.attributes != null && op.attributes!.isNotEmpty) {
+            opMap['attributes'] = op.attributes;
+          }
+        }
+        if (opMap.isNotEmpty) {
+          ops.add(opMap);
+        }
+      }
+
+      final converter = QuillDeltaToHtmlConverter(ops);
+      final html = converter.convert();
+
+      // Only update if actually different to prevent cursor jumps
+      if (textController.text != html) {
+        textController.text = html;
+      }
+    } catch (e, stack) {
+      print("Error syncing Quill to HTML: $e");
+      print("Stack: $stack");
+      // Fallback to plain text
+      final plainText = quillController.document.toPlainText();
+      if (textController.text != plainText) {
+        textController.text = plainText;
+      }
+    } finally {
+      _isSyncingFromQuill = false;
+    }
+  }
+
+  /// Syncs textController (HTML) content back to QuillController
+  void _syncHtmlToQuill() {
+    if (_isSyncingFromQuill) return;
+
+    try {
+      _isSyncingFromText = true;
+
+      // For HTML content, strip to plain text for Quill
+      // (Full HTML to Delta conversion requires a more complex library)
+      final plainText = _stripHtmlTags(textController.text);
+
+      // Only update if actually different
+      final currentPlain = quillController.document.toPlainText().trim();
+      if (currentPlain != plainText.trim()) {
+        quillController.clear();
+        if (plainText.isNotEmpty) {
+          quillController.document.insert(0, plainText);
+        }
+      }
+    } catch (e) {
+      print("Error syncing HTML to Quill: $e");
+    } finally {
+      _isSyncingFromText = false;
+    }
   }
 
   void _initFileWatcher() {
@@ -87,7 +176,7 @@ class ContentViewModel extends BaseViewModel {
     for (final file in files) {
       String displayTitle = file;
       bool isLocked = false;
-      DateTime? created; // From note timestamp
+      DateTime? created;
       DateTime? modified;
       int? sizeBytes;
 
@@ -105,7 +194,6 @@ class ContentViewModel extends BaseViewModel {
           if (appDecrypted.isNotEmpty) {
             final jsonMap = json.decode(appDecrypted);
             final note = NoteModel.fromJson(jsonMap);
-            // Use the title from the note if available and not default "New Note" (unless that's what user wants)
             if (note.title.isNotEmpty) {
               displayTitle = note.title;
             }
@@ -131,10 +219,9 @@ class ContentViewModel extends BaseViewModel {
       );
     }
 
-    // Sort by modified date descending (newest first)
     loadedFiles.sort((a, b) {
       if (a.modified == null && b.modified == null) return 0;
-      if (a.modified == null) return 1; // Nulls last
+      if (a.modified == null) return 1;
       if (b.modified == null) return -1;
       return b.modified!.compareTo(a.modified!);
     });
@@ -150,42 +237,43 @@ class ContentViewModel extends BaseViewModel {
     final content = await _fileService.readFile(fileName);
     if (content != null) {
       try {
-        // 1. Decrypt with APP SECRET KEY
         final appDecrypted = _encryptionService.decryptApp(content);
 
         if (appDecrypted.isNotEmpty) {
-          // It's a valid JSON note
           final jsonMap = json.decode(appDecrypted);
           final note = NoteModel.fromJson(jsonMap);
 
           _isLocked = note.isLocked;
 
           if (note.isLocked) {
-            // Check if we have a session password
             final sessionPass = _sessionPasswords[fileName];
             if (sessionPass != null) {
-              // Unlock automatically
               _unlockContent(note.content, sessionPass);
               _currentPassword = sessionPass;
             } else {
-              // Locked state - clear editor
               textController.text = "";
               quillController.clear();
               _currentPassword = null;
               notifyListeners();
             }
           } else {
-            // Not locked, content is plain
-            // Set text controller
+            // Not locked - set content to both controllers
+            _isSyncingFromText = true;
             textController.text = note.content;
+            _isSyncingFromText = false;
+
+            // Load into Quill (stripping HTML for now)
+            final plainText = _stripHtmlTags(note.content);
+            quillController.clear();
+            if (plainText.isNotEmpty) {
+              quillController.document.insert(0, plainText);
+            }
+
             _currentPassword = null;
-            // Also sync to rich editor
-            syncToRich();
           }
 
           titleController.text = note.title;
         } else {
-          // Legacy file or bad key
           print("App decryption failed, trying legacy...");
           textController.text = "Error: Invalid file format.";
           quillController.clear();
@@ -198,69 +286,36 @@ class ContentViewModel extends BaseViewModel {
 
       _lastText = textController.text;
       parseCheckboxes(textController.text);
-      // Reset dirty flags since content was just loaded
-      _richEditorDirty = false;
-      _markdownEditorDirty = false;
       notifyListeners();
     }
     setBusy(false);
   }
 
+  String _stripHtmlTags(String html) {
+    return html
+        .replaceAll(RegExp(r'<br\s*/?>'), '\n')
+        .replaceAll(RegExp(r'<p[^>]*>'), '')
+        .replaceAll(RegExp(r'</p>'), '\n')
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .trim();
+  }
+
   void setActiveTab(int index) {
     if (_activeTabIndex == index) return;
 
-    // Always sync when switching tabs to keep both editors in sync
-    if (_activeTabIndex == 0) {
-      // Leaving Rich Editor -> sync to Markdown
-      syncToMarkdown();
-      _richEditorDirty = false;
-    } else if (_activeTabIndex == 1) {
-      // Leaving Markdown Editor -> sync to Rich
-      syncToRich();
-      _markdownEditorDirty = false;
+    // When switching TO editor from HTML, sync HTML back to Quill
+    if (index == 0 && _activeTabIndex == 1) {
+      _syncHtmlToQuill();
     }
+    // When switching TO HTML from editor, sync is already done continuously
+    // So nothing extra needed here
 
     _activeTabIndex = index;
     notifyListeners();
-  }
-
-  void syncToRich() {
-    try {
-      final markdown = textController.text;
-      print("=== SYNC TO RICH ===");
-      print("Input Markdown:\n$markdown");
-
-      final mdDocument = md.Document(
-        encodeHtml: false,
-        extensionSet: md.ExtensionSet.gitHubFlavored,
-      );
-      final delta = MarkdownToDelta(
-        markdownDocument: mdDocument,
-      ).convert(markdown);
-
-      print("Output Delta: ${delta.toJson()}");
-      quillController.document = quill.Document.fromDelta(delta);
-    } catch (e, stack) {
-      print("Error syncing to rich editor: $e");
-      print("Stack: $stack");
-    }
-  }
-
-  void syncToMarkdown() {
-    try {
-      final delta = quillController.document.toDelta();
-      print("=== SYNC TO MARKDOWN ===");
-      print("Input Delta: ${delta.toJson()}");
-
-      final deltaToMd = DeltaToMarkdown();
-      final markdown = deltaToMd.convert(delta);
-
-      print("Output Markdown:\n$markdown");
-      textController.text = markdown;
-    } catch (e, stack) {
-      print("Error syncing to markdown: $e");
-      print("Stack: $stack");
-    }
   }
 
   void setPassword(String password) {
@@ -276,16 +331,15 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<void> saveNote({bool isAutoSave = false}) async {
-    // Before saving, ensure textController is up to date if we are in Rich Mode
+    // textController should already have the latest HTML due to continuous sync
+    // But just to be safe, do one more sync if we're in editor mode
     if (_activeTabIndex == 0) {
-      syncToMarkdown();
+      _syncQuillToHtml();
     }
 
     if (!isAutoSave) setBusy(true);
-
     if (!isAutoSave) await Future.delayed(const Duration(seconds: 1));
 
-    // Determine current ID (if new file, ID is UUID)
     final uuid = _currentFileName != null
         ? _currentFileName!
               .replaceAll('.enc', '')
@@ -295,7 +349,6 @@ class ContentViewModel extends BaseViewModel {
     String contentToSave = textController.text;
     bool locked = false;
 
-    // If password set, encrypt content with USER PASSWORD
     if (_currentPassword != null) {
       contentToSave = _encryptionService.encrypt(
         textController.text,
@@ -304,21 +357,17 @@ class ContentViewModel extends BaseViewModel {
       locked = true;
     }
 
-    // Create NoteModel
     final note = NoteModel(
       id: uuid,
       title: (titleController.text.trim().length < 40)
-          ? _generateTitleFromContent(textController.text)
+          ? _generateTitleFromContent(_stripHtmlTags(textController.text))
           : titleController.text,
       content: contentToSave,
       isLocked: locked,
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
 
-    // Convert to JSON
     final jsonString = json.encode(note.toJson());
-
-    // Encrypt JSON with APP SECRET KEY
     final appEncrypted = _encryptionService.encryptApp(jsonString);
 
     if (_currentFileName == null) {
@@ -328,12 +377,10 @@ class ContentViewModel extends BaseViewModel {
 
     await _fileService.saveFile(appEncrypted, _currentFileName!);
 
-    // Update session password for this file if saving with a password
     if (_currentFileName != null && _currentPassword != null) {
       _sessionPasswords[_currentFileName!] = _currentPassword!;
     }
 
-    // For verification
     print("SAVED FILE: $_currentFileName (Locked: $locked, Auto: $isAutoSave)");
 
     await loadRecentFiles();
@@ -363,13 +410,20 @@ class ContentViewModel extends BaseViewModel {
     );
     if (decrypted.startsWith("Error decrypting:")) {
       textController.text = "Incorrect Password";
-      _sessionPasswords.remove(_currentFileName); // Invalid pass
+      _sessionPasswords.remove(_currentFileName);
       _isLocked = true;
     } else {
+      _isSyncingFromText = true;
       textController.text = decrypted;
+      _isSyncingFromText = false;
+
+      final plainText = _stripHtmlTags(decrypted);
+      quillController.clear();
+      if (plainText.isNotEmpty) {
+        quillController.document.insert(0, plainText);
+      }
+
       _isLocked = false;
-      // Also sync to rich
-      syncToRich();
     }
   }
 
@@ -388,14 +442,15 @@ class ContentViewModel extends BaseViewModel {
     _currentFileName = null;
     _currentPassword = null;
     _isLocked = false;
+    _isSyncingFromQuill = true;
+    _isSyncingFromText = true;
     textController.clear();
     quillController.clear();
+    _isSyncingFromQuill = false;
+    _isSyncingFromText = false;
     titleController.text = "New Note";
     _checkboxRanges.clear();
     _lastText = "";
-    // Reset dirty flags
-    _richEditorDirty = false;
-    _markdownEditorDirty = false;
     notifyListeners();
   }
 
@@ -403,6 +458,7 @@ class ContentViewModel extends BaseViewModel {
   void dispose() {
     _autoSaveTimer?.cancel();
     _debounceTimer?.cancel();
+    _htmlSyncDebounceTimer?.cancel();
     _fileWatcherSubscription?.cancel();
     textController.dispose();
     quillController.dispose();
@@ -411,14 +467,13 @@ class ContentViewModel extends BaseViewModel {
   }
 
   void onTextChanged(String text) {
+    if (_isSyncingFromQuill) return; // Prevent loop
+
     handleAutoList(text);
     _lastText = text;
 
-    // Mark markdown editor as dirty when user makes changes
-    _markdownEditorDirty = true;
-
     if (titleController.text.trim().length < 40) {
-      final generatedTitle = _generateTitleFromContent(text);
+      final generatedTitle = _generateTitleFromContent(_stripHtmlTags(text));
       if (generatedTitle != "New Note") {
         titleController.text = generatedTitle;
       }
@@ -441,14 +496,12 @@ class ContentViewModel extends BaseViewModel {
   void parseCheckboxes(String text) {
     _checkboxRanges.clear();
 
-    // 1. Identify ranges to exclude (code blocks)
     final List<TextRange> exclusions = [];
     final codeBlockRegex = RegExp(r'```[\s\S]*?```');
     for (final match in codeBlockRegex.allMatches(text)) {
       exclusions.add(TextRange(start: match.start, end: match.end));
     }
 
-    // 2. Find all potential checkboxes
     final RegExp regex = RegExp(r'^\s*[-*+]\s+(\[[ xX]\])', multiLine: true);
 
     for (final match in regex.allMatches(text)) {
@@ -457,7 +510,6 @@ class ContentViewModel extends BaseViewModel {
             match.start + (match.group(0)!.lastIndexOf(match.group(1)!));
         final end = start + match.group(1)!.length;
 
-        // 3. Check if this checkbox is inside a code block
         bool isExcluded = false;
         for (final exclusion in exclusions) {
           if (start >= exclusion.start && end <= exclusion.end) {
@@ -479,7 +531,6 @@ class ContentViewModel extends BaseViewModel {
     final range = _checkboxRanges[index];
     final currentText = textController.text;
 
-    // Safety check ensuring range is still valid
     if (range.end > currentText.length) return;
 
     final currentCheckbox = currentText.substring(range.start, range.end);
@@ -492,26 +543,22 @@ class ContentViewModel extends BaseViewModel {
       newCheckbox,
     );
 
-    // Update controller without losing selection if possible
     textController.value = TextEditingValue(
       text: newText,
       selection: textController.selection,
     );
 
-    // Re-parse immediately
     parseCheckboxes(newText);
     notifyListeners();
     _scheduleAutoSave();
   }
 
-  /// Handles auto-formatting list items (bullets/numbers) when Enter is pressed
   void handleAutoList(String newText) {
     if (newText.length != _lastText.length + 1) return;
 
     final selection = textController.selection;
     if (!selection.isValid || selection.start == 0) return;
 
-    // Check if the character before the cursor is a newline
     if (newText[selection.start - 1] == '\n') {
       final currentPos = selection.start;
       final previousNewlinePos = newText.lastIndexOf('\n', currentPos - 2);
@@ -519,7 +566,6 @@ class ContentViewModel extends BaseViewModel {
 
       final previousLine = newText.substring(lineStart, currentPos - 1);
 
-      // Regex for Bullet: ^(\s*)([*+-])\s
       final bulletMatch = RegExp(r'^(\s*)([*+-])\s').firstMatch(previousLine);
       if (bulletMatch != null) {
         final indent = bulletMatch.group(1) ?? "";
@@ -528,7 +574,6 @@ class ContentViewModel extends BaseViewModel {
         return;
       }
 
-      // Regex for Number: ^(\s*)(\d+)\.\s
       final numberMatch = RegExp(r'^(\s*)(\d+)\.\s').firstMatch(previousLine);
       if (numberMatch != null) {
         final indent = numberMatch.group(1) ?? "";
@@ -546,13 +591,6 @@ class ContentViewModel extends BaseViewModel {
       final fileName = result.files.single.name;
       final textToAdd = '\n\n![Attachment: $fileName]($fileName)';
       _insertText(textToAdd);
-
-      // If rich editor is active, we should also insert it there technically.
-      // But syncToRich calling next time might handle it?
-      // Better to sync immediately if active.
-      if (_activeTabIndex == 0) {
-        syncToRich();
-      }
     }
   }
 
@@ -596,7 +634,6 @@ class ContentViewModel extends BaseViewModel {
           );
         }
       } else if (ext == 'txt') {
-        // Valid text file
         return ImportVerificationResult(
           isValid: true,
           message: "Plain Text File",
@@ -678,9 +715,7 @@ class ContentViewModel extends BaseViewModel {
   }
 
   String _cleanTitleLine(String line) {
-    // Remove leading markdown symbols (e.g., #, -, *, >)
     line = line.replaceAll(RegExp(r'^[\s#\*\->]+'), '');
-    // Remove leading numbering (e.g., 1., 2.)
     line = line.replaceAll(RegExp(r'^\s*\d+\.\s*'), '');
     return line.trim();
   }

@@ -19,8 +19,6 @@ class ContentViewModel extends BaseViewModel {
     text: "New Note",
   );
 
-  String _lastText = "";
-  final List<TextRange> _checkboxRanges = [];
   String? _currentPassword;
   String? _currentFileName;
   Timer? _autoSaveTimer;
@@ -33,10 +31,6 @@ class ContentViewModel extends BaseViewModel {
 
   bool get isLocked => _isLocked;
 
-  // Expose for UI if needed, but logic should mainly happen here
-
-  // Expose for UI if needed, but logic should mainly happen here
-  // List<TextRange> get checkboxRanges => _checkboxRanges;
   List<RecentFile> get recentFiles => _recentFiles;
 
   bool get isPasswordSet => _currentPassword != null;
@@ -46,8 +40,6 @@ class ContentViewModel extends BaseViewModel {
     required IEncryptionService encryptionService,
   }) : _fileService = fileService,
        _encryptionService = encryptionService {
-    _lastText = textController.text;
-    parseCheckboxes(textController.text);
     loadRecentFiles();
     _initFileWatcher();
   }
@@ -183,9 +175,6 @@ class ContentViewModel extends BaseViewModel {
         print("Error loading note: $e");
         textController.text = "Error loading file.";
       }
-
-      _lastText = textController.text;
-      parseCheckboxes(textController.text);
       notifyListeners();
     }
     setBusy(false);
@@ -317,8 +306,6 @@ class ContentViewModel extends BaseViewModel {
     _isLocked = false;
     textController.clear();
     titleController.text = "New Note";
-    _checkboxRanges.clear();
-    _lastText = "";
     notifyListeners();
   }
 
@@ -333,9 +320,6 @@ class ContentViewModel extends BaseViewModel {
   }
 
   void onTextChanged(String text) {
-    handleAutoList(text);
-    _lastText = text;
-
     if (titleController.text.trim().length < 40) {
       final generatedTitle = _generateTitleFromContent(text);
       if (generatedTitle != "New Note") {
@@ -343,7 +327,6 @@ class ContentViewModel extends BaseViewModel {
       }
     }
 
-    parseCheckboxes(text);
     notifyListeners();
     _scheduleAutoSave();
   }
@@ -357,113 +340,11 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
-  void parseCheckboxes(String text) {
-    _checkboxRanges.clear();
-
-    // 1. Identify ranges to exclude (code blocks)
-    final List<TextRange> exclusions = [];
-    final codeBlockRegex = RegExp(r'```[\s\S]*?```');
-    for (final match in codeBlockRegex.allMatches(text)) {
-      exclusions.add(TextRange(start: match.start, end: match.end));
-    }
-
-    // 2. Find all potential checkboxes
-    final RegExp regex = RegExp(r'^\s*[-*+]\s+(\[[ xX]\])', multiLine: true);
-
-    for (final match in regex.allMatches(text)) {
-      if (match.groupCount >= 1) {
-        final start =
-            match.start + (match.group(0)!.lastIndexOf(match.group(1)!));
-        final end = start + match.group(1)!.length;
-
-        // 3. Check if this checkbox is inside a code block
-        bool isExcluded = false;
-        for (final exclusion in exclusions) {
-          if (start >= exclusion.start && end <= exclusion.end) {
-            isExcluded = true;
-            break;
-          }
-        }
-
-        if (!isExcluded) {
-          _checkboxRanges.add(TextRange(start: start, end: end));
-        }
-      }
-    }
-  }
-
-  void toggleCheckbox(int index) {
-    if (index < 0 || index >= _checkboxRanges.length) return;
-
-    final range = _checkboxRanges[index];
-    final currentText = textController.text;
-
-    // Safety check ensuring range is still valid
-    if (range.end > currentText.length) return;
-
-    final currentCheckbox = currentText.substring(range.start, range.end);
-    final isChecked = currentCheckbox.toLowerCase().contains('x');
-    final newCheckbox = isChecked ? '[ ]' : '[x]';
-
-    final newText = currentText.replaceRange(
-      range.start,
-      range.end,
-      newCheckbox,
-    );
-
-    // Update controller without losing selection if possible
-    textController.value = TextEditingValue(
-      text: newText,
-      selection: textController.selection,
-    );
-
-    // Re-parse immediately
-    parseCheckboxes(newText);
-    notifyListeners();
-    _scheduleAutoSave();
-  }
-
-  /// Handles auto-formatting list items (bullets/numbers) when Enter is pressed
-  void handleAutoList(String newText) {
-    if (newText.length != _lastText.length + 1) return;
-
-    final selection = textController.selection;
-    if (!selection.isValid || selection.start == 0) return;
-
-    // Check if the character before the cursor is a newline
-    if (newText[selection.start - 1] == '\n') {
-      final currentPos = selection.start;
-      final previousNewlinePos = newText.lastIndexOf('\n', currentPos - 2);
-      final lineStart = previousNewlinePos == -1 ? 0 : previousNewlinePos + 1;
-
-      final previousLine = newText.substring(lineStart, currentPos - 1);
-
-      // Regex for Bullet: ^(\s*)([*+-])\s
-      final bulletMatch = RegExp(r'^(\s*)([*+-])\s').firstMatch(previousLine);
-      if (bulletMatch != null) {
-        final indent = bulletMatch.group(1) ?? "";
-        final bullet = bulletMatch.group(2) ?? "";
-        _insertText('$indent$bullet ');
-        return;
-      }
-
-      // Regex for Number: ^(\s*)(\d+)\.\s
-      final numberMatch = RegExp(r'^(\s*)(\d+)\.\s').firstMatch(previousLine);
-      if (numberMatch != null) {
-        final indent = numberMatch.group(1) ?? "";
-        final numberStr = numberMatch.group(2) ?? "0";
-        final number = int.tryParse(numberStr) ?? 0;
-        _insertText('$indent${number + 1}. ');
-        return;
-      }
-    }
-  }
-
   Future<void> pickFile() async {
     final result = await _fileService.pickFile();
     if (result != null) {
       final fileName = result.files.single.name;
-      final textToAdd = '\n\n![Attachment: $fileName]($fileName)';
+      final textToAdd = '\n\n[Attachment: $fileName]';
       _insertText(textToAdd);
     }
   }
@@ -555,7 +436,6 @@ class ContentViewModel extends BaseViewModel {
     } else {
       textController.text += text;
     }
-    parseCheckboxes(textController.text);
     notifyListeners();
     _scheduleAutoSave();
   }
@@ -590,7 +470,7 @@ class ContentViewModel extends BaseViewModel {
   }
 
   String _cleanTitleLine(String line) {
-    // Remove leading markdown symbols (e.g., #, -, *, >)
+    // Remove leading symbols (e.g., #, -, *, >)
     line = line.replaceAll(RegExp(r'^[\s#\*\->]+'), '');
     // Remove leading numbering (e.g., 1., 2.)
     line = line.replaceAll(RegExp(r'^\s*\d+\.\s*'), '');

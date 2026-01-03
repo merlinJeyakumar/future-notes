@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
 import '../viewmodels/content_viewmodel.dart';
 
 class ContentArea extends StatelessWidget {
@@ -399,7 +398,7 @@ class ContentArea extends StatelessWidget {
         ),
         decoration: const InputDecoration(
           border: InputBorder.none,
-          hintText: 'Type markdown here...',
+          hintText: 'Type your note here...',
           hintStyle: TextStyle(color: Colors.grey),
         ),
         onChanged: viewModel.onTextChanged,
@@ -408,53 +407,18 @@ class ContentArea extends StatelessWidget {
   }
 
   Widget _buildPreviewArea(BuildContext context) {
-    int checkboxIndex = 0;
-
     return Container(
       color: const Color(0xFF0F172A), // Slightly darker for preview
-      child: Markdown(
-        data: viewModel.textController.text,
-        selectable: true,
-        softLineBreak: true,
-        styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-          p: const TextStyle(color: Colors.white70, fontSize: 16),
-          h1: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 32,
-          ),
-          h2: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 24,
-          ),
-          code: const TextStyle(
-            backgroundColor: Color(0xFF1E293B),
-            color: Colors.greenAccent,
+      padding: const EdgeInsets.all(16.0),
+      child: SingleChildScrollView(
+        child: SelectableText(
+          viewModel.textController.text,
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 14,
             fontFamily: 'monospace',
           ),
-          codeblockDecoration: BoxDecoration(
-            color: const Color(0xFF1E293B),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          checkbox: const TextStyle(color: Colors.blueAccent),
         ),
-        checkboxBuilder: (bool value) {
-          final currentIndex = checkboxIndex++;
-          return GestureDetector(
-            onTap: () {
-              viewModel.toggleCheckbox(currentIndex);
-            },
-            child: Padding(
-              padding: const EdgeInsets.only(right: 8.0),
-              child: Icon(
-                value ? Icons.check_box : Icons.check_box_outline_blank,
-                color: value ? Colors.blueAccent : Colors.grey,
-                size: 20,
-              ),
-            ),
-          );
-        },
       ),
     );
   }

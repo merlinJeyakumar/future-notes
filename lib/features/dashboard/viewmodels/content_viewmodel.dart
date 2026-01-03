@@ -269,7 +269,7 @@ class ContentViewModel extends BaseViewModel {
       }
     }
 
-    notifyListeners();
+    // notifyListeners(); // Removed for performance optimization - typing no longer triggers full UI rebuild
     _scheduleAutoSave();
   }
 

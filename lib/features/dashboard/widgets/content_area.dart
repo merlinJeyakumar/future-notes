@@ -411,13 +411,18 @@ class ContentArea extends StatelessWidget {
       color: const Color(0xFF0F172A), // Slightly darker for preview
       padding: const EdgeInsets.all(16.0),
       child: SingleChildScrollView(
-        child: SelectableText(
-          viewModel.textController.text,
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 14,
-            fontFamily: 'monospace',
-          ),
+        child: ValueListenableBuilder<TextEditingValue>(
+          valueListenable: viewModel.textController,
+          builder: (context, value, _) {
+            return SelectableText(
+              value.text,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 14,
+                fontFamily: 'monospace',
+              ),
+            );
+          },
         ),
       ),
     );

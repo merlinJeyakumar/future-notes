@@ -1,0 +1,9 @@
+Analyzing content_area.dart...
+
+  error - content_area.dart:398:14 - The named parameter 'controller' is required, but there's no corresponding argument. Try adding the required argument. - missing_required_argument
+  error - content_area.dart:399:9 - The named parameter 'configurations' isn't defined. Try correcting the name to an existing named parameter's name, or defining a named parameter with the name 'configurations'. - undefined_named_parameter
+  error - content_area.dart:399:31 - The name 'QuillEditorConfigurations' isn't a class. Try correcting the name to match an existing class. - creation_with_non_type
+  error - content_area.dart:401:33 - The method 'QuillSharedConfigurations' isn't defined for the type 'ContentArea'. Try correcting the name to the name of an existing method, or defining a method named 'QuillSharedConfigurations'. - undefined_method
+warning - content_area.dart:13:11 - The value of the local variable 'isDesktop' isn't used. Try removing the variable or using it. - unused_local_variable
+
+5 issues found.

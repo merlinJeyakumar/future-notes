@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 import '../viewmodels/content_viewmodel.dart';
 
 class ContentArea extends StatelessWidget {
@@ -64,14 +65,13 @@ class ContentArea extends StatelessWidget {
                       side: const BorderSide(color: Colors.blueAccent),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
-                        vertical: 12, // Match height of ElevatedButton
+                        vertical: 12,
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
                 ],
                 ElevatedButton(
-                  // Call viewModel.saveNote directly
                   onPressed: viewModel.isBusy
                       ? null
                       : () => viewModel.saveNote(),
@@ -105,7 +105,7 @@ class ContentArea extends StatelessWidget {
             ),
           ),
 
-          // Toolbar - Row 2: Tools
+          // Toolbar - Row 2: Custom Tools (Unchanged)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             decoration: const BoxDecoration(
@@ -114,6 +114,7 @@ class ContentArea extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                // Keep existing custom toolbar items (Attach, Lock, Settings)
                 if (!viewModel.isLocked) ...[
                   _buildToolbarIcon(
                     Icons.attach_file,
@@ -134,6 +135,7 @@ class ContentArea extends StatelessWidget {
                             ? 'Remove Password'
                             : 'Set Password'),
                   onPressed: () {
+                    // ... (keep existing logic)
                     if (viewModel.isLocked) {
                       _showPasswordDialog(context, isUnlock: true);
                     } else if (viewModel.isPasswordSet) {
@@ -186,42 +188,48 @@ class ContentArea extends StatelessWidget {
             ),
           ),
 
+          // Toolbar - Row 3: HTML Formatting Bar (Quill)
+          if (!viewModel.isLocked)
+            Container(
+              color: const Color(0xFF0F172A),
+              child: QuillSimpleToolbar(
+                controller: viewModel.quillController,
+                config: const QuillSimpleToolbarConfig(
+                  showFontFamily: false,
+                  showFontSize: true,
+                  showBoldButton: true,
+                  showItalicButton: true,
+                  showUnderLineButton: true,
+                  showStrikeThrough: true,
+                  showInlineCode: true,
+                  showColorButton: true,
+                  showBackgroundColorButton: true,
+                  showClearFormat: true,
+                  showAlignmentButtons: true,
+                  showLeftAlignment: true,
+                  showCenterAlignment: true,
+                  showRightAlignment: true,
+                  showJustifyAlignment: true,
+                  showHeaderStyle: true,
+                  showListNumbers: true,
+                  showListBullets: true,
+                  showListCheck: true,
+                  showCodeBlock: true,
+                  showQuote: true,
+                  showIndent: true,
+                  showLink: true,
+                  showUndo: true,
+                  showRedo: true,
+                  showDirection: false,
+                  showSearchButton: false,
+                  toolbarIconAlignment: WrapAlignment.start,
+                  toolbarSectionSpacing: 4,
+                ),
+              ),
+            ),
+
           // Editor Area
-          Expanded(
-            child: isDesktop
-                ? Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(child: _buildInputArea(context)),
-                      const VerticalDivider(width: 1, color: Color(0xFF334155)),
-                      Expanded(child: _buildPreviewArea(context)),
-                    ],
-                  )
-                : DefaultTabController(
-                    length: 2,
-                    child: Column(
-                      children: [
-                        const TabBar(
-                          tabs: [
-                            Tab(text: 'Edit'),
-                            Tab(text: 'Preview'),
-                          ],
-                          labelColor: Colors.blueAccent,
-                          unselectedLabelColor: Colors.grey,
-                          indicatorColor: Colors.blueAccent,
-                        ),
-                        Expanded(
-                          child: TabBarView(
-                            children: [
-                              _buildInputArea(context),
-                              _buildPreviewArea(context),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-          ),
+          Expanded(child: _buildInputArea(context)),
         ],
       ),
     );
@@ -387,43 +395,9 @@ class ContentArea extends StatelessWidget {
     }
     return Padding(
       padding: const EdgeInsets.all(16.0),
-      child: TextField(
-        controller: viewModel.textController,
-        maxLines: null,
-        expands: true,
-        style: const TextStyle(
-          color: Colors.white,
-          fontFamily: 'monospace',
-          fontSize: 14,
-        ),
-        decoration: const InputDecoration(
-          border: InputBorder.none,
-          hintText: 'Type your note here...',
-          hintStyle: TextStyle(color: Colors.grey),
-        ),
-        onChanged: viewModel.onTextChanged,
-      ),
-    );
-  }
-
-  Widget _buildPreviewArea(BuildContext context) {
-    return Container(
-      color: const Color(0xFF0F172A), // Slightly darker for preview
-      padding: const EdgeInsets.all(16.0),
-      child: SingleChildScrollView(
-        child: ValueListenableBuilder<TextEditingValue>(
-          valueListenable: viewModel.textController,
-          builder: (context, value, _) {
-            return SelectableText(
-              value.text,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 14,
-                fontFamily: 'monospace',
-              ),
-            );
-          },
-        ),
+      child: QuillEditor.basic(
+        controller: viewModel.quillController,
+        config: const QuillEditorConfig(),
       ),
     );
   }

@@ -8,14 +8,16 @@ import '../services/background_service.dart';
 import '../services/encryption_service.dart';
 import '../models/note_model.dart';
 import 'dart:convert';
-
+import 'package:flutter_quill/flutter_quill.dart';
+import 'package:vsc_quill_delta_to_html/vsc_quill_delta_to_html.dart';
+import 'package:flutter_quill_delta_from_html/flutter_quill_delta_from_html.dart';
 import 'package:uuid/uuid.dart';
 
 class ContentViewModel extends BaseViewModel {
   final IFileService _fileService;
   final IEncryptionService _encryptionService;
 
-  final TextEditingController textController = TextEditingController();
+  final QuillController quillController = QuillController.basic();
   final TextEditingController titleController = TextEditingController(
     text: "New Note",
   );
@@ -44,6 +46,11 @@ class ContentViewModel extends BaseViewModel {
        _encryptionService = encryptionService {
     loadRecentFiles();
     _initFileWatcher();
+
+    // Listen to changes for auto-save and title generation
+    quillController.document.changes.listen((change) {
+      onTextChanged();
+    });
   }
 
   void _initFileWatcher() {
@@ -96,13 +103,13 @@ class ContentViewModel extends BaseViewModel {
               _currentPassword = sessionPass;
             } else {
               // Locked state - clear editor
-              textController.text = "";
+              quillController.document = Document();
               _currentPassword = null;
               notifyListeners();
             }
           } else {
-            // Not locked, content is plain
-            textController.text = note.content;
+            // Not locked
+            _loadContentToQuill(note.content);
             _currentPassword = null;
           }
 
@@ -110,11 +117,12 @@ class ContentViewModel extends BaseViewModel {
         } else {
           // Legacy file or bad key
           print("App decryption failed, trying legacy...");
-          textController.text = "Error: Invalid file format.";
+          quillController.document = Document()
+            ..insert(0, "Error: Invalid file format.");
         }
       } catch (e) {
         print("Error loading note: $e");
-        textController.text = "Error loading file.";
+        quillController.document = Document()..insert(0, "Error loading file.");
       }
       notifyListeners();
     }
@@ -148,23 +156,42 @@ class ContentViewModel extends BaseViewModel {
               .replaceAll(RegExp(r'note_\d+_'), '')
         : const Uuid().v4();
 
-    String contentToSave = textController.text;
+    String contentToSave = "";
     bool locked = false;
 
     // If password set, encrypt content with USER PASSWORD
     if (_currentPassword != null) {
+      // For encryption, we need to save the HTML string, then encrypt THAT string.
+      // So 'contentToSave' will be the Encrypted(HTML).
+
+      // First get HTML
+      final delta = quillController.document.toDelta();
+      final converter = QuillDeltaToHtmlConverter(
+        delta.toJson(),
+        ConverterOptions.forEmail(),
+      );
+      final html = converter.convert();
+
       contentToSave = _encryptionService.encrypt(
-        textController.text,
+        html,
         password: _currentPassword,
       );
       locked = true;
+    } else {
+      // Not locked, save raw HTML
+      final delta = quillController.document.toDelta();
+      final converter = QuillDeltaToHtmlConverter(
+        delta.toJson(),
+        ConverterOptions.forEmail(),
+      );
+      contentToSave = converter.convert();
     }
 
     // Create NoteModel
     final note = NoteModel(
       id: uuid,
       title: (titleController.text.trim().length < 40)
-          ? _generateTitleFromContent(textController.text)
+          ? _generateTitleFromContent(quillController.document.toPlainText())
           : titleController.text,
       content: contentToSave,
       isLocked: locked,
@@ -222,13 +249,35 @@ class ContentViewModel extends BaseViewModel {
       password: password,
     );
     if (decrypted.startsWith("Error decrypting:")) {
-      textController.text = "Incorrect Password";
+      quillController.document = Document()..insert(0, "Incorrect Password");
       _sessionPasswords.remove(_currentFileName); // Invalid pass
       _isLocked = true;
     } else {
-      textController.text = decrypted;
+      _loadContentToQuill(decrypted);
       _isLocked = false;
     }
+  }
+
+  void _loadContentToQuill(String content) {
+    // content is either HTML (if previously saved with new editor) or Plain Text (old notes)
+    // Simple heuristic: check for HTML tags
+    // Or just try to parse with HtmlToDelta
+
+    try {
+      if (content.trim().startsWith('<')) {
+        final delta = HtmlToDelta().convert(content);
+        quillController.document = Document.fromDelta(delta);
+      } else {
+        // Plain text
+        quillController.document = Document()..insert(0, content);
+      }
+    } catch (e) {
+      // Fallback
+      quillController.document = Document()..insert(0, content);
+    }
+
+    // Move cursor to end
+    quillController.moveCursorToPosition(quillController.document.length);
   }
 
   void manualLock() {
@@ -236,7 +285,7 @@ class ContentViewModel extends BaseViewModel {
       _sessionPasswords.remove(_currentFileName);
       _currentPassword = null;
       _isLocked = true;
-      textController.clear();
+      quillController.document = Document();
       notifyListeners();
     }
   }
@@ -245,7 +294,7 @@ class ContentViewModel extends BaseViewModel {
     _currentFileName = null;
     _currentPassword = null;
     _isLocked = false;
-    textController.clear();
+    quillController.document = Document();
     titleController.text = "New Note";
     notifyListeners();
   }
@@ -255,13 +304,14 @@ class ContentViewModel extends BaseViewModel {
     _autoSaveTimer?.cancel();
     _debounceTimer?.cancel();
     _fileWatcherSubscription?.cancel();
-    textController.dispose();
+    quillController.dispose();
     titleController.dispose();
     _backgroundService.dispose();
     super.dispose();
   }
 
-  void onTextChanged(String text) {
+  void onTextChanged() {
+    String text = quillController.document.toPlainText();
     if (titleController.text.trim().length < 40) {
       final generatedTitle = _generateTitleFromContent(text);
       if (generatedTitle != "New Note") {
@@ -360,24 +410,21 @@ class ContentViewModel extends BaseViewModel {
   }
 
   void _insertText(String text) {
-    final textSelection = textController.selection;
-    if (textSelection.isValid) {
-      final newText = textController.text.replaceRange(
-        textSelection.start,
-        textSelection.end,
+    // We don't support simple insertText for attachments in Quill easily without Delta
+    // But we can just insert text at selection
+    final index = quillController.selection.baseOffset;
+    final length = quillController.selection.extentOffset - index;
+    // Replace logic?
+    // Just insert
+    if (index >= 0) {
+      quillController.document.replace(index, length, text);
+    } else {
+      quillController.document.insert(
+        quillController.document.length - 1,
         text,
       );
-      final newSelection = textSelection.copyWith(
-        baseOffset: textSelection.start + text.length,
-        extentOffset: textSelection.start + text.length,
-      );
-      textController.value = TextEditingValue(
-        text: newText,
-        selection: newSelection,
-      );
-    } else {
-      textController.text += text;
     }
+
     notifyListeners();
     _scheduleAutoSave();
   }

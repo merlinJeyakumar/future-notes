@@ -39,6 +39,7 @@ class ContentViewModel extends BaseViewModel {
 
   bool get isPasswordSet => _currentPassword != null;
 
+  // region Initialization
   ContentViewModel({
     required IFileService fileService,
     required IEncryptionService encryptionService,
@@ -69,7 +70,9 @@ class ContentViewModel extends BaseViewModel {
       });
     });
   }
+  // endregion
 
+  // region File Loading
   Future<void> loadRecentFiles() async {
     final path = await _fileService.getUserDataPath();
     if (path.isNotEmpty) {
@@ -128,7 +131,9 @@ class ContentViewModel extends BaseViewModel {
     }
     setBusy(false);
   }
+  // endregion
 
+  // region Password & Locking
   void setPassword(String password) {
     _currentPassword = password;
     notifyListeners();
@@ -144,6 +149,44 @@ class ContentViewModel extends BaseViewModel {
     _scheduleAutoSave();
   }
 
+  void unlockNote(String password) {
+    // Re-read logic or just store `_tempEncryptedContent`?
+    // To be safe, we should reload/re-decrypt using the password.
+    // However, we don't hold the encrypted content in memory here optimally.
+    // Let's reload the file to be safe and clean.
+    if (_currentFileName != null) {
+      _sessionPasswords[_currentFileName!] = password;
+      loadNote(_currentFileName!);
+    }
+  }
+
+  void _unlockContent(String encryptedContent, String password) {
+    final decrypted = _encryptionService.decrypt(
+      encryptedContent,
+      password: password,
+    );
+    if (decrypted.startsWith("Error decrypting:")) {
+      quillController.document = Document()..insert(0, "Incorrect Password");
+      _sessionPasswords.remove(_currentFileName); // Invalid pass
+      _isLocked = true;
+    } else {
+      _loadContentToQuill(decrypted);
+      _isLocked = false;
+    }
+  }
+
+  void manualLock() {
+    if (_currentFileName != null) {
+      _sessionPasswords.remove(_currentFileName);
+      _currentPassword = null;
+      _isLocked = true;
+      quillController.document = Document();
+      notifyListeners();
+    }
+  }
+  // endregion
+
+  // region Saving
   Future<void> saveNote({bool isAutoSave = false}) async {
     if (!isAutoSave) setBusy(true);
 
@@ -231,107 +274,9 @@ class ContentViewModel extends BaseViewModel {
     }
     await loadRecentFiles();
   }
+  // endregion
 
-  void unlockNote(String password) {
-    // Re-read logic or just store `_tempEncryptedContent`?
-    // To be safe, we should reload/re-decrypt using the password.
-    // However, we don't hold the encrypted content in memory here optimally.
-    // Let's reload the file to be safe and clean.
-    if (_currentFileName != null) {
-      _sessionPasswords[_currentFileName!] = password;
-      loadNote(_currentFileName!);
-    }
-  }
-
-  void _unlockContent(String encryptedContent, String password) {
-    final decrypted = _encryptionService.decrypt(
-      encryptedContent,
-      password: password,
-    );
-    if (decrypted.startsWith("Error decrypting:")) {
-      quillController.document = Document()..insert(0, "Incorrect Password");
-      _sessionPasswords.remove(_currentFileName); // Invalid pass
-      _isLocked = true;
-    } else {
-      _loadContentToQuill(decrypted);
-      _isLocked = false;
-    }
-  }
-
-  void _loadContentToQuill(String content) {
-    // content is either HTML (if previously saved with new editor) or Plain Text (old notes)
-    // Simple heuristic: check for HTML tags
-    // Or just try to parse with HtmlToDelta
-
-    try {
-      if (content.trim().startsWith('<')) {
-        final delta = HtmlToDelta().convert(content);
-        quillController.document = Document.fromDelta(delta);
-      } else {
-        // Plain text
-        quillController.document = Document()..insert(0, content);
-      }
-    } catch (e) {
-      // Fallback
-      quillController.document = Document()..insert(0, content);
-    }
-
-    // Move cursor to end
-    quillController.moveCursorToPosition(quillController.document.length);
-  }
-
-  void manualLock() {
-    if (_currentFileName != null) {
-      _sessionPasswords.remove(_currentFileName);
-      _currentPassword = null;
-      _isLocked = true;
-      quillController.document = Document();
-      notifyListeners();
-    }
-  }
-
-  void reset() {
-    _currentFileName = null;
-    _currentPassword = null;
-    _isLocked = false;
-    quillController.document = Document();
-    titleController.text = "New Note";
-    notifyListeners();
-  }
-
-  @override
-  void dispose() {
-    _autoSaveTimer?.cancel();
-    _debounceTimer?.cancel();
-    _fileWatcherSubscription?.cancel();
-    quillController.dispose();
-    titleController.dispose();
-    _backgroundService.dispose();
-    super.dispose();
-  }
-
-  void onTextChanged() {
-    String text = quillController.document.toPlainText();
-    if (titleController.text.trim().length < 40) {
-      final generatedTitle = _generateTitleFromContent(text);
-      if (generatedTitle != "New Note") {
-        titleController.text = generatedTitle;
-      }
-    }
-
-    // notifyListeners(); // Removed for performance optimization - typing no longer triggers full UI rebuild
-    _scheduleAutoSave();
-  }
-
-  void _scheduleAutoSave() {
-    if (_currentFileName != null || isPasswordSet) {
-      _autoSaveTimer?.cancel();
-      _autoSaveTimer = Timer(const Duration(seconds: 2), () {
-        saveNote(isAutoSave: true);
-      });
-    }
-  }
-
+  // region Import & Export
   Future<void> pickFile() async {
     final result = await _fileService.pickFile();
     if (result != null) {
@@ -408,6 +353,30 @@ class ContentViewModel extends BaseViewModel {
       await loadRecentFiles();
     }
   }
+  // endregion
+
+  // region Helpers
+  void _loadContentToQuill(String content) {
+    // content is either HTML (if previously saved with new editor) or Plain Text (old notes)
+    // Simple heuristic: check for HTML tags
+    // Or just try to parse with HtmlToDelta
+
+    try {
+      if (content.trim().startsWith('<')) {
+        final delta = HtmlToDelta().convert(content);
+        quillController.document = Document.fromDelta(delta);
+      } else {
+        // Plain text
+        quillController.document = Document()..insert(0, content);
+      }
+    } catch (e) {
+      // Fallback
+      quillController.document = Document()..insert(0, content);
+    }
+
+    // Move cursor to end
+    quillController.moveCursorToPosition(quillController.document.length);
+  }
 
   void _insertText(String text) {
     // We don't support simple insertText for attachments in Quill easily without Delta
@@ -427,6 +396,50 @@ class ContentViewModel extends BaseViewModel {
 
     notifyListeners();
     _scheduleAutoSave();
+  }
+
+  void reset() {
+    _currentFileName = null;
+    _currentPassword = null;
+    _isLocked = false;
+    quillController.document = Document();
+    titleController.text = "New Note";
+    notifyListeners();
+  }
+
+  // region Lifecycle
+  @override
+  void dispose() {
+    _autoSaveTimer?.cancel();
+    _debounceTimer?.cancel();
+    _fileWatcherSubscription?.cancel();
+    quillController.dispose();
+    titleController.dispose();
+    _backgroundService.dispose();
+    super.dispose();
+  }
+  // endregion
+
+  void onTextChanged() {
+    String text = quillController.document.toPlainText();
+    if (titleController.text.trim().length < 40) {
+      final generatedTitle = _generateTitleFromContent(text);
+      if (generatedTitle != "New Note") {
+        titleController.text = generatedTitle;
+      }
+    }
+
+    // notifyListeners(); // Removed for performance optimization - typing no longer triggers full UI rebuild
+    _scheduleAutoSave();
+  }
+
+  void _scheduleAutoSave() {
+    if (_currentFileName != null || isPasswordSet) {
+      _autoSaveTimer?.cancel();
+      _autoSaveTimer = Timer(const Duration(seconds: 2), () {
+        saveNote(isAutoSave: true);
+      });
+    }
   }
 
   String _generateTitleFromContent(String content) {
@@ -465,6 +478,8 @@ class ContentViewModel extends BaseViewModel {
     line = line.replaceAll(RegExp(r'^\s*\d+\.\s*'), '');
     return line.trim();
   }
+
+  // endregion
 }
 
 class ImportVerificationResult {

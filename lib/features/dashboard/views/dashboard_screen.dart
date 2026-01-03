@@ -7,6 +7,7 @@ import '../viewmodels/content_viewmodel.dart';
 import '../services/file_service.dart';
 import '../services/encryption_service.dart';
 import '../models/note_model.dart';
+import '../widgets/import_confirmation_dialog.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -82,54 +83,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // Show confirmation dialog
       final shouldImport = await showDialog<bool>(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text("Import File"),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text("File: ${file.name}"),
-              const SizedBox(height: 8),
-              Text(
-                "Type: ${verification.message}",
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              if (verification.previewInfo != null) ...[
-                const SizedBox(height: 12),
-                const Text(
-                  "Preview Details:",
-                  style: TextStyle(color: Colors.grey),
-                ),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    verification.previewInfo!,
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 12,
-                      color: Colors.black87,
-                    ),
-                    maxLines: 5,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text("Cancel"),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text("Import"),
-            ),
-          ],
+        builder: (context) => ImportConfirmationDialog(
+          fileName: file.name,
+          fileType: verification.message,
+          previewInfo: verification.previewInfo,
         ),
       );
 

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import '../../../core/viewmodels/base_viewmodel.dart';
 import '../services/file_service.dart';
+import '../services/background_service.dart';
 import '../services/encryption_service.dart';
 import '../models/note_model.dart';
 import 'dart:convert';
@@ -24,6 +25,7 @@ class ContentViewModel extends BaseViewModel {
   Timer? _autoSaveTimer;
   Timer? _debounceTimer; // For file watching
   StreamSubscription? _fileWatcherSubscription;
+  final BackgroundService _backgroundService = BackgroundService();
   List<RecentFile> _recentFiles = [];
 
   final Map<String, String> _sessionPasswords = {};
@@ -45,6 +47,13 @@ class ContentViewModel extends BaseViewModel {
   }
 
   void _initFileWatcher() {
+    _backgroundService.init();
+    _backgroundService.recentFilesStream.listen((files) {
+      _recentFiles = files;
+      notifyListeners();
+      setBusy(false);
+    });
+
     _fileWatcherSubscription = _fileService.watchRecentFiles().listen((_) {
       // Debounce reload
       if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
@@ -55,78 +64,10 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<void> loadRecentFiles() async {
-    final files = await _fileService.getRecentFiles();
-    List<RecentFile> loadedFiles = [];
-
-    for (final file in files) {
-      String displayTitle = file;
-      bool isLocked = false;
-      DateTime? created; // From note timestamp
-      DateTime? modified;
-      int? sizeBytes;
-
-      try {
-        final content = await _fileService.readFile(file);
-        final stats = await _fileService.getFileStats(file);
-
-        if (stats != null) {
-          modified = stats.modified;
-          sizeBytes = stats.size;
-        }
-
-        if (content != null) {
-          final appDecrypted = _encryptionService.decryptApp(content);
-          if (appDecrypted.isNotEmpty) {
-            final jsonMap = json.decode(appDecrypted);
-            final note = NoteModel.fromJson(jsonMap);
-            // Use the title from the note if available and not default "New Note" (unless that's what user wants)
-            if (note.title.isNotEmpty) {
-              displayTitle = note.title;
-            }
-            isLocked = note.isLocked;
-            created = DateTime.fromMillisecondsSinceEpoch(note.timestamp);
-          }
-
-          // Approximate size from content string length relative to bytes?
-          // Not accurate for encrypted/binary, but okay-ish.
-          // Better: just leave modified/size null if too hard without path.
-          // The user really wants details.
-          // Let's rely on the service later or just leave null for now if I can't easily get File object.
-          // Wait, `_fileService.readFile` reads from `UserData/$file`.
-          // I can't easily get `File` stats without the directory.
-          // I will skip 'modified' and 'size' implementation in this ViewModel loop for now
-          // to avoid breaking clean architecture or duplicate path logic.
-          // I will focus on `isLocked` (critical) and `created` (from note).
-          // I will try to implement `deleteNote` next.
-        }
-      } catch (e) {
-        print("Error reading title for $file: $e");
-      }
-      final fullPath = await _fileService.getFullPath(file);
-
-      loadedFiles.add(
-        RecentFile(
-          path: file,
-          fullPath: fullPath,
-          title: displayTitle,
-          isLocked: isLocked,
-          created: created,
-          modified: modified,
-          sizeBytes: sizeBytes,
-        ),
-      );
+    final path = await _fileService.getUserDataPath();
+    if (path.isNotEmpty) {
+      _backgroundService.loadRecentFiles(path);
     }
-
-    // Sort by modified date descending (newest first)
-    loadedFiles.sort((a, b) {
-      if (a.modified == null && b.modified == null) return 0;
-      if (a.modified == null) return 1; // Nulls last
-      if (b.modified == null) return -1;
-      return b.modified!.compareTo(a.modified!);
-    });
-
-    _recentFiles = loadedFiles;
-    notifyListeners();
   }
 
   Future<void> loadNote(String fileName) async {
@@ -316,6 +257,7 @@ class ContentViewModel extends BaseViewModel {
     _fileWatcherSubscription?.cancel();
     textController.dispose();
     titleController.dispose();
+    _backgroundService.dispose();
     super.dispose();
   }
 

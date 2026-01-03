@@ -15,6 +15,7 @@ abstract class IFileService {
   Future<String> getFullPath(String fileName);
   Future<String?> importFile(PlatformFile file);
   Stream<void> watchRecentFiles();
+  Future<String> getUserDataPath();
 }
 
 class FileService implements IFileService {
@@ -168,5 +169,16 @@ class FileService implements IFileService {
       print("Error importing file: $e");
     }
     return null;
+  }
+
+  @override
+  Future<String> getUserDataPath() async {
+    if (kIsWeb) return '';
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      return '${directory.path}/UserData';
+    } catch (e) {
+      return '';
+    }
   }
 }

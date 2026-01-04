@@ -21,6 +21,8 @@ class ContentViewModel extends BaseViewModel {
   final TextEditingController titleController = TextEditingController(
     text: "New Note",
   );
+  final FocusNode focusNode = FocusNode();
+  final ScrollController scrollController = ScrollController();
 
   String? _currentPassword;
   String? _currentFileName;
@@ -443,6 +445,8 @@ class ContentViewModel extends BaseViewModel {
     _fileWatcherSubscription?.cancel();
     quillController.dispose();
     titleController.dispose();
+    focusNode.dispose();
+    scrollController.dispose();
     _backgroundService.dispose();
     super.dispose();
   }

@@ -253,7 +253,16 @@ class ContentArea extends StatelessWidget {
       padding: const EdgeInsets.all(16.0),
       child: QuillEditor.basic(
         controller: viewModel.quillController,
-        config: const QuillEditorConfig(),
+        config: QuillEditorConfig(
+          autoFocus: false,
+          scrollable: true,
+          expands: false,
+          padding: EdgeInsets.zero,
+          keyboardAppearance: Brightness.dark,
+        ),
+        focusNode: viewModel.focusNode, // Check if this is valid here
+        scrollController:
+            viewModel.scrollController, // Check if this is valid here
       ),
     );
   }

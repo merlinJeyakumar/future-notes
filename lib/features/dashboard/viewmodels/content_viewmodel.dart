@@ -26,6 +26,7 @@ class ContentViewModel extends BaseViewModel {
   String? _currentFileName;
   Timer? _autoSaveTimer;
   Timer? _debounceTimer; // For file watching
+  Timer? _titleUpdateTimer; // For optimizing typing performance
   StreamSubscription? _fileWatcherSubscription;
   final BackgroundService _backgroundService = BackgroundService();
   List<RecentFile> _recentFiles = [];
@@ -438,6 +439,7 @@ class ContentViewModel extends BaseViewModel {
   void dispose() {
     _autoSaveTimer?.cancel();
     _debounceTimer?.cancel();
+    _titleUpdateTimer?.cancel();
     _fileWatcherSubscription?.cancel();
     quillController.dispose();
     titleController.dispose();
@@ -447,15 +449,27 @@ class ContentViewModel extends BaseViewModel {
   // endregion
 
   void onTextChanged() {
-    String text = quillController.document.toPlainText();
-    if (titleController.text.trim().length < 40) {
-      final generatedTitle = _generateTitleFromContent(text);
-      if (generatedTitle != "New Note") {
-        titleController.text = generatedTitle;
+    // Optimization: Debounce title generation to avoid heavy toPlainText() calls on every keystroke
+    _titleUpdateTimer?.cancel();
+    _titleUpdateTimer = Timer(const Duration(milliseconds: 800), () {
+      try {
+        String text = quillController.document.toPlainText();
+        // Only auto-update title if it's the default or short (likely same as default logic)
+        // Adjust the condition to be less aggressive if needed
+        if (titleController.text.trim().length < 40 ||
+            titleController.text == "New Note") {
+          final generatedTitle = _generateTitleFromContent(text);
+          if (generatedTitle != "New Note" &&
+              generatedTitle != titleController.text) {
+            titleController.text = generatedTitle;
+          }
+        }
+      } catch (e) {
+        // Handle potential errors during text processing
+        print("Error updating title: $e");
       }
-    }
+    });
 
-    // notifyListeners(); // Removed for performance optimization - typing no longer triggers full UI rebuild
     _scheduleAutoSave();
   }
 

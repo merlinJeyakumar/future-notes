@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'features/dashboard/views/dashboard_screen.dart';
 
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -13,6 +14,16 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Ensure status bar icons are light (white) for the dark theme
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor:
+            Colors.transparent, // Transparent to let app bar/color show through
+        statusBarIconBrightness: Brightness.light, // White icons
+        statusBarBrightness: Brightness.dark, // For iOS
+      ),
+    );
+
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Deployment Dashboard',

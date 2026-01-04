@@ -22,71 +22,89 @@ class ContentArea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: _DesignColors.background,
-      child: Column(
-        children: [
-          // Top Strip - Clean breadcrumb + secondary actions
-          _buildTopStrip(context),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Use a higher breakpoint to trigger "Mobile/Compact" mode earlier,
+        // preventing overflow on smaller tablets or when Sidebar is open on desktop.
+        final isMobile = constraints.maxWidth < 900;
 
-          // Floating Toolbar Island (only when not locked)
-          if (!viewModel.isLocked) _buildFloatingToolbar(),
+        return Container(
+          color: _DesignColors.background,
+          child: SafeArea(
+            // Ensure status bar doesn't overlap
+            child: Column(
+              children: [
+                // Top Strip - Clean breadcrumb + secondary actions
+                _buildTopStrip(context, isMobile),
 
-          // Spacious Editor Area
-          Expanded(child: _buildInputArea(context)),
-        ],
-      ),
+                // Floating Toolbar Island (only when not locked)
+                if (!viewModel.isLocked) _buildFloatingToolbar(isMobile),
+
+                // Spacious Editor Area
+                Expanded(child: _buildInputArea(context)),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
   /// Clean, minimal top strip with breadcrumb and secondary actions
-  Widget _buildTopStrip(BuildContext context) {
+  Widget _buildTopStrip(BuildContext context, bool isMobile) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 12 : 20,
+        vertical: 12,
+      ),
+      // Clip hard edge to prevent pixel overflow if content is slightly too wide
+      clipBehavior: Clip.hardEdge,
+      decoration: const BoxDecoration(),
       child: Row(
         children: [
           // Breadcrumb-style indicator
-          _buildBreadcrumb(),
+          Expanded(child: _buildBreadcrumb(isMobile)),
 
-          const Spacer(),
+          if (!isMobile) const Spacer(),
 
           // Secondary actions (right side)
           _buildSecondaryActions(context),
 
-          const SizedBox(width: 16),
+          SizedBox(width: isMobile ? 8 : 16),
 
           // Save Button - Prominent pill style
-          _buildSaveButton(),
+          _buildSaveButton(isMobile),
         ],
       ),
     );
   }
 
   /// Breadcrumb indicator: "Editing > [title]"
-  Widget _buildBreadcrumb() {
+  Widget _buildBreadcrumb(bool isMobile) {
     return Row(
-      mainAxisSize: MainAxisSize.min,
+      // mainAxisSize.min removed to allow Expanded child to work naturally
       children: [
         Icon(Icons.edit_note_rounded, size: 18, color: _DesignColors.accent),
         const SizedBox(width: 8),
-        const Text(
-          'Editing',
-          style: TextStyle(
-            color: _DesignColors.subtleGray,
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
+        if (!isMobile) ...[
+          const Text(
+            'Editing',
+            style: TextStyle(
+              color: _DesignColors.subtleGray,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
           ),
-        ),
-        const SizedBox(width: 6),
-        Icon(
-          Icons.chevron_right_rounded,
-          size: 16,
-          color: _DesignColors.subtleGray.withOpacity(0.6),
-        ),
-        const SizedBox(width: 6),
+          const SizedBox(width: 6),
+          Icon(
+            Icons.chevron_right_rounded,
+            size: 16,
+            color: _DesignColors.subtleGray.withOpacity(0.6),
+          ),
+          const SizedBox(width: 6),
+        ],
         // Editable title
-        SizedBox(
-          width: 200,
+        Expanded(
           child: TextField(
             controller: viewModel.titleController,
             style: const TextStyle(
@@ -170,15 +188,17 @@ class ContentArea extends StatelessWidget {
   }
 
   /// Prominent pill-shaped Save button
-  Widget _buildSaveButton() {
+  Widget _buildSaveButton(bool isMobile) {
     return ElevatedButton(
       onPressed: viewModel.isBusy ? null : () => viewModel.saveNote(),
       style: ElevatedButton.styleFrom(
         backgroundColor: _DesignColors.saveButton,
         foregroundColor: Colors.white,
         disabledBackgroundColor: _DesignColors.saveButton.withOpacity(0.5),
-        shape: const StadiumBorder(),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        shape: isMobile ? const CircleBorder() : const StadiumBorder(),
+        padding: isMobile
+            ? const EdgeInsets.all(12)
+            : const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
         elevation: 0,
       ),
       child: viewModel.isBusy
@@ -190,17 +210,19 @@ class ContentArea extends StatelessWidget {
                 color: Colors.white,
               ),
             )
-          : const Text(
-              'Save Note',
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-            ),
+          : (isMobile
+                ? const Icon(Icons.save_rounded, size: 18)
+                : const Text(
+                    'Save Note',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  )),
     );
   }
 
-  /// Floating toolbar "island" with two rows of grouped formatting tools
-  Widget _buildFloatingToolbar() {
+  /// Floating toolbar "island" with grouped formatting tools
+  Widget _buildFloatingToolbar(bool isMobile) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      margin: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 20, vertical: 8),
       decoration: BoxDecoration(
         color: _DesignColors.toolbarIsland,
         borderRadius: BorderRadius.circular(12),
@@ -216,27 +238,42 @@ class ContentArea extends StatelessWidget {
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Row 1: Undo/Redo, Font Size, Text Styling, Alignment, Header dropdown
-            _buildToolbarRow1(),
-            Divider(color: _DesignColors.divider.withOpacity(0.3), height: 1),
-            // Row 2: Lists, Code, Quote, Indent, Link, + "Normal" button on right
-            _buildToolbarRow2(),
-          ],
+      // Always allow horizontal scroll to prevent overflow, even on larger screens if constrained
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: isMobile
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildToolbarRow1(),
+                    _buildVerticalDivider(),
+                    _buildToolbarRow2(),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildToolbarRow1(),
+                    Divider(
+                      color: _DesignColors.divider.withOpacity(0.3),
+                      height: 1,
+                    ),
+                    _buildToolbarRow2(),
+                  ],
+                ),
         ),
       ),
     );
   }
 
-  /// Row 1: Undo/Redo | Font Size | Bold, Italic, Underline, Strike, Code | Colors, Clear | Alignment | Header
   Widget _buildToolbarRow1() {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           // Undo/Redo
           QuillToolbarHistoryButton(
@@ -350,9 +387,7 @@ class ContentArea extends StatelessWidget {
           ),
           _buildVerticalDivider(),
 
-          const Spacer(),
-
-          // Header dropdown (right side)
+          // Header dropdown
           QuillToolbarSelectHeaderStyleDropdownButton(
             controller: viewModel.quillController,
             options: QuillToolbarSelectHeaderStyleDropdownButtonOptions(
@@ -364,11 +399,11 @@ class ContentArea extends StatelessWidget {
     );
   }
 
-  /// Row 2: Lists | Code Block, Quote | Indent | Link on left, "Normal" button on right
   Widget _buildToolbarRow2() {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           // Ordered list, Bullet list, Checkbox
           QuillToolbarToggleStyleButton(
@@ -430,16 +465,18 @@ class ContentArea extends StatelessWidget {
             ),
           ),
 
-          const Spacer(),
+          // For mobile we might want a spacer, for desktop we often want it pushed right
+          // Using SizedBox(width: 8) instead of Spacer() in this row to work within SingleChildScrollView if needed
+          const SizedBox(width: 16),
 
-          // "Normal" button (right side)
+          // "Normal" button
           _buildNormalButton(),
         ],
       ),
     );
   }
 
-  /// "Normal" pill button for the right side
+  /// "Normal" pill button
   Widget _buildNormalButton() {
     return Container(
       decoration: BoxDecoration(
@@ -451,9 +488,7 @@ class ContentArea extends StatelessWidget {
         child: InkWell(
           onTap: () {
             // Clear all header styles, reset to normal
-            viewModel.quillController.formatSelection(
-              Attribute.clone(Attribute.header, null),
-            );
+            viewModel.quillController.formatSelection(Attribute.header);
           },
           borderRadius: BorderRadius.circular(16),
           child: const Padding(

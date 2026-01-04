@@ -493,8 +493,17 @@ class ContentArea extends StatelessWidget {
     return QuillIconTheme(
       iconButtonUnselectedData: IconButtonData(
         color: _DesignColors.textSecondary,
+        iconSize: 18,
       ),
-      iconButtonSelectedData: IconButtonData(color: _DesignColors.accent),
+      iconButtonSelectedData: IconButtonData(
+        color: _DesignColors.accent,
+        iconSize: 18,
+        style: ButtonStyle(
+          backgroundColor: WidgetStateProperty.all(
+            _DesignColors.accent.withOpacity(0.15),
+          ),
+        ),
+      ),
     );
   }
 

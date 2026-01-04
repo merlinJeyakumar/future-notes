@@ -197,7 +197,7 @@ class ContentArea extends StatelessWidget {
     );
   }
 
-  /// Floating toolbar "island" with grouped formatting tools
+  /// Floating toolbar "island" with two rows of grouped formatting tools
   Widget _buildFloatingToolbar() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -216,56 +216,285 @@ class ContentArea extends StatelessWidget {
           ),
         ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: QuillSimpleToolbar(
-          controller: viewModel.quillController,
-          config: QuillSimpleToolbarConfig(
-            showFontFamily: false,
-            showFontSize: true,
-            showBoldButton: true,
-            showItalicButton: true,
-            showUnderLineButton: true,
-            showStrikeThrough: true,
-            showInlineCode: true,
-            showColorButton: true,
-            showBackgroundColorButton: true,
-            showClearFormat: true,
-            showAlignmentButtons: true,
-            showLeftAlignment: true,
-            showCenterAlignment: true,
-            showRightAlignment: true,
-            showJustifyAlignment: true,
-            showHeaderStyle: true,
-            showListNumbers: true,
-            showListBullets: true,
-            showListCheck: true,
-            showCodeBlock: true,
-            showQuote: true,
-            showIndent: true,
-            showLink: true,
-            showUndo: true,
-            showRedo: true,
-            showDirection: false,
-            showSearchButton: false,
-            toolbarIconAlignment: WrapAlignment.center,
-            toolbarSectionSpacing: 8,
-            sectionDividerColor: _DesignColors.divider.withOpacity(0.4),
-            buttonOptions: QuillSimpleToolbarButtonOptions(
-              base: QuillToolbarBaseButtonOptions(
-                iconTheme: QuillIconTheme(
-                  iconButtonUnselectedData: IconButtonData(
-                    color: _DesignColors.textSecondary,
-                  ),
-                  iconButtonSelectedData: IconButtonData(
-                    color: _DesignColors.accent,
-                  ),
-                ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Row 1: Undo/Redo, Font Size, Text Styling, Alignment, Header dropdown
+            _buildToolbarRow1(),
+            Divider(color: _DesignColors.divider.withOpacity(0.3), height: 1),
+            // Row 2: Lists, Code, Quote, Indent, Link, + "Normal" button on right
+            _buildToolbarRow2(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Row 1: Undo/Redo | Font Size | Bold, Italic, Underline, Strike, Code | Colors, Clear | Alignment | Header
+  Widget _buildToolbarRow1() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          // Undo/Redo
+          QuillToolbarHistoryButton(
+            controller: viewModel.quillController,
+            isUndo: true,
+            options: QuillToolbarHistoryButtonOptions(
+              iconTheme: _getIconTheme(),
+            ),
+          ),
+          QuillToolbarHistoryButton(
+            controller: viewModel.quillController,
+            isUndo: false,
+            options: QuillToolbarHistoryButtonOptions(
+              iconTheme: _getIconTheme(),
+            ),
+          ),
+          _buildVerticalDivider(),
+
+          // Font Size dropdown
+          QuillToolbarFontSizeButton(
+            controller: viewModel.quillController,
+            options: QuillToolbarFontSizeButtonOptions(
+              style: TextStyle(
+                color: _DesignColors.textSecondary,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          _buildVerticalDivider(),
+
+          // Text Styling: Bold, Italic, Underline, Strike, Inline Code
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.bold,
+            options: _getButtonOptions(),
+          ),
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.italic,
+            options: _getButtonOptions(),
+          ),
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.underline,
+            options: _getButtonOptions(),
+          ),
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.strikeThrough,
+            options: _getButtonOptions(),
+          ),
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.inlineCode,
+            options: _getButtonOptions(),
+          ),
+          _buildVerticalDivider(),
+
+          // Subscript, Superscript
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.subscript,
+            options: _getButtonOptions(),
+          ),
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.superscript,
+            options: _getButtonOptions(),
+          ),
+          _buildVerticalDivider(),
+
+          // Color buttons
+          QuillToolbarColorButton(
+            controller: viewModel.quillController,
+            isBackground: false,
+            options: _getColorButtonOptions(),
+          ),
+          QuillToolbarColorButton(
+            controller: viewModel.quillController,
+            isBackground: true,
+            options: _getColorButtonOptions(),
+          ),
+          QuillToolbarClearFormatButton(
+            controller: viewModel.quillController,
+            options: QuillToolbarClearFormatButtonOptions(
+              iconTheme: _getIconTheme(),
+            ),
+          ),
+          _buildVerticalDivider(),
+
+          // Alignment
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.leftAlignment,
+            options: _getButtonOptions(),
+          ),
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.centerAlignment,
+            options: _getButtonOptions(),
+          ),
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.rightAlignment,
+            options: _getButtonOptions(),
+          ),
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.justifyAlignment,
+            options: _getButtonOptions(),
+          ),
+          _buildVerticalDivider(),
+
+          const Spacer(),
+
+          // Header dropdown (right side)
+          QuillToolbarSelectHeaderStyleDropdownButton(
+            controller: viewModel.quillController,
+            options: QuillToolbarSelectHeaderStyleDropdownButtonOptions(
+              textStyle: TextStyle(color: _DesignColors.textSecondary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Row 2: Lists | Code Block, Quote | Indent | Link on left, "Normal" button on right
+  Widget _buildToolbarRow2() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          // Ordered list, Bullet list, Checkbox
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.ol,
+            options: _getButtonOptions(),
+          ),
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.ul,
+            options: _getButtonOptions(),
+          ),
+          QuillToolbarToggleCheckListButton(
+            controller: viewModel.quillController,
+            options: QuillToolbarToggleCheckListButtonOptions(
+              iconTheme: _getIconTheme(),
+            ),
+          ),
+          _buildVerticalDivider(),
+
+          // Code Block
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.codeBlock,
+            options: _getButtonOptions(),
+          ),
+          _buildVerticalDivider(),
+
+          // Quote
+          QuillToolbarToggleStyleButton(
+            controller: viewModel.quillController,
+            attribute: Attribute.blockQuote,
+            options: _getButtonOptions(),
+          ),
+          _buildVerticalDivider(),
+
+          // Indent buttons
+          QuillToolbarIndentButton(
+            controller: viewModel.quillController,
+            isIncrease: true,
+            options: QuillToolbarIndentButtonOptions(
+              iconTheme: _getIconTheme(),
+            ),
+          ),
+          QuillToolbarIndentButton(
+            controller: viewModel.quillController,
+            isIncrease: false,
+            options: QuillToolbarIndentButtonOptions(
+              iconTheme: _getIconTheme(),
+            ),
+          ),
+          _buildVerticalDivider(),
+
+          // Link
+          QuillToolbarLinkStyleButton(
+            controller: viewModel.quillController,
+            options: QuillToolbarLinkStyleButtonOptions(
+              iconTheme: _getIconTheme(),
+            ),
+          ),
+
+          const Spacer(),
+
+          // "Normal" button (right side)
+          _buildNormalButton(),
+        ],
+      ),
+    );
+  }
+
+  /// "Normal" pill button for the right side
+  Widget _buildNormalButton() {
+    return Container(
+      decoration: BoxDecoration(
+        color: _DesignColors.accent,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            // Clear all header styles, reset to normal
+            viewModel.quillController.formatSelection(
+              Attribute.clone(Attribute.header, null),
+            );
+          },
+          borderRadius: BorderRadius.circular(16),
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Text(
+              'Normal',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
               ),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildVerticalDivider() {
+    return Container(
+      height: 20,
+      width: 1,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      color: _DesignColors.divider.withOpacity(0.4),
+    );
+  }
+
+  QuillToolbarToggleStyleButtonOptions _getButtonOptions() {
+    return QuillToolbarToggleStyleButtonOptions(iconTheme: _getIconTheme());
+  }
+
+  QuillToolbarColorButtonOptions _getColorButtonOptions() {
+    return QuillToolbarColorButtonOptions(iconTheme: _getIconTheme());
+  }
+
+  QuillIconTheme _getIconTheme() {
+    return QuillIconTheme(
+      iconButtonUnselectedData: IconButtonData(
+        color: _DesignColors.textSecondary,
+      ),
+      iconButtonSelectedData: IconButtonData(color: _DesignColors.accent),
     );
   }
 

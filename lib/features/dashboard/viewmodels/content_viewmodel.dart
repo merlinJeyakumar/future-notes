@@ -86,50 +86,76 @@ class ContentViewModel extends BaseViewModel {
 
     final content = await _fileService.readFile(fileName);
     if (content != null) {
+      bool loaded = false;
+
+      // 1. Try App Decryption (New format)
       try {
-        // 1. Decrypt with APP SECRET KEY
         final appDecrypted = _encryptionService.decryptApp(content);
 
         if (appDecrypted.isNotEmpty) {
-          // It's a valid JSON note
           final jsonMap = json.decode(appDecrypted);
           final note = NoteModel.fromJson(jsonMap);
-
-          _isLocked = note.isLocked;
-
-          if (note.isLocked) {
-            // Check if we have a session password
-            final sessionPass = _sessionPasswords[fileName];
-            if (sessionPass != null) {
-              // Unlock automatically
-              _unlockContent(note.content, sessionPass);
-              _currentPassword = sessionPass;
-            } else {
-              // Locked state - clear editor
-              quillController.document = Document();
-              _currentPassword = null;
-              notifyListeners();
-            }
-          } else {
-            // Not locked
-            _loadContentToQuill(note.content);
-            _currentPassword = null;
-          }
-
-          titleController.text = note.title;
-        } else {
-          // Legacy file or bad key
-          print("App decryption failed, trying legacy...");
-          quillController.document = Document()
-            ..insert(0, "Error: Invalid file format.");
+          _applyNoteModel(note, fileName);
+          loaded = true;
         }
       } catch (e) {
-        print("Error loading note: $e");
-        quillController.document = Document()..insert(0, "Error loading file.");
+        print("App decryption failed: $e");
       }
+
+      // 2. Try Legacy JSON (Unencrypted old notes)
+      if (!loaded) {
+        try {
+          final jsonMap = json.decode(content);
+          // Simple validation to check if it's a note
+          if (jsonMap is Map<String, dynamic> &&
+              (jsonMap.containsKey('title') ||
+                  jsonMap.containsKey('content'))) {
+            final note = NoteModel.fromJson(jsonMap);
+            _applyNoteModel(note, fileName);
+            loaded = true;
+          }
+        } catch (e) {
+          print("Legacy JSON failed: $e");
+        }
+      }
+
+      // 3. Fallback to Plain Text
+      if (!loaded) {
+        print("Loading as plain text");
+        _loadContentToQuill(content);
+        titleController.text = _generateTitleFromContent(content);
+        _isLocked = false;
+        _currentPassword = null;
+      }
+
       notifyListeners();
     }
     setBusy(false);
+  }
+
+  void _applyNoteModel(NoteModel note, String fileName) {
+    _isLocked = note.isLocked;
+
+    if (note.isLocked) {
+      // Check if we have a session password
+      final sessionPass = _sessionPasswords[fileName];
+      if (sessionPass != null) {
+        // Unlock automatically
+        _unlockContent(note.content, sessionPass);
+        _currentPassword = sessionPass;
+      } else {
+        // Locked state - clear editor
+        quillController.document = Document();
+        _currentPassword = null;
+        notifyListeners();
+      }
+    } else {
+      // Not locked
+      _loadContentToQuill(note.content);
+      _currentPassword = null;
+    }
+
+    titleController.text = note.title;
   }
   // endregion
 

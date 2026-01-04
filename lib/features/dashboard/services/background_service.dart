@@ -53,10 +53,14 @@ void _isolateEntryPoint(SendPort sendPort) {
   receivePort.listen((message) async {
     if (message is _LoadRecentFilesCommand) {
       try {
+        print(
+          "[BackgroundService] Processing files in: ${message.directoryPath}",
+        );
         final files = await _processRecentFiles(
           message.directoryPath,
           encryptionService,
         );
+        print("[BackgroundService] Found ${files.length} files");
         sendPort.send(files);
       } catch (e) {
         sendPort.send("Error processing files: $e");
@@ -73,14 +77,15 @@ Future<List<RecentFile>> _processRecentFiles(
   if (!directory.existsSync()) return [];
 
   final List<FileSystemEntity> entities = directory.listSync();
-  final fileFiles = entities
-      .whereType<File>()
-      .where((e) => e.path.endsWith('.enc'))
-      .toList();
+  final fileFiles = entities.whereType<File>().toList();
 
   List<RecentFile> loadedFiles = [];
 
   for (final file in fileFiles) {
+    // Skip hidden files or system files if needed, e.g. starting with .
+    // But user might want .txt etc.
+    if (file.uri.pathSegments.last.startsWith('.')) continue;
+
     String displayTitle = file.uri.pathSegments.last;
     bool isLocked = false;
     DateTime? created;
@@ -94,20 +99,41 @@ Future<List<RecentFile>> _processRecentFiles(
 
       final content = file.readAsStringSync();
       if (content.isNotEmpty) {
-        final appDecrypted = encryptionService.decryptApp(content);
-        if (appDecrypted.isNotEmpty) {
-          try {
+        // Try App Decryption first (New .enc format)
+        try {
+          final appDecrypted = encryptionService.decryptApp(content);
+          if (appDecrypted.isNotEmpty) {
             final jsonMap = json.decode(appDecrypted);
-            // We can use NoteModel.fromJson but we need to be careful about imports?
-            // NoteModel is in note_model.dart which we imported.
             final note = NoteModel.fromJson(jsonMap);
             if (note.title.isNotEmpty) {
               displayTitle = note.title;
             }
             isLocked = note.isLocked;
             created = DateTime.fromMillisecondsSinceEpoch(note.timestamp);
-          } catch (e) {
-            // Json parse error
+          }
+        } catch (e) {
+          // Not an encrypted app file
+          // Try JSON (Legacy unencrypted)
+          try {
+            final jsonMap = json.decode(content);
+            // Check if it looks like a note
+            if (jsonMap is Map<String, dynamic> &&
+                jsonMap.containsKey('title')) {
+              final note = NoteModel.fromJson(jsonMap);
+              displayTitle = note.title;
+              isLocked = note.isLocked;
+              created = DateTime.fromMillisecondsSinceEpoch(note.timestamp);
+            }
+          } catch (e2) {
+            // Plain text
+            // Use first line as title if possible
+            final lines = content.split('\n');
+            if (lines.isNotEmpty && lines.first.trim().isNotEmpty) {
+              // Limit title length
+              String safeTitle = lines.first.trim();
+              if (safeTitle.length > 50) safeTitle = safeTitle.substring(0, 50);
+              displayTitle = safeTitle;
+            }
           }
         }
       }

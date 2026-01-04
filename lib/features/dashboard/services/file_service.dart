@@ -58,7 +58,7 @@ class FileService implements IFileService {
 
     if (await userDataDir.exists()) {
       yield* userDataDir.watch(events: FileSystemEvent.all).where((event) {
-        return event.path.endsWith('.enc');
+        return !event.path.split(Platform.pathSeparator).last.startsWith('.');
       });
     }
   }
@@ -176,7 +176,12 @@ class FileService implements IFileService {
     if (kIsWeb) return '';
     try {
       final directory = await getApplicationDocumentsDirectory();
-      return '${directory.path}/UserData';
+      final userDataDir = Directory('${directory.path}/UserData');
+      if (!await userDataDir.exists()) {
+        await userDataDir.create(recursive: true);
+        print("Created UserData directory at: ${userDataDir.path}");
+      }
+      return userDataDir.path;
     } catch (e) {
       return '';
     }

@@ -308,18 +308,31 @@ class ContentViewModel extends BaseViewModel {
 
     if (!isAutoSave) await Future.delayed(const Duration(seconds: 1));
 
-    // Determine current ID (if new file, ID is UUID)
-    final uuid = _currentFileName != null
-        ? _currentFileName!
-              .replaceAll('.enc', '')
-              .replaceAll(RegExp(r'note_\d+_'), '')
-        : const Uuid().v4();
+    // Determine ID and Mode (Legacy vs New)
+    String? noteId;
+    bool isLegacy = false;
+
+    if (_currentFileName != null) {
+      if (_currentFileName!.startsWith('note_')) {
+        // New structure: note_<id>
+        noteId = _currentFileName!.replaceFirst('note_', '');
+      } else {
+        // Legacy structure: specific filename
+        isLegacy = true;
+        // ID is technically not in filename for legacy files usually, but we need one for NoteModel
+        // We'll generate one or reuse existing if possible (but we can't extract easily from "MyNote.enc")
+        // We'll generate a transient one for the Model, but file path relies on _currentFileName
+        noteId = const Uuid().v4();
+      }
+    } else {
+      // New Note -> New Structure
+      noteId = const Uuid().v4();
+    }
 
     String contentToSave = "";
     bool locked = false;
 
-    // Get the HTML content, either from HtmlController (if editing HTML)
-    // or by converting Quill Delta
+    // Get the HTML content
     String htmlContent;
     if (_isHtmlMode) {
       htmlContent = htmlController.text;
@@ -332,13 +345,11 @@ class ContentViewModel extends BaseViewModel {
       htmlContent = converter.convert();
     }
 
-    // Check if content is empty (strip HTML tags if needed, or just check length basics)
-    // For a robust check, we look at plain text equivalent.
+    // Check if content is empty
     final plainText = _isHtmlMode
         ? htmlController.text.replaceAll(RegExp(r'<[^>]*>'), '').trim()
         : quillController.document.toPlainText().trim();
 
-    // If new file and empty content, do not save
     if (_currentFileName == null &&
         plainText.isEmpty &&
         titleController.text == "New Note") {
@@ -347,27 +358,22 @@ class ContentViewModel extends BaseViewModel {
       return;
     }
 
-    // If password set, encrypt content with USER PASSWORD
+    // Encrypt
     if (_currentPassword != null) {
-      // For encryption, we need to save the HTML string, then encrypt THAT string.
-      // So 'contentToSave' will be the Encrypted(HTML).
       contentToSave = _encryptionService.encrypt(
         htmlContent,
         password: _currentPassword,
       );
       locked = true;
     } else {
-      // Not locked, save raw HTML
       contentToSave = htmlContent;
     }
 
-    // Create NoteModel
     final note = NoteModel(
-      id: uuid,
+      id: noteId,
       title: (titleController.text.trim().length < 40)
           ? (_isHtmlMode
-                ? titleController
-                      .text // Don't auto-generate from HTML yet to exist perf/complexity
+                ? titleController.text
                 : _generateTitleFromContent(
                     quillController.document.toPlainText(),
                   ))
@@ -377,25 +383,20 @@ class ContentViewModel extends BaseViewModel {
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
 
-    // Convert to JSON
     final jsonString = json.encode(note.toJson());
-
-    // Encrypt JSON with APP SECRET KEY
     final appEncrypted = _encryptionService.encryptApp(jsonString);
 
-    if (_currentFileName == null) {
-      final timestamp = note.timestamp;
-      _currentFileName = 'note_${timestamp}_$uuid.enc';
+    if (isLegacy) {
+      await _fileService.saveFile(appEncrypted, _currentFileName!);
+    } else {
+      await _fileService.saveNoteContent(noteId, appEncrypted);
+      _currentFileName = "note_$noteId";
     }
 
-    await _fileService.saveFile(appEncrypted, _currentFileName!);
-
-    // Update session password for this file if saving with a password
     if (_currentFileName != null && _currentPassword != null) {
       _sessionPasswords[_currentFileName!] = _currentPassword!;
     }
 
-    // For verification
     print("SAVED FILE: $_currentFileName (Locked: $locked, Auto: $isAutoSave)");
 
     await loadRecentFiles();

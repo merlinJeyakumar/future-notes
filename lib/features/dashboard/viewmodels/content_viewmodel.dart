@@ -12,6 +12,8 @@ import 'package:flutter_quill/flutter_quill.dart';
 import 'package:vsc_quill_delta_to_html/vsc_quill_delta_to_html.dart';
 import 'package:flutter_quill_delta_from_html/flutter_quill_delta_from_html.dart';
 import 'package:uuid/uuid.dart';
+import 'package:code_text_field/code_text_field.dart';
+import 'package:highlight/languages/xml.dart'; // XML handles HTML highlighting
 
 class ContentViewModel extends BaseViewModel {
   final IFileService _fileService;
@@ -42,19 +44,70 @@ class ContentViewModel extends BaseViewModel {
 
   bool get isPasswordSet => _currentPassword != null;
 
+  late final CodeController htmlController;
+  bool _isHtmlMode = false;
+  bool get isHtmlMode => _isHtmlMode;
+
   // region Initialization
   ContentViewModel({
     required IFileService fileService,
     required IEncryptionService encryptionService,
   }) : _fileService = fileService,
        _encryptionService = encryptionService {
+    // Initialize CodeController with syntax highlighting
+    htmlController = CodeController(
+      language: xml, // Highlighting for XML/HTML
+    );
+
     loadRecentFiles();
     _initFileWatcher();
 
     // Listen to changes for auto-save and title generation
     quillController.document.changes.listen((change) {
-      onTextChanged();
+      if (!_isHtmlMode) {
+        onTextChanged();
+      }
     });
+
+    htmlController.addListener(() {
+      if (_isHtmlMode) {
+        _scheduleAutoSave();
+        // Optional: Title generation from HTML could go here,
+        // but stripping tags might be expensive/complex to do continuously.
+      }
+    });
+  }
+
+  void toggleEditorMode() {
+    if (_isHtmlMode) {
+      // Switch to Rich Text
+      // Convert HTML string to Delta
+      try {
+        final html = htmlController.text;
+        final delta = HtmlToDelta().convert(html);
+        quillController.document = Document.fromDelta(delta);
+
+        // Move cursor to end to avoid issues
+        quillController.moveCursorToPosition(quillController.document.length);
+      } catch (e) {
+        print("Error converting HTML to Delta: $e");
+        // Fallback or show error? For now, we just switch and maybe get empty/broken state.
+        // But HtmlToDelta is usually robust enough to giving *something*.
+      }
+      _isHtmlMode = false;
+    } else {
+      // Switch to HTML Editor
+      // Convert Delta to HTML string
+      final delta = quillController.document.toDelta();
+      final converter = QuillDeltaToHtmlConverter(
+        delta.toJson(),
+        ConverterOptions.forEmail(),
+      );
+      final html = converter.convert();
+      htmlController.text = html; // This triggers listener, schedules auto-save
+      _isHtmlMode = true;
+    }
+    notifyListeners();
   }
 
   void _initFileWatcher() {
@@ -86,6 +139,9 @@ class ContentViewModel extends BaseViewModel {
   Future<void> loadNote(String fileName) async {
     setBusy(true);
     _currentFileName = fileName;
+
+    // Reset mode to Rich Text on new load for consistency
+    _isHtmlMode = false;
 
     final content = await _fileService.readFile(fileName);
     if (content != null) {
@@ -149,6 +205,7 @@ class ContentViewModel extends BaseViewModel {
       } else {
         // Locked state - clear editor
         quillController.document = Document();
+        htmlController.clear();
         _currentPassword = null;
         notifyListeners();
       }
@@ -210,6 +267,7 @@ class ContentViewModel extends BaseViewModel {
       _currentPassword = null;
       _isLocked = true;
       quillController.document = Document();
+      htmlController.clear();
       notifyListeners();
     }
   }
@@ -231,39 +289,44 @@ class ContentViewModel extends BaseViewModel {
     String contentToSave = "";
     bool locked = false;
 
-    // If password set, encrypt content with USER PASSWORD
-    if (_currentPassword != null) {
-      // For encryption, we need to save the HTML string, then encrypt THAT string.
-      // So 'contentToSave' will be the Encrypted(HTML).
-
-      // First get HTML
+    // Get the HTML content, either from HtmlController (if editing HTML)
+    // or by converting Quill Delta
+    String htmlContent;
+    if (_isHtmlMode) {
+      htmlContent = htmlController.text;
+    } else {
       final delta = quillController.document.toDelta();
       final converter = QuillDeltaToHtmlConverter(
         delta.toJson(),
         ConverterOptions.forEmail(),
       );
-      final html = converter.convert();
+      htmlContent = converter.convert();
+    }
 
+    // If password set, encrypt content with USER PASSWORD
+    if (_currentPassword != null) {
+      // For encryption, we need to save the HTML string, then encrypt THAT string.
+      // So 'contentToSave' will be the Encrypted(HTML).
       contentToSave = _encryptionService.encrypt(
-        html,
+        htmlContent,
         password: _currentPassword,
       );
       locked = true;
     } else {
       // Not locked, save raw HTML
-      final delta = quillController.document.toDelta();
-      final converter = QuillDeltaToHtmlConverter(
-        delta.toJson(),
-        ConverterOptions.forEmail(),
-      );
-      contentToSave = converter.convert();
+      contentToSave = htmlContent;
     }
 
     // Create NoteModel
     final note = NoteModel(
       id: uuid,
       title: (titleController.text.trim().length < 40)
-          ? _generateTitleFromContent(quillController.document.toPlainText())
+          ? (_isHtmlMode
+                ? titleController
+                      .text // Don't auto-generate from HTML yet to exist perf/complexity
+                : _generateTitleFromContent(
+                    quillController.document.toPlainText(),
+                  ))
           : titleController.text,
       content: contentToSave,
       isLocked: locked,
@@ -408,6 +471,23 @@ class ContentViewModel extends BaseViewModel {
   }
 
   void _insertText(String text) {
+    if (_isHtmlMode) {
+      // Insert in HTML
+      final textSelection = htmlController.selection;
+      String newText = htmlController.text;
+      if (textSelection.start >= 0) {
+        newText = newText.replaceRange(
+          textSelection.start,
+          textSelection.end,
+          text,
+        );
+        htmlController.text = newText;
+      } else {
+        htmlController.text += text;
+      }
+      return;
+    }
+
     // We don't support simple insertText for attachments in Quill easily without Delta
     // But we can just insert text at selection
     final index = quillController.selection.baseOffset;
@@ -431,7 +511,9 @@ class ContentViewModel extends BaseViewModel {
     _currentFileName = null;
     _currentPassword = null;
     _isLocked = false;
+    _isHtmlMode = false;
     quillController.document = Document();
+    htmlController.clear();
     titleController.text = "New Note";
     notifyListeners();
   }
@@ -445,6 +527,7 @@ class ContentViewModel extends BaseViewModel {
     _fileWatcherSubscription?.cancel();
     quillController.dispose();
     titleController.dispose();
+    htmlController.dispose();
     focusNode.dispose();
     scrollController.dispose();
     _backgroundService.dispose();

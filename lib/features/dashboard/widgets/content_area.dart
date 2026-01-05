@@ -3,6 +3,9 @@ import 'package:flutter_quill/flutter_quill.dart';
 import '../viewmodels/content_viewmodel.dart';
 import 'password_dialog.dart';
 
+import 'package:code_text_field/code_text_field.dart';
+import 'package:flutter_highlight/themes/atom-one-dark.dart';
+
 // Anti-Gravity Design System Colors
 class _DesignColors {
   static const background = Color(0xFF1A202C); // Deep Charcoal
@@ -246,32 +249,44 @@ class ContentArea extends StatelessWidget {
         ],
       ),
       // Always allow horizontal scroll to prevent overflow, even on larger screens if constrained
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: isMobile
-              ? Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _buildToolbarRow1(),
-                    _buildVerticalDivider(),
-                    _buildToolbarRow2(),
-                  ],
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _buildToolbarRow1(),
-                    Divider(
-                      color: _DesignColors.divider.withOpacity(0.3),
-                      height: 1,
-                    ),
-                    _buildToolbarRow2(),
-                  ],
-                ),
-        ),
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: isMobile
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildToolbarRow1(),
+                          _buildVerticalDivider(),
+                          _buildToolbarRow2(),
+                        ],
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildToolbarRow1(),
+                          Divider(
+                            color: _DesignColors.divider.withOpacity(0.3),
+                            height: 1,
+                          ),
+                          _buildToolbarRow2(),
+                        ],
+                      ),
+              ),
+            ),
+          ),
+
+          // Fixed Toggle Button
+          Padding(
+            padding: const EdgeInsets.only(right: 8, left: 4),
+            child: _buildModeToggleButton(),
+          ),
+        ],
       ),
     );
   }
@@ -471,42 +486,47 @@ class ContentArea extends StatelessWidget {
               iconTheme: _getIconTheme(),
             ),
           ),
-
-          // For mobile we might want a spacer, for desktop we often want it pushed right
-          // Using SizedBox(width: 8) instead of Spacer() in this row to work within SingleChildScrollView if needed
-          const SizedBox(width: 16),
-
-          // "Normal" button
-          _buildNormalButton(),
         ],
       ),
     );
   }
 
-  /// "Normal" pill button
-  Widget _buildNormalButton() {
+  /// Toggle button for Rich Text / HTML
+  Widget _buildModeToggleButton() {
+    final isHtml = viewModel.isHtmlMode;
     return Container(
       decoration: BoxDecoration(
-        color: _DesignColors.accent,
+        color: _DesignColors.accent.withOpacity(0.1),
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _DesignColors.accent.withOpacity(0.5)),
       ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: () {
-            // Clear all header styles, reset to normal
-            viewModel.quillController.formatSelection(Attribute.header);
+            viewModel.toggleEditorMode();
           },
           borderRadius: BorderRadius.circular(16),
-          child: const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Text(
-              'Normal',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-                fontSize: 12,
-              ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isHtml ? Icons.auto_awesome_rounded : Icons.code_rounded,
+                  size: 14,
+                  color: _DesignColors.accent,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  isHtml ? 'Rich Text' : 'HTML',
+                  style: const TextStyle(
+                    color: _DesignColors.accent,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -667,18 +687,31 @@ class ContentArea extends StatelessWidget {
     // Spacious editor with increased padding
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      child: QuillEditor.basic(
-        controller: viewModel.quillController,
-        config: QuillEditorConfig(
-          autoFocus: false,
-          scrollable: true,
-          expands: false,
-          padding: const EdgeInsets.all(8),
-          keyboardAppearance: Brightness.dark,
-        ),
-        focusNode: viewModel.focusNode,
-        scrollController: viewModel.scrollController,
-      ),
+      child: viewModel.isHtmlMode
+          ? CodeTheme(
+              data: CodeThemeData(styles: atomOneDarkTheme),
+              child: CodeField(
+                controller: viewModel.htmlController,
+                textStyle: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 14,
+                ),
+                expands: true,
+                decoration: const BoxDecoration(), // Remove default border
+              ),
+            )
+          : QuillEditor.basic(
+              controller: viewModel.quillController,
+              config: QuillEditorConfig(
+                autoFocus: false,
+                scrollable: true,
+                expands: false,
+                padding: const EdgeInsets.all(8),
+                keyboardAppearance: Brightness.dark,
+              ),
+              focusNode: viewModel.focusNode,
+              scrollController: viewModel.scrollController,
+            ),
     );
   }
 }

@@ -8,6 +8,7 @@ import 'package:universal_html/html.dart' as html;
 abstract class IFileService {
   Future<FilePickerResult?> pickFile({List<String>? allowedExtensions});
   Future<void> saveFile(String content, String fileName);
+  Future<void> saveNoteContent(String noteId, String content);
   Future<List<String>> getRecentFiles();
   Future<String?> readFile(String fileName);
   Future<void> deleteFile(String fileName);
@@ -40,72 +41,120 @@ class FileService implements IFileService {
     } else {
       final directory = await getApplicationDocumentsDirectory();
       final userDataDir = Directory('${directory.path}/UserData');
-      if (!await userDataDir.exists()) {
+      if (!await userDataDir.exists())
         await userDataDir.create(recursive: true);
-      }
+
       final file = File('${userDataDir.path}/$fileName');
       await file.writeAsString(content);
-      print('Saved to: ${file.path}');
     }
+  }
+
+  Future<void> saveNoteContent(String noteId, String content) async {
+    if (kIsWeb) return;
+    final directory = await getApplicationDocumentsDirectory();
+    final noteDir = Directory('${directory.path}/UserData/notes/note_$noteId');
+    if (!await noteDir.exists()) {
+      await noteDir.create(recursive: true);
+    }
+    // Encoded filename with ID
+    final file = File('${noteDir.path}/note_content_$noteId.enc');
+    await file.writeAsString(content);
+    print('Saved note to: ${file.path}');
   }
 
   @override
   Stream<void> watchRecentFiles() async* {
     if (kIsWeb) return;
-
     final directory = await getApplicationDocumentsDirectory();
     final userDataDir = Directory('${directory.path}/UserData');
 
+    // Watch root UserData for legacy files
     if (await userDataDir.exists()) {
-      yield* userDataDir.watch(events: FileSystemEvent.all).where((event) {
-        return !event.path.split(Platform.pathSeparator).last.startsWith('.');
-      });
+      yield* userDataDir.watch(events: FileSystemEvent.all);
+    }
+
+    // Watch notes directory
+    final notesDir = Directory('${userDataDir.path}/notes');
+    if (await notesDir.exists()) {
+      yield* notesDir.watch(events: FileSystemEvent.all);
     }
   }
 
   @override
   Future<List<String>> getRecentFiles() async {
-    if (kIsWeb) {
-      // Web doesn't support directory listing like this easily without backend or specific API
-      return [];
-    } else {
-      final directory = await getApplicationDocumentsDirectory();
-      final userDataDir = Directory('${directory.path}/UserData');
-      if (await userDataDir.exists()) {
-        final List<FileSystemEntity> entities = userDataDir.listSync();
-        return entities
-            .whereType<File>()
-            .map((e) => e.uri.pathSegments.last)
-            .toList();
+    if (kIsWeb) return [];
+
+    final directory = await getApplicationDocumentsDirectory();
+    final userDataDir = Directory('${directory.path}/UserData');
+    final List<String> files = [];
+
+    if (await userDataDir.exists()) {
+      // 1. Legacy Files
+      final legacyEntities = userDataDir.listSync();
+      files.addAll(
+        legacyEntities.whereType<File>().map((e) => e.uri.pathSegments.last),
+      );
+
+      // 2. New Note Folders
+      final notesDir = Directory('${userDataDir.path}/notes');
+      if (await notesDir.exists()) {
+        final noteFolders = notesDir.listSync();
+        files.addAll(
+          noteFolders.whereType<Directory>().map(
+            (e) => e.uri.pathSegments.last,
+          ),
+        ); // e.g., "note_123"
       }
-      return [];
     }
+    return files;
   }
 
   @override
   Future<String?> readFile(String fileName) async {
-    if (kIsWeb) {
-      return null;
-    } else {
-      try {
-        final directory = await getApplicationDocumentsDirectory();
-        final file = File('${directory.path}/UserData/$fileName');
-        if (await file.exists()) {
-          return await file.readAsString();
+    if (kIsWeb) return null;
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final basePath = '${directory.path}/UserData';
+
+      // Check if it's a new style note folder
+      if (fileName.startsWith('note_')) {
+        final noteId = fileName.replaceFirst('note_', '');
+        final noteFile = File(
+          '$basePath/notes/$fileName/note_content_$noteId.enc',
+        );
+        if (await noteFile.exists()) {
+          return await noteFile.readAsString();
         }
-      } catch (e) {
-        print("Error reading file: $e");
       }
-      return null;
+
+      // Fallback to legacy file
+      final file = File('$basePath/$fileName');
+      if (await file.exists()) {
+        return await file.readAsString();
+      }
+    } catch (e) {
+      print("Error reading file: $e");
     }
+    return null;
   }
 
   @override
   Future<void> deleteFile(String fileName) async {
-    if (kIsWeb) return; // Not supported directly
+    if (kIsWeb) return;
     try {
       final directory = await getApplicationDocumentsDirectory();
-      final file = File('${directory.path}/UserData/$fileName');
+      final basePath = '${directory.path}/UserData';
+
+      if (fileName.startsWith('note_')) {
+        final noteDir = Directory('$basePath/notes/$fileName');
+        if (await noteDir.exists()) {
+          await noteDir.delete(recursive: true);
+          print("Deleted note folder: ${noteDir.path}");
+          return;
+        }
+      }
+
+      final file = File('$basePath/$fileName');
       if (await file.exists()) {
         await file.delete();
         print("Deleted file: ${file.path}");
@@ -120,7 +169,17 @@ class FileService implements IFileService {
     if (kIsWeb) return null;
     try {
       final directory = await getApplicationDocumentsDirectory();
-      final file = File('${directory.path}/UserData/$fileName');
+      final basePath = '${directory.path}/UserData';
+
+      if (fileName.startsWith('note_')) {
+        final noteId = fileName.replaceFirst('note_', '');
+        final noteFile = File(
+          '$basePath/notes/$fileName/note_content_$noteId.enc',
+        );
+        if (await noteFile.exists()) return await noteFile.stat();
+      }
+
+      final file = File('$basePath/$fileName');
       if (await file.exists()) {
         return await file.stat();
       }
@@ -135,6 +194,12 @@ class FileService implements IFileService {
     if (kIsWeb) return fileName;
     try {
       final directory = await getApplicationDocumentsDirectory();
+      if (fileName.startsWith('note_')) {
+        // Return path to the folder or the meta file?
+        // Sidebar uses this for "Show in folder".
+        // For a bundle, usually showing the folder is better.
+        return '${directory.path}/UserData/notes/$fileName';
+      }
       return '${directory.path}/UserData/$fileName';
     } catch (e) {
       return fileName;

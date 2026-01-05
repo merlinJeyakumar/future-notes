@@ -14,6 +14,7 @@ import 'package:flutter_quill_delta_from_html/flutter_quill_delta_from_html.dart
 import 'package:uuid/uuid.dart';
 import 'package:code_text_field/code_text_field.dart';
 import 'package:highlight/languages/xml.dart'; // XML handles HTML highlighting
+import 'dart:typed_data';
 
 class ContentViewModel extends BaseViewModel {
   final IFileService _fileService;
@@ -34,6 +35,7 @@ class ContentViewModel extends BaseViewModel {
   StreamSubscription? _fileWatcherSubscription;
   final BackgroundService _backgroundService = BackgroundService();
   List<RecentFile> _recentFiles = [];
+  List<String> _attachments = [];
 
   final Map<String, String> _sessionPasswords = {};
   bool _isLocked = false;
@@ -41,13 +43,74 @@ class ContentViewModel extends BaseViewModel {
   bool get isLocked => _isLocked;
 
   List<RecentFile> get recentFiles => _recentFiles;
-
+  List<String> get attachments => _attachments;
   bool get isPasswordSet => _currentPassword != null;
   String? get currentFileName => _currentFileName;
 
   late final CodeController htmlController;
   bool _isHtmlMode = false;
   bool get isHtmlMode => _isHtmlMode;
+
+  Future<void> pickImage() async {
+    final result = await _fileService.pickFile(
+      allowedExtensions: ['png', 'jpg', 'jpeg', 'webp'],
+    );
+
+    if (result != null && result.files.single.path != null) {
+      setBusy(true);
+
+      String noteId;
+      if (_currentFileName != null) {
+        if (_currentFileName!.startsWith('note_')) {
+          noteId = _currentFileName!.replaceFirst('note_', '');
+        } else {
+          // Legacy or new without save -> Migrate/Commit to New Structure
+          noteId = const Uuid().v4();
+          // Force update filename to use new folder structure
+          _currentFileName = "note_$noteId";
+        }
+      } else {
+        // New Note
+        noteId = const Uuid().v4();
+        _currentFileName = "note_$noteId";
+      }
+
+      try {
+        // 2. Read & Encrypt
+        final originalFile = File(result.files.single.path!);
+        final bytes = await originalFile.readAsBytes();
+
+        final encryptedBytes = _encryptionService.encryptBinary(
+          bytes,
+          password: _currentPassword,
+        );
+
+        // 3. Save Attachment
+        final attachmentId = await _fileService.saveAttachment(
+          encryptedBytes,
+          noteId,
+        );
+
+        // 4. Add to List
+        _attachments.add(attachmentId);
+        notifyListeners();
+
+        // 5. Auto Save
+        _scheduleAutoSave();
+      } catch (e) {
+        print("Error adding attachment: $e");
+      }
+
+      setBusy(false);
+    }
+  }
+
+  void removeAttachment(String attachmentId) {
+    _attachments.remove(attachmentId);
+    notifyListeners();
+    _scheduleAutoSave();
+    // TODO: Physically delete the attachment file to clean up storage
+  }
 
   // region Initialization
   ContentViewModel({
@@ -195,6 +258,7 @@ class ContentViewModel extends BaseViewModel {
 
   void _applyNoteModel(NoteModel note, String fileName) {
     _isLocked = note.isLocked;
+    _attachments = List.from(note.attachments);
 
     if (note.isLocked) {
       // Check if we have a session password
@@ -332,23 +396,22 @@ class ContentViewModel extends BaseViewModel {
     String contentToSave = "";
     bool locked = false;
 
-    // Get the HTML content
-    String htmlContent;
+    // Get the content to save
     if (_isHtmlMode) {
-      htmlContent = htmlController.text;
+      contentToSave = htmlController.text;
     } else {
+      // Save as pure Delta JSON for maximum fidelity
       final delta = quillController.document.toDelta();
-      final converter = QuillDeltaToHtmlConverter(
-        delta.toJson(),
-        ConverterOptions.forEmail(),
-      );
-      htmlContent = converter.convert();
+      contentToSave = jsonEncode(delta.toJson());
     }
 
-    // Check if content is empty
-    final plainText = _isHtmlMode
-        ? htmlController.text.replaceAll(RegExp(r'<[^>]*>'), '').trim()
-        : quillController.document.toPlainText().trim();
+    // Check if content is empty (logic remains similar but extracting plaintext from Delta or HTML)
+    String plainText = "";
+    if (_isHtmlMode) {
+      plainText = htmlController.text.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+    } else {
+      plainText = quillController.document.toPlainText().trim();
+    }
 
     if (_currentFileName == null &&
         plainText.isEmpty &&
@@ -359,14 +422,15 @@ class ContentViewModel extends BaseViewModel {
     }
 
     // Encrypt
+    String encryptedContent = "";
     if (_currentPassword != null) {
-      contentToSave = _encryptionService.encrypt(
-        htmlContent,
+      encryptedContent = _encryptionService.encrypt(
+        contentToSave,
         password: _currentPassword,
       );
       locked = true;
     } else {
-      contentToSave = htmlContent;
+      encryptedContent = contentToSave;
     }
 
     final note = NoteModel(
@@ -374,15 +438,15 @@ class ContentViewModel extends BaseViewModel {
       title: (titleController.text.trim().length < 40)
           ? (_isHtmlMode
                 ? titleController.text
-                : _generateTitleFromContent(
-                    quillController.document.toPlainText(),
-                  ))
+                : _generateTitleFromContent(plainText))
           : titleController.text,
-      content: contentToSave,
+      content: encryptedContent,
       isLocked: locked,
       timestamp: DateTime.now().millisecondsSinceEpoch,
+      attachments: _attachments,
     );
 
+    // ... saving logic ...
     final jsonString = json.encode(note.toJson());
     final appEncrypted = _encryptionService.encryptApp(jsonString);
 
@@ -414,15 +478,6 @@ class ContentViewModel extends BaseViewModel {
   // endregion
 
   // region Import & Export
-  Future<void> pickFile() async {
-    final result = await _fileService.pickFile();
-    if (result != null) {
-      final fileName = result.files.single.name;
-      final textToAdd = '\n\n[Attachment: $fileName]';
-      _insertText(textToAdd);
-    }
-  }
-
   Future<PlatformFile?> pickImportFile() async {
     final result = await _fileService.pickFile(
       allowedExtensions: ['txt', 'enc'],
@@ -468,7 +523,7 @@ class ContentViewModel extends BaseViewModel {
           isValid: true,
           message: "Plain Text File",
           previewInfo:
-              "Size: ${await fileObj.length()} bytes\nPreview: ${content.length > 50 ? content.substring(0, 50) + "..." : content}",
+              "Size: ${await fileObj.length()} bytes\nPreview: ${content.length > 50 ? content.substring(0, 50) + '...' : content}",
         );
       }
 
@@ -494,20 +549,36 @@ class ContentViewModel extends BaseViewModel {
 
   // region Helpers
   void _loadContentToQuill(String content) {
-    // content is either HTML (if previously saved with new editor) or Plain Text (old notes)
-    // Simple heuristic: check for HTML tags
-    // Or just try to parse with HtmlToDelta
-
     try {
-      if (content.trim().startsWith('<')) {
+      content = content.trim();
+
+      // 1. Try Delta JSON
+      if (content.startsWith('[') || content.startsWith('{')) {
+        try {
+          final jsonContent = jsonDecode(content);
+          if (jsonContent is List) {
+            quillController.document = Document.fromJson(jsonContent);
+            quillController.moveCursorToPosition(
+              quillController.document.length,
+            );
+            return;
+          }
+        } catch (e) {
+          // Not JSON or failed to parse, fall through
+        }
+      }
+
+      // 2. Try HTML
+      if (content.startsWith('<')) {
         final delta = HtmlToDelta().convert(content);
         quillController.document = Document.fromDelta(delta);
       } else {
-        // Plain text
+        // 3. Plain text
         quillController.document = Document()..insert(0, content);
       }
     } catch (e) {
       // Fallback
+      print("Error loading content: $e");
       quillController.document = Document()..insert(0, content);
     }
 
@@ -515,48 +586,12 @@ class ContentViewModel extends BaseViewModel {
     quillController.moveCursorToPosition(quillController.document.length);
   }
 
-  void _insertText(String text) {
-    if (_isHtmlMode) {
-      // Insert in HTML
-      final textSelection = htmlController.selection;
-      String newText = htmlController.text;
-      if (textSelection.start >= 0) {
-        newText = newText.replaceRange(
-          textSelection.start,
-          textSelection.end,
-          text,
-        );
-        htmlController.text = newText;
-      } else {
-        htmlController.text += text;
-      }
-      return;
-    }
-
-    // We don't support simple insertText for attachments in Quill easily without Delta
-    // But we can just insert text at selection
-    final index = quillController.selection.baseOffset;
-    final length = quillController.selection.extentOffset - index;
-    // Replace logic?
-    // Just insert
-    if (index >= 0) {
-      quillController.document.replace(index, length, text);
-    } else {
-      quillController.document.insert(
-        quillController.document.length - 1,
-        text,
-      );
-    }
-
-    notifyListeners();
-    _scheduleAutoSave();
-  }
-
   void reset() {
     _currentFileName = null;
     _currentPassword = null;
     _isLocked = false;
     _isHtmlMode = false;
+    _attachments = [];
     quillController.document = Document();
     htmlController.clear();
     titleController.text = "New Note";
@@ -649,6 +684,23 @@ class ContentViewModel extends BaseViewModel {
     // Remove leading numbering (e.g., 1., 2.)
     line = line.replaceAll(RegExp(r'^\s*\d+\.\s*'), '');
     return line.trim();
+  }
+
+  Future<Uint8List?> readAttachment(String attachmentId) async {
+    if (_currentFileName == null || !_currentFileName!.startsWith('note_'))
+      return null;
+    final noteId = _currentFileName!.replaceFirst('note_', '');
+
+    final encryptedBytes = await _fileService.readAttachment(
+      noteId,
+      attachmentId,
+    );
+    if (encryptedBytes == null) return null;
+
+    return _encryptionService.decryptBinary(
+      encryptedBytes,
+      password: _currentPassword,
+    );
   }
 
   // endregion

@@ -4,6 +4,7 @@ class NoteModel {
   final String content;
   final bool isLocked;
   final int timestamp;
+  final List<String> attachments;
 
   NoteModel({
     required this.id,
@@ -11,6 +12,7 @@ class NoteModel {
     required this.content,
     required this.isLocked,
     required this.timestamp,
+    this.attachments = const [],
   });
 
   Map<String, dynamic> toJson() {
@@ -20,6 +22,7 @@ class NoteModel {
       'content': content,
       'isLocked': isLocked,
       'timestamp': timestamp,
+      'attachments': attachments,
     };
   }
 
@@ -30,6 +33,11 @@ class NoteModel {
       content: json['content'] as String,
       isLocked: json['isLocked'] as bool,
       timestamp: json['timestamp'] as int,
+      attachments:
+          (json['attachments'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
     );
   }
 }

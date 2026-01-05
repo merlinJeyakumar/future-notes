@@ -1,16 +1,20 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart';
 import 'package:universal_html/html.dart' as html;
+import 'package:uuid/uuid.dart';
 
 abstract class IFileService {
   Future<FilePickerResult?> pickFile({List<String>? allowedExtensions});
   Future<void> saveFile(String content, String fileName);
   Future<void> saveNoteContent(String noteId, String content);
+  Future<String> saveAttachment(Uint8List data, String noteId);
   Future<List<String>> getRecentFiles();
   Future<String?> readFile(String fileName);
+  Future<Uint8List?> readAttachment(String noteId, String attachmentId);
   Future<void> deleteFile(String fileName);
   Future<FileStat?> getFileStats(String fileName);
   Future<String> getFullPath(String fileName);
@@ -26,6 +30,43 @@ class FileService implements IFileService {
       type: allowedExtensions != null ? FileType.custom : FileType.any,
       allowedExtensions: allowedExtensions,
     );
+  }
+
+  @override
+  Future<String> saveAttachment(Uint8List data, String noteId) async {
+    if (kIsWeb) return ""; // Not supported
+
+    final directory = await getApplicationDocumentsDirectory();
+    final attachmentsDir = Directory(
+      '${directory.path}/UserData/notes/note_$noteId/attachments',
+    );
+    if (!await attachmentsDir.exists()) {
+      await attachmentsDir.create(recursive: true);
+    }
+
+    final attachmentId = const Uuid().v4();
+    final file = File('${attachmentsDir.path}/$attachmentId.med');
+    await file.writeAsBytes(data);
+
+    return attachmentId;
+  }
+
+  @override
+  Future<Uint8List?> readAttachment(String noteId, String attachmentId) async {
+    if (kIsWeb) return null;
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File(
+        '${directory.path}/UserData/notes/note_$noteId/attachments/$attachmentId.med',
+      );
+
+      if (await file.exists()) {
+        return await file.readAsBytes();
+      }
+    } catch (e) {
+      print("Error reading attachment: $e");
+    }
+    return null;
   }
 
   @override

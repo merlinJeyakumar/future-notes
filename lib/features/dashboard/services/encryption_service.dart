@@ -5,6 +5,8 @@ import 'dart:typed_data'; // For Uint8List
 abstract class IEncryptionService {
   String encrypt(String plainText, {String? password});
   String decrypt(String encryptedText, {String? password});
+  Uint8List encryptBinary(Uint8List data, {String? password});
+  Uint8List decryptBinary(Uint8List data, {String? password});
   String encryptApp(String plainText);
   String decryptApp(String encryptedText);
 }
@@ -72,6 +74,42 @@ class EncryptionService implements IEncryptionService {
       return encrypter.decrypt(encrypted, iv: iv);
     } catch (e) {
       return "Error decrypting: $e";
+    }
+  }
+
+  @override
+  Uint8List encryptBinary(Uint8List data, {String? password}) {
+    final key = password != null ? _deriveKey(password) : _defaultKey;
+    final iv = IV.fromLength(16);
+    final encrypter = Encrypter(AES(key));
+
+    final encrypted = encrypter.encryptBytes(data, iv: iv);
+
+    // Combine IV + Encrypted Data
+    final combined = BytesBuilder();
+    combined.add(iv.bytes);
+    combined.add(encrypted.bytes);
+    return combined.toBytes();
+  }
+
+  @override
+  Uint8List decryptBinary(Uint8List data, {String? password}) {
+    try {
+      final key = password != null ? _deriveKey(password) : _defaultKey;
+
+      if (data.length < 16) throw Exception("Invalid data length");
+
+      final ivBytes = data.sublist(0, 16);
+      final cipherBytes = data.sublist(16);
+
+      final iv = IV(ivBytes);
+      final encrypted = Encrypted(cipherBytes);
+
+      final encrypter = Encrypter(AES(key));
+      return Uint8List.fromList(encrypter.decryptBytes(encrypted, iv: iv));
+    } catch (e) {
+      print("Error decrypting binary: $e");
+      return Uint8List(0);
     }
   }
 

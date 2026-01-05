@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
+import 'dart:typed_data';
 import '../viewmodels/content_viewmodel.dart';
 import 'password_dialog.dart';
 
@@ -45,9 +46,114 @@ class ContentArea extends StatelessWidget {
 
                 // Spacious Editor Area
                 Expanded(child: _buildInputArea(context)),
+
+                // Attachments Bar
+                if (!viewModel.isLocked && viewModel.attachments.isNotEmpty)
+                  _buildAttachmentBar(context),
               ],
             ),
           ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAttachmentBar(BuildContext context) {
+    return Container(
+      height: 100,
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      decoration: BoxDecoration(
+        color: _DesignColors.background,
+        border: Border(
+          top: BorderSide(color: _DesignColors.divider.withOpacity(0.3)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Attachments (${viewModel.attachments.length})",
+            style: const TextStyle(
+              color: _DesignColors.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: viewModel.attachments.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final id = viewModel.attachments[index];
+                return _buildAttachmentItem(context, id);
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAttachmentItem(BuildContext context, String id) {
+    return FutureBuilder<Uint8List?>(
+      future: viewModel.readAttachment(id),
+      builder: (context, snapshot) {
+        final data = snapshot.data;
+        Widget content;
+
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          content = const Center(
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        } else if (data != null) {
+          // Assume image for now (since we only pick images)
+          // If we support other files later, check header or metadata
+          content = ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.memory(data, fit: BoxFit.cover),
+          );
+        } else {
+          content = const Icon(
+            Icons.broken_image,
+            color: _DesignColors.subtleGray,
+          );
+        }
+
+        return Stack(
+          children: [
+            Container(
+              width: 80,
+              decoration: BoxDecoration(
+                color: _DesignColors.toolbarIsland,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: _DesignColors.divider.withOpacity(0.3),
+                ),
+              ),
+              child: content,
+            ),
+            Positioned(
+              top: 2,
+              right: 2,
+              child: InkWell(
+                onTap: () => viewModel.removeAttachment(id),
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, size: 14, color: Colors.white),
+                ),
+              ),
+            ),
+          ],
         );
       },
     );
@@ -140,7 +246,7 @@ class ContentArea extends StatelessWidget {
           _buildSubtleIconButton(
             Icons.attach_file_rounded,
             'Attach file',
-            onPressed: viewModel.pickFile,
+            onPressed: viewModel.pickImage,
           ),
         if (viewModel.isLocked || viewModel.isPasswordSet)
           _buildSubtleIconButton(
@@ -693,6 +799,7 @@ class ContentArea extends StatelessWidget {
                   expands: true,
                   padding: const EdgeInsets.all(8),
                   keyboardAppearance: Brightness.dark,
+                  embedBuilders: [AttachmentEmbedBuilder(viewModel)],
                 ),
                 focusNode: viewModel.focusNode,
                 scrollController: viewModel.scrollController,
@@ -800,94 +907,92 @@ class ContentArea extends StatelessWidget {
     required IconData icon,
     required String title,
     required VoidCallback onTap,
-    Color textColor = _DesignColors.textPrimary,
-    Color iconColor = _DesignColors.textPrimary,
+    Color? textColor,
+    Color? iconColor,
   }) {
     return ListTile(
-      leading: Icon(icon, color: iconColor, size: 20),
-      title: Text(title, style: TextStyle(color: textColor, fontSize: 14)),
-      dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      leading: Icon(icon, color: iconColor ?? _DesignColors.textPrimary),
+      title: Text(
+        title,
+        style: TextStyle(color: textColor ?? _DesignColors.textPrimary),
+      ),
       onTap: onTap,
-      hoverColor: _DesignColors.divider.withOpacity(0.2),
     );
   }
 
   void _promptSave(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: _DesignColors.toolbarIsland,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Settings Updated',
-          style: TextStyle(color: _DesignColors.textPrimary),
-        ),
-        content: const Text(
-          'Configuration changed. Do you want to save the file now?',
-          style: TextStyle(color: _DesignColors.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: _DesignColors.subtleGray),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              viewModel.saveNote();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _DesignColors.saveButton,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Save File'),
-          ),
-        ],
+    viewModel.saveNote();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Note saved"),
+        duration: Duration(seconds: 1),
       ),
     );
   }
 
   void _confirmDelete(BuildContext context) {
     if (viewModel.currentFileName == null) return;
-
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         backgroundColor: _DesignColors.toolbarIsland,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text(
-          'Delete Note?',
+          "Delete Note?",
           style: TextStyle(color: _DesignColors.textPrimary),
         ),
         content: const Text(
-          'This action cannot be undone. Are you sure you want to delete this file?',
+          "This action cannot be undone.",
           style: TextStyle(color: _DesignColors.textSecondary),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: _DesignColors.subtleGray),
-            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel"),
           ),
           TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await viewModel.deleteNote(viewModel.currentFileName!);
+            onPressed: () {
+              Navigator.pop(ctx);
+              viewModel.deleteNote(viewModel.currentFileName!);
             },
             child: const Text(
-              'Delete',
+              "Delete",
               style: TextStyle(color: Colors.redAccent),
             ),
           ),
         ],
       ),
     );
+  }
+} // End of ContentArea
+
+class AttachmentEmbedBuilder extends EmbedBuilder {
+  final ContentViewModel viewModel;
+
+  AttachmentEmbedBuilder(this.viewModel);
+
+  @override
+  String get key => BlockEmbed.imageType;
+
+  @override
+  bool get expanded => false;
+
+  @override
+  Widget build(BuildContext context, EmbedContext embedContext) {
+    final node = embedContext.node;
+    final String? imageUrl = node.value.data;
+
+    if (imageUrl != null && imageUrl.startsWith('attach://')) {
+      // Inline attachments are now displayed in the Attachment Bar.
+      // We hide them from the editor viewport to avoid duplication and potential crashes.
+      return const SizedBox.shrink();
+    }
+
+    if (imageUrl != null &&
+        (imageUrl.startsWith('http') || imageUrl.startsWith('file'))) {
+      return Image.network(imageUrl);
+    }
+
+    // Fallback for base64 or other formats if needed, or return nothing
+    return const SizedBox();
   }
 }

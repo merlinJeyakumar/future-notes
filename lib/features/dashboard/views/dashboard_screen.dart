@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/content_area.dart';
@@ -154,60 +155,68 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return ListenableBuilder(
       listenable: _viewModel,
       builder: (context, _) {
-        return Scaffold(
-          backgroundColor: const Color(0xFF1B2535),
-          appBar: isDesktop
-              ? null
-              : AppBar(
-                  backgroundColor: const Color(0xFF161E2D),
-                  title: const Text('Dashboard'),
-                  iconTheme: const IconThemeData(color: Colors.white),
-                  titleTextStyle: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                  ),
-                  actions: [
-                    IconButton(
-                      icon: const Icon(Icons.settings),
-                      onPressed: () => _showMasterSettings(context),
+        return CallbackShortcuts(
+          bindings: {
+            SingleActivator(LogicalKeyboardKey.keyS, control: true): () =>
+                _viewModel.saveNote(),
+            SingleActivator(LogicalKeyboardKey.keyN, control: true): () =>
+                _viewModel.reset(),
+          },
+          child: Scaffold(
+            backgroundColor: const Color(0xFF1B2535),
+            appBar: isDesktop
+                ? null
+                : AppBar(
+                    backgroundColor: const Color(0xFF161E2D),
+                    title: const Text('Dashboard'),
+                    iconTheme: const IconThemeData(color: Colors.white),
+                    titleTextStyle: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
                     ),
-                  ],
-                ),
-          drawer: isDesktop
-              ? null
-              : Sidebar(
-                  recentFiles: _viewModel.recentFiles,
-                  onFileSelected: (path) {
-                    _viewModel.loadNote(path);
-                    Navigator.pop(context); // Close drawer
-                  },
-                  onOpenFolder: _handleOpenFolder,
-                  onDelete: _handleDelete,
-                  onNewNote: () {
-                    _viewModel.reset();
-                    Navigator.pop(context);
-                  },
-                  onImportNote: _handleImport,
-                  onSettings: () {
-                    Navigator.pop(context);
-                    _showMasterSettings(context);
-                  },
-                ),
-          body: Row(
-            children: [
-              if (isDesktop)
-                Sidebar(
-                  recentFiles: _viewModel.recentFiles,
-                  onFileSelected: (path) => _viewModel.loadNote(path),
-                  onOpenFolder: _handleOpenFolder,
-                  onDelete: _handleDelete,
-                  onNewNote: _viewModel.reset,
-                  onImportNote: _handleImport,
-                  onSettings: () => _showMasterSettings(context),
-                ),
+                    actions: [
+                      IconButton(
+                        icon: const Icon(Icons.settings),
+                        onPressed: () => _showMasterSettings(context),
+                      ),
+                    ],
+                  ),
+            drawer: isDesktop
+                ? null
+                : Sidebar(
+                    recentFiles: _viewModel.recentFiles,
+                    onFileSelected: (path) {
+                      _viewModel.loadNote(path);
+                      Navigator.pop(context); // Close drawer
+                    },
+                    onOpenFolder: _handleOpenFolder,
+                    onDelete: _handleDelete,
+                    onNewNote: () {
+                      _viewModel.reset();
+                      Navigator.pop(context);
+                    },
+                    onImportNote: _handleImport,
+                    onSettings: () {
+                      Navigator.pop(context);
+                      _showMasterSettings(context);
+                    },
+                  ),
+            body: Row(
+              children: [
+                if (isDesktop)
+                  Sidebar(
+                    recentFiles: _viewModel.recentFiles,
+                    onFileSelected: (path) => _viewModel.loadNote(path),
+                    onOpenFolder: _handleOpenFolder,
+                    onDelete: _handleDelete,
+                    onNewNote: _viewModel.reset,
+                    onImportNote: _handleImport,
+                    onSettings: () => _showMasterSettings(context),
+                  ),
 
-              Expanded(child: ContentArea(viewModel: _viewModel)),
-            ],
+                Expanded(child: ContentArea(viewModel: _viewModel)),
+              ],
+            ),
           ),
         );
       },

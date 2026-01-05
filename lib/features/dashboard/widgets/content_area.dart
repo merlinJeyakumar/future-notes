@@ -678,17 +678,25 @@ class ContentArea extends StatelessWidget {
                 decoration: const BoxDecoration(), // Remove default border
               ),
             )
-          : QuillEditor.basic(
-              controller: viewModel.quillController,
-              config: QuillEditorConfig(
-                autoFocus: false,
-                scrollable: true,
-                expands: false,
-                padding: const EdgeInsets.all(8),
-                keyboardAppearance: Brightness.dark,
+          : GestureDetector(
+              onTap: () {
+                if (!viewModel.focusNode.hasFocus) {
+                  viewModel.focusNode.requestFocus();
+                }
+              },
+              behavior: HitTestBehavior.translucent,
+              child: QuillEditor.basic(
+                controller: viewModel.quillController,
+                config: QuillEditorConfig(
+                  autoFocus: false,
+                  scrollable: true,
+                  expands: true,
+                  padding: const EdgeInsets.all(8),
+                  keyboardAppearance: Brightness.dark,
+                ),
+                focusNode: viewModel.focusNode,
+                scrollController: viewModel.scrollController,
               ),
-              focusNode: viewModel.focusNode,
-              scrollController: viewModel.scrollController,
             ),
     );
   }

@@ -101,9 +101,54 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  void _showMasterSettings(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Settings', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.info_outline, color: Colors.white70),
+              title: const Text('About', style: TextStyle(color: Colors.white)),
+              subtitle: const Text(
+                'AntiGravity Notes v1.0',
+                style: TextStyle(color: Colors.grey),
+              ),
+              onTap: () {},
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.color_lens_outlined,
+                color: Colors.white70,
+              ),
+              title: const Text('Theme', style: TextStyle(color: Colors.white)),
+              subtitle: const Text(
+                'Dark Mode',
+                style: TextStyle(color: Colors.grey),
+              ),
+              onTap: () {},
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Close',
+              style: TextStyle(color: Colors.blueAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Basic responsive check
     final isDesktop = MediaQuery.of(context).size.width > 800;
 
     return ListenableBuilder(
@@ -111,7 +156,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       builder: (context, _) {
         return Scaffold(
           backgroundColor: const Color(0xFF1B2535),
-          // On mobile, show an AppBar to open the drawer
           appBar: isDesktop
               ? null
               : AppBar(
@@ -122,6 +166,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     color: Colors.white,
                     fontSize: 18,
                   ),
+                  actions: [
+                    IconButton(
+                      icon: const Icon(Icons.settings),
+                      onPressed: () => _showMasterSettings(context),
+                    ),
+                  ],
                 ),
           drawer: isDesktop
               ? null
@@ -138,10 +188,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Navigator.pop(context);
                   },
                   onImportNote: _handleImport,
+                  onSettings: () {
+                    Navigator.pop(context);
+                    _showMasterSettings(context);
+                  },
                 ),
           body: Row(
             children: [
-              // On Desktop, show Sidebar permanently
               if (isDesktop)
                 Sidebar(
                   recentFiles: _viewModel.recentFiles,
@@ -149,14 +202,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   onOpenFolder: _handleOpenFolder,
                   onDelete: _handleDelete,
                   onNewNote: _viewModel.reset,
-                  // Import not needed on desktop per request (or add if consistently needed)
-                  // Request was "on mobile app give an option"
-                  // But Sidebar logic handles Platform check internally for button visibility.
-                  // We can pass it anyway.
                   onImportNote: _handleImport,
+                  onSettings: () => _showMasterSettings(context),
                 ),
 
-              // Main Content Area
               Expanded(child: ContentArea(viewModel: _viewModel)),
             ],
           ),

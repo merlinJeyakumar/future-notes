@@ -11,7 +11,8 @@ class Sidebar extends StatelessWidget {
   final Function(RecentFile) onOpenFolder;
   final Function(RecentFile) onDelete;
   final VoidCallback onNewNote;
-  final VoidCallback? onImportNote; // Added callback
+  final VoidCallback? onImportNote;
+  final VoidCallback? onSettings; // Added callback
 
   const Sidebar({
     super.key,
@@ -21,13 +22,14 @@ class Sidebar extends StatelessWidget {
     required this.onDelete,
     required this.onNewNote,
     this.onImportNote,
+    this.onSettings,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: 280,
-      color: const Color(0xFF161E2D), // Dark sidebar background
+      color: const Color(0xFF161E2D),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -50,23 +52,51 @@ class Sidebar extends StatelessWidget {
             ),
           ),
 
-          // New Note Button
+          // New Note & Settings Button
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: onNewNote,
-                icon: const Icon(Icons.add),
-                label: const Text('New Note'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blueAccent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: onNewNote,
+                      icon: const Icon(Icons.add),
+                      label: const Text('New Note'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blueAccent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+                  if (onSettings != null) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E293B),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF334155)),
+                      ),
+                      child: IconButton(
+                        onPressed: onSettings,
+                        icon: const Icon(Icons.settings, color: Colors.white70),
+                        tooltip: 'Settings',
+                        splashRadius: 24,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        // Remove box constraint to allow filling height?
+                        // Actually icon button is fixed size usually.
+                        // We want the container to be wide enough but match height.
+                        // crossAxisAlignment.stretch handles height.
+                        // We just need center alignment which IconButton is by default?
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ),

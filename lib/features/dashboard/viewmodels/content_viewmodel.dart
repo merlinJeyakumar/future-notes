@@ -262,6 +262,10 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
+  bool verifyPassword(String password) {
+    return _currentPassword == password;
+  }
+
   void manualLock() {
     if (_currentFileName != null) {
       _sessionPasswords.remove(_currentFileName);

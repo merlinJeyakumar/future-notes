@@ -562,9 +562,15 @@ class ContentArea extends StatelessWidget {
     );
   }
 
-  void _handleLockAction(BuildContext context) {
+  void _handleLockAction(BuildContext context) async {
     if (viewModel.isLocked) {
-      _showPasswordDialog(context, isUnlock: true);
+      final password = await _showPasswordDialog(
+        context,
+        mode: PasswordMode.unlock,
+      );
+      if (password != null && password.isNotEmpty) {
+        viewModel.unlockNote(password);
+      }
     } else if (viewModel.isPasswordSet) {
       showDialog(
         context: context,
@@ -593,6 +599,7 @@ class ContentArea extends StatelessWidget {
               onPressed: () {
                 viewModel.clearPassword();
                 Navigator.pop(context);
+                _promptSave(context);
               },
               child: const Text(
                 'Remove',
@@ -603,26 +610,28 @@ class ContentArea extends StatelessWidget {
         ),
       );
     } else {
-      _showPasswordDialog(context);
+      final password = await _showPasswordDialog(
+        context,
+        mode: PasswordMode.set,
+      );
+      if (password != null && password.isNotEmpty) {
+        viewModel.setPassword(password);
+        _promptSave(context);
+      }
     }
   }
 
-  Future<void> _showPasswordDialog(
+  Future<String?> _showPasswordDialog(
     BuildContext context, {
-    bool isUnlock = false,
+    PasswordMode mode = PasswordMode.unlock,
   }) async {
-    await showDialog(
+    return showDialog<String>(
       context: context,
       builder: (context) {
         return PasswordDialog(
-          isUnlock: isUnlock,
-          onConfirm: (password) {
-            if (isUnlock) {
-              viewModel.unlockNote(password);
-            } else {
-              viewModel.setPassword(password);
-            }
-          },
+          mode: mode,
+          onVerifyCurrent: (current) => viewModel.verifyPassword(current),
+          onConfirm: (_) {}, // Handled by return value
         );
       },
     );
@@ -657,7 +666,15 @@ class ContentArea extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: () => _showPasswordDialog(context, isUnlock: true),
+              onPressed: () async {
+                final password = await _showPasswordDialog(
+                  context,
+                  mode: PasswordMode.unlock,
+                );
+                if (password != null && password.isNotEmpty) {
+                  viewModel.unlockNote(password);
+                }
+              },
               style: ElevatedButton.styleFrom(
                 backgroundColor: _DesignColors.accent,
                 foregroundColor: Colors.white,
@@ -748,12 +765,17 @@ class ContentArea extends StatelessWidget {
               title: viewModel.isPasswordSet
                   ? 'Change Password'
                   : 'Set Password',
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(context);
-                // If set, we might want to ask for old password first?
-                // For simplicity now, we just open the set password dialog which overwrites.
-                // Or if we want "Change", we reuse the set password flow.
-                _showPasswordDialog(context, isUnlock: false);
+                final mode = viewModel.isPasswordSet
+                    ? PasswordMode.update
+                    : PasswordMode.set;
+
+                final password = await _showPasswordDialog(context, mode: mode);
+                if (password != null && password.isNotEmpty) {
+                  viewModel.setPassword(password);
+                  _promptSave(context);
+                }
               },
             ),
 
@@ -813,6 +835,44 @@ class ContentArea extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       onTap: onTap,
       hoverColor: _DesignColors.divider.withOpacity(0.2),
+    );
+  }
+
+  void _promptSave(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _DesignColors.toolbarIsland,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Settings Updated',
+          style: TextStyle(color: _DesignColors.textPrimary),
+        ),
+        content: const Text(
+          'Configuration changed. Do you want to save the file now?',
+          style: TextStyle(color: _DesignColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: _DesignColors.subtleGray),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              viewModel.saveNote();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _DesignColors.saveButton,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Save File'),
+          ),
+        ],
+      ),
     );
   }
 

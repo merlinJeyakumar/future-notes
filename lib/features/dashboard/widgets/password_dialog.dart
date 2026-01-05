@@ -88,8 +88,9 @@ class _PasswordDialogState extends State<PasswordDialog> {
               suffixIcon: IconButton(
                 icon: Icon(
                   _obscureText ? Icons.visibility : Icons.visibility_off,
-                  color: Colors.grey,
+                  color: Colors.blueAccent, // Matched with prefix icon
                 ),
+                tooltip: _obscureText ? 'Show password' : 'Hide password',
                 onPressed: () {
                   setState(() {
                     _obscureText = !_obscureText;

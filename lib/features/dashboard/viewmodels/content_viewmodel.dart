@@ -43,6 +43,7 @@ class ContentViewModel extends BaseViewModel {
   List<RecentFile> get recentFiles => _recentFiles;
 
   bool get isPasswordSet => _currentPassword != null;
+  String? get currentFileName => _currentFileName;
 
   late final CodeController htmlController;
   bool _isHtmlMode = false;

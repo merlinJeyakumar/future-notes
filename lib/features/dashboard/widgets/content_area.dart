@@ -157,7 +157,7 @@ class ContentArea extends StatelessWidget {
         _buildSubtleIconButton(
           Icons.settings_outlined,
           'Settings',
-          onPressed: () {},
+          onPressed: () => _showSettingsMenu(context),
         ),
       ],
     );
@@ -705,6 +705,153 @@ class ContentArea extends StatelessWidget {
               focusNode: viewModel.focusNode,
               scrollController: viewModel.scrollController,
             ),
+    );
+  }
+
+  void _showSettingsMenu(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _DesignColors.toolbarIsland,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'File Settings',
+              style: TextStyle(color: _DesignColors.textPrimary, fontSize: 18),
+            ),
+            if (viewModel.currentFileName != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  viewModel.currentFileName!,
+                  style: const TextStyle(
+                    color: _DesignColors.textSecondary,
+                    fontSize: 12,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            const Divider(color: _DesignColors.divider),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Change/Set Password
+            _buildSettingsTile(
+              icon: viewModel.isPasswordSet
+                  ? Icons.lock_reset_rounded
+                  : Icons.lock_outline_rounded,
+              title: viewModel.isPasswordSet
+                  ? 'Change Password'
+                  : 'Set Password',
+              onTap: () {
+                Navigator.pop(context);
+                // If set, we might want to ask for old password first?
+                // For simplicity now, we just open the set password dialog which overwrites.
+                // Or if we want "Change", we reuse the set password flow.
+                _showPasswordDialog(context, isUnlock: false);
+              },
+            ),
+
+            // Remove Password (only if set)
+            if (viewModel.isPasswordSet)
+              _buildSettingsTile(
+                icon: Icons.lock_open_rounded,
+                title: 'Remove Password',
+                textColor: Colors.orangeAccent,
+                iconColor: Colors.orangeAccent,
+                onTap: () {
+                  Navigator.pop(context); // Close settings
+                  _handleLockAction(
+                    context,
+                  ); // This handles the remove logic/dialog
+                },
+              ),
+
+            // Delete File
+            _buildSettingsTile(
+              icon: Icons.delete_outline_rounded,
+              title: 'Delete File',
+              textColor: Colors.redAccent,
+              iconColor: Colors.redAccent,
+              onTap: () {
+                Navigator.pop(context);
+                _confirmDelete(context);
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Close',
+              style: TextStyle(color: _DesignColors.subtleGray),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSettingsTile({
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+    Color textColor = _DesignColors.textPrimary,
+    Color iconColor = _DesignColors.textPrimary,
+  }) {
+    return ListTile(
+      leading: Icon(icon, color: iconColor, size: 20),
+      title: Text(title, style: TextStyle(color: textColor, fontSize: 14)),
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      onTap: onTap,
+      hoverColor: _DesignColors.divider.withOpacity(0.2),
+    );
+  }
+
+  void _confirmDelete(BuildContext context) {
+    if (viewModel.currentFileName == null) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _DesignColors.toolbarIsland,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Delete Note?',
+          style: TextStyle(color: _DesignColors.textPrimary),
+        ),
+        content: const Text(
+          'This action cannot be undone. Are you sure you want to delete this file?',
+          style: TextStyle(color: _DesignColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: _DesignColors.subtleGray),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await viewModel.deleteNote(viewModel.currentFileName!);
+            },
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -117,6 +117,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
               : AppBar(
                   backgroundColor: const Color(0xFF161E2D),
                   title: const Text('Dashboard'),
+                  actions: [
+                    IconButton(
+                      icon: const Icon(Icons.settings_outlined),
+                      onPressed: () {
+                        // TODO: Implement settings navigation
+                      },
+                    ),
+                  ],
                   iconTheme: const IconThemeData(color: Colors.white),
                   titleTextStyle: const TextStyle(
                     color: Colors.white,

@@ -68,7 +68,10 @@ class ContentArea extends StatelessWidget {
           if (!isMobile) const Spacer(),
 
           // Secondary actions (right side)
-          _buildSecondaryActions(context),
+          _buildSecondaryActions(
+            context,
+            showSettingsIcon: MediaQuery.of(context).size.width > 800,
+          ),
 
           SizedBox(width: isMobile ? 8 : 16),
 
@@ -129,7 +132,10 @@ class ContentArea extends StatelessWidget {
   }
 
   /// Secondary action icons (link, lock, settings)
-  Widget _buildSecondaryActions(BuildContext context) {
+  Widget _buildSecondaryActions(
+    BuildContext context, {
+    required bool showSettingsIcon,
+  }) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -151,11 +157,12 @@ class ContentArea extends StatelessWidget {
           onPressed: () => _handleLockAction(context),
           isActive: viewModel.isLocked || viewModel.isPasswordSet,
         ),
-        _buildSubtleIconButton(
-          Icons.settings_outlined,
-          'Settings',
-          onPressed: () {},
-        ),
+        if (showSettingsIcon)
+          _buildSubtleIconButton(
+            Icons.settings_outlined,
+            'Settings',
+            onPressed: () {},
+          ),
       ],
     );
   }

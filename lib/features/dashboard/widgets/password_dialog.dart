@@ -5,7 +5,7 @@ enum PasswordMode { unlock, set, update }
 class PasswordDialog extends StatefulWidget {
   final PasswordMode mode;
   final Function(String) onConfirm;
-  final bool Function(String)? onVerifyCurrent;
+  final Future<bool> Function(String)? onVerifyCurrent;
 
   const PasswordDialog({
     super.key,
@@ -13,9 +13,6 @@ class PasswordDialog extends StatefulWidget {
     required this.onConfirm,
     this.onVerifyCurrent,
   });
-
-  // Backward compatibility constructor if needed, or simply update calls
-  // We will update calls in ContentArea, so standard constructor is fine.
 
   @override
   State<PasswordDialog> createState() => _PasswordDialogState();
@@ -27,6 +24,7 @@ class _PasswordDialogState extends State<PasswordDialog> {
   final _confirmController = TextEditingController();
 
   bool _obscureText = true;
+  bool _isVerifying = false;
   String? _errorText;
 
   @override
@@ -37,38 +35,73 @@ class _PasswordDialogState extends State<PasswordDialog> {
     super.dispose();
   }
 
-  void _submit() {
-    setState(() => _errorText = null);
+  Future<void> _submit() async {
+    setState(() {
+      _errorText = null;
+      _isVerifying = true;
+    });
 
-    // Mode specific validation
-    if (widget.mode == PasswordMode.update) {
-      if (widget.onVerifyCurrent != null) {
-        if (!widget.onVerifyCurrent!(_currentController.text)) {
-          setState(() => _errorText = "Incorrect current password");
+    try {
+      // Mode specific validation
+      if (widget.mode == PasswordMode.update) {
+        if (widget.onVerifyCurrent != null) {
+          final isValid = await widget.onVerifyCurrent!(
+            _currentController.text,
+          );
+          if (!isValid) {
+            setState(() {
+              _errorText = "Incorrect current password";
+              _isVerifying = false;
+            });
+            return;
+          }
+        }
+      } else if (widget.mode == PasswordMode.unlock) {
+        if (widget.onVerifyCurrent != null) {
+          final isValid = await widget.onVerifyCurrent!(
+            _passwordController.text,
+          );
+          if (!isValid) {
+            setState(() {
+              _errorText = "Incorrect password";
+              _isVerifying = false;
+            });
+            return;
+          }
+        }
+      }
+
+      if (widget.mode == PasswordMode.set ||
+          widget.mode == PasswordMode.update) {
+        if (_passwordController.text.length < 4) {
+          setState(() {
+            _errorText = "Password must be at least 4 characters";
+            _isVerifying = false;
+          });
+          return;
+        }
+        if (_passwordController.text != _confirmController.text) {
+          setState(() {
+            _errorText = "Passwords do not match";
+            _isVerifying = false;
+          });
           return;
         }
       }
-    }
 
-    if (widget.mode == PasswordMode.set || widget.mode == PasswordMode.update) {
-      if (_passwordController.text.length < 4) {
-        setState(() => _errorText = "Password must be at least 4 characters");
-        return;
+      // Success
+      final result = _passwordController.text;
+
+      if (result.isNotEmpty) {
+        widget.onConfirm(result);
+        if (mounted) Navigator.pop(context, result);
       }
-      if (_passwordController.text != _confirmController.text) {
-        setState(() => _errorText = "Passwords do not match");
-        return;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isVerifying = false;
+        });
       }
-    }
-
-    // Success
-    final result = widget.mode == PasswordMode.unlock
-        ? _passwordController.text
-        : _passwordController.text;
-
-    if (result.isNotEmpty) {
-      widget.onConfirm(result);
-      Navigator.pop(context, result);
     }
   }
 
@@ -162,11 +195,11 @@ class _PasswordDialogState extends State<PasswordDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: _isVerifying ? null : () => Navigator.pop(context),
           child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
         ),
         ElevatedButton(
-          onPressed: _submit,
+          onPressed: _isVerifying ? null : _submit,
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.blueAccent,
             foregroundColor: Colors.white,
@@ -174,7 +207,16 @@ class _PasswordDialogState extends State<PasswordDialog> {
               borderRadius: BorderRadius.circular(8),
             ),
           ),
-          child: Text(widget.mode == PasswordMode.unlock ? 'Unlock' : 'Save'),
+          child: _isVerifying
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : Text(widget.mode == PasswordMode.unlock ? 'Unlock' : 'Save'),
         ),
       ],
     );
@@ -190,8 +232,11 @@ class _PasswordDialogState extends State<PasswordDialog> {
       controller: controller,
       obscureText: _obscureText,
       autofocus: autofocus,
-      textInputAction: isLast ? TextInputAction.done : TextInputAction.next,
-      onSubmitted: isLast ? (_) => _submit() : null,
+      enabled: !_isVerifying,
+      textInputAction: isLast || widget.mode == PasswordMode.unlock
+          ? TextInputAction.done
+          : TextInputAction.next,
+      onSubmitted: (_) => _submit(),
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
         labelText: label,

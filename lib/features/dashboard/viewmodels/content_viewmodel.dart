@@ -236,14 +236,38 @@ class ContentViewModel extends BaseViewModel {
     _scheduleAutoSave();
   }
 
-  void unlockNote(String password) {
-    // Re-read logic or just store `_tempEncryptedContent`?
-    // To be safe, we should reload/re-decrypt using the password.
-    // However, we don't hold the encrypted content in memory here optimally.
-    // Let's reload the file to be safe and clean.
-    if (_currentFileName != null) {
+  Future<bool> unlockNote(String password) async {
+    if (_currentFileName == null) return false;
+
+    try {
+      final jsonString = await _fileService.readFile(_currentFileName!);
+      if (jsonString == null) return false;
+
+      // 1. App Decrypt
+      final appDecrypted = _encryptionService.decryptApp(jsonString);
+      final jsonMap = json.decode(appDecrypted);
+      final note = NoteModel.fromJson(jsonMap);
+
+      // 2. User Decrypt
+      final decryptedContent = _encryptionService.decrypt(
+        note.content,
+        password: password,
+      );
+
+      if (decryptedContent.startsWith("Error decrypting:")) {
+        return false;
+      }
+
+      // Success
+      _currentPassword = password;
       _sessionPasswords[_currentFileName!] = password;
-      loadNote(_currentFileName!);
+      _loadContentToQuill(decryptedContent);
+      _isLocked = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      print("Unlock failed: $e");
+      return false;
     }
   }
 

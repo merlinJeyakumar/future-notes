@@ -593,7 +593,12 @@ class ContentArea extends StatelessWidget {
       builder: (context) {
         return PasswordDialog(
           mode: mode,
-          onVerifyCurrent: (current) => viewModel.verifyPassword(current),
+          onVerifyCurrent: (password) async {
+            if (mode == PasswordMode.unlock) {
+              return await viewModel.unlockNote(password);
+            }
+            return viewModel.verifyPassword(password);
+          },
           onConfirm: (_) {}, // Handled by return value
         );
       },

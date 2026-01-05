@@ -308,6 +308,21 @@ class ContentViewModel extends BaseViewModel {
       htmlContent = converter.convert();
     }
 
+    // Check if content is empty (strip HTML tags if needed, or just check length basics)
+    // For a robust check, we look at plain text equivalent.
+    final plainText = _isHtmlMode
+        ? htmlController.text.replaceAll(RegExp(r'<[^>]*>'), '').trim()
+        : quillController.document.toPlainText().trim();
+
+    // If new file and empty content, do not save
+    if (_currentFileName == null &&
+        plainText.isEmpty &&
+        titleController.text == "New Note") {
+      print("Skipping save of empty new note");
+      if (!isAutoSave) setBusy(false);
+      return;
+    }
+
     // If password set, encrypt content with USER PASSWORD
     if (_currentPassword != null) {
       // For encryption, we need to save the HTML string, then encrypt THAT string.

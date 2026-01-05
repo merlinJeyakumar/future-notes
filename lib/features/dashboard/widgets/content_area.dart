@@ -142,18 +142,13 @@ class ContentArea extends StatelessWidget {
             'Attach file',
             onPressed: viewModel.pickFile,
           ),
-        _buildSubtleIconButton(
-          viewModel.isLocked
-              ? Icons.lock_rounded
-              : (viewModel.isPasswordSet
-                    ? Icons.lock_rounded
-                    : Icons.lock_open_rounded),
-          viewModel.isLocked
-              ? 'Unlock'
-              : (viewModel.isPasswordSet ? 'Locked' : 'Set password'),
-          onPressed: () => _handleLockAction(context),
-          isActive: viewModel.isLocked || viewModel.isPasswordSet,
-        ),
+        if (viewModel.isLocked || viewModel.isPasswordSet)
+          _buildSubtleIconButton(
+            viewModel.isLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
+            viewModel.isLocked ? 'Unlock' : 'Lock File',
+            onPressed: () => _handleLockAction(context),
+            isActive: true,
+          ),
         _buildSubtleIconButton(
           Icons.settings_outlined,
           'Settings',
@@ -169,6 +164,7 @@ class ContentArea extends StatelessWidget {
     String tooltip, {
     required VoidCallback onPressed,
     bool isActive = false,
+    Color? color,
   }) {
     return Tooltip(
       message: tooltip,
@@ -182,7 +178,9 @@ class ContentArea extends StatelessWidget {
             child: Icon(
               icon,
               size: 18,
-              color: isActive ? _DesignColors.accent : _DesignColors.subtleGray,
+              color:
+                  color ??
+                  (isActive ? _DesignColors.accent : _DesignColors.subtleGray),
             ),
           ),
         ),
@@ -572,43 +570,8 @@ class ContentArea extends StatelessWidget {
         viewModel.unlockNote(password);
       }
     } else if (viewModel.isPasswordSet) {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          backgroundColor: _DesignColors.toolbarIsland,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: const Text(
-            'Remove Password?',
-            style: TextStyle(color: _DesignColors.textPrimary),
-          ),
-          content: const Text(
-            'Are you sure you want to remove the password protection?',
-            style: TextStyle(color: _DesignColors.textSecondary),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(
-                'Cancel',
-                style: TextStyle(color: _DesignColors.subtleGray),
-              ),
-            ),
-            TextButton(
-              onPressed: () {
-                viewModel.clearPassword();
-                Navigator.pop(context);
-                _promptSave(context);
-              },
-              child: const Text(
-                'Remove',
-                style: TextStyle(color: Colors.redAccent),
-              ),
-            ),
-          ],
-        ),
-      );
+      // Lock the file manually as requested
+      viewModel.manualLock();
     } else {
       final password = await _showPasswordDialog(
         context,

@@ -130,10 +130,25 @@ class Sidebar extends StatelessWidget {
                     color: Colors.white70,
                     size: 20,
                   ),
-                  title: Text(
-                    file.title,
-                    style: const TextStyle(color: Colors.white70),
-                    overflow: TextOverflow.ellipsis,
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          file.title,
+                          style: const TextStyle(color: Colors.white70),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (file.isLocked)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 8),
+                          child: Icon(
+                            Icons.lock_outline,
+                            color: Colors.amberAccent,
+                            size: 14,
+                          ),
+                        ),
+                    ],
                   ),
                   onTap: () => onFileSelected(file.path),
 

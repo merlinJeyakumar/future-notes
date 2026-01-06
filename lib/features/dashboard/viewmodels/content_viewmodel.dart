@@ -530,6 +530,129 @@ class ContentViewModel extends BaseViewModel {
       notifyListeners();
     }
   }
+
+  Future<int> changePassword(String newPassword) async {
+    final oldPassword = _currentPassword;
+    if (oldPassword == null) return 0;
+
+    setBusy(true);
+    int count = 0;
+    try {
+      final files = await _fileService.getRecentFiles();
+      for (final fileName in files) {
+        try {
+          // Read file
+          final content = await _fileService.readFile(fileName);
+          if (content == null) continue;
+
+          // Decrypt App Layer
+          final appDecrypted = await _encryptionService.decryptApp(content);
+          if (appDecrypted.isEmpty) continue; // Not app encrypted or fail
+
+          // Parse
+          final jsonMap = json.decode(appDecrypted);
+          final note = NoteModel.fromJson(jsonMap);
+
+          // Check if locked
+          if (note.isLocked) {
+            // Try decrypt content
+            final decrypted = await _encryptionService.decrypt(
+              note.content,
+              password: oldPassword,
+            );
+            if (decrypted.startsWith("Error decrypting")) {
+              print("Skipping $fileName: Decryption failed with old password");
+              continue;
+            }
+
+            // Re-encrypt content
+            final newEncrypted = await _encryptionService.encrypt(
+              decrypted,
+              password: newPassword,
+            );
+
+            // Re-encrypt attachments
+            final List<AttachmentModel> newAttachments = [];
+
+            for (final attachment in note.attachments) {
+              final oldData = await _fileService.readAttachment(
+                note.id,
+                attachment.id,
+              );
+              if (oldData != null) {
+                final decryptedData = await _encryptionService.decryptBinary(
+                  oldData,
+                  password: oldPassword,
+                );
+                if (decryptedData.isNotEmpty) {
+                  final newData = await _encryptionService.encryptBinary(
+                    decryptedData,
+                    password: newPassword,
+                  );
+                  // Generate new ID for re-encrypted attachment
+                  final newId = await _fileService.saveAttachment(
+                    newData,
+                    note.id,
+                  );
+
+                  newAttachments.add(
+                    AttachmentModel(
+                      id: newId,
+                      fileName: attachment.fileName,
+                      size: attachment.size,
+                      mimeType: attachment.mimeType,
+                      isLoading: false,
+                    ),
+                  );
+                } else {
+                  newAttachments.add(attachment);
+                }
+              } else {
+                newAttachments.add(attachment);
+              }
+            }
+
+            // Update Note
+            final newNote = NoteModel(
+              id: note.id,
+              title: note.title,
+              content: newEncrypted,
+              isLocked: true, // Remains locked
+              timestamp: note.timestamp,
+              attachments: newAttachments,
+            );
+
+            // Encrypt App Layer
+            final newJson = json.encode(newNote.toJson());
+            final newAppEncrypted = await _encryptionService.encryptApp(
+              newJson,
+            );
+
+            // Save
+            if (fileName.startsWith('note_')) {
+              await _fileService.saveNoteContent(note.id, newAppEncrypted);
+            } else {
+              await _fileService.saveFile(newAppEncrypted, fileName);
+            }
+
+            count++;
+
+            // If this is the current file, update session
+            if (_currentFileName == fileName) {
+              _currentPassword = newPassword;
+              _sessionPasswords[fileName] = newPassword;
+            }
+          }
+        } catch (e) {
+          print("Error processing $fileName: $e");
+        }
+      }
+    } finally {
+      setBusy(false);
+    }
+    return count;
+  }
+
   // endregion
 
   // region Saving

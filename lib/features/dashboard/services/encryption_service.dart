@@ -96,23 +96,40 @@ class EncryptionService implements IEncryptionService {
 
   @override
   Uint8List decryptBinary(Uint8List data, {String? password}) {
-    try {
-      final key = password != null ? _deriveKey(password) : _defaultKey;
-
-      if (data.length < 16) throw Exception("Invalid data length");
-
-      final ivBytes = data.sublist(0, 16);
-      final cipherBytes = data.sublist(16);
-
-      final iv = IV(ivBytes);
-      final encrypted = Encrypted(cipherBytes);
-
-      final encrypter = Encrypter(AES(key));
-      return Uint8List.fromList(encrypter.decryptBytes(encrypted, iv: iv));
-    } catch (e) {
-      print("Error decrypting binary: $e");
+    if (data.length < 16) {
+      print("Error decrypting binary: Invalid data length");
       return Uint8List(0);
     }
+
+    final ivBytes = data.sublist(0, 16);
+    final cipherBytes = data.sublist(16);
+    final iv = IV(ivBytes);
+    final encrypted = Encrypted(cipherBytes);
+
+    // Helper to try decrypting with a specific key
+    Uint8List? tryDecrypt(Key key) {
+      try {
+        final encrypter = Encrypter(AES(key));
+        return Uint8List.fromList(encrypter.decryptBytes(encrypted, iv: iv));
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // 1. Try with provided password (or default if null)
+    final primaryKey = password != null ? _deriveKey(password) : _defaultKey;
+    var result = tryDecrypt(primaryKey);
+
+    // 2. Fallback: If failed and we used a password, try the Default Key
+    // (Handles case where attachment was added before note was locked)
+    if (result == null && password != null) {
+      result = tryDecrypt(_defaultKey);
+    }
+
+    if (result != null) return result;
+
+    print("Error decrypting binary: Decryption failed with all keys");
+    return Uint8List(0);
   }
 
   @override

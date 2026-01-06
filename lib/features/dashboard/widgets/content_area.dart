@@ -105,60 +105,91 @@ class ContentArea extends StatelessWidget {
     BuildContext context,
     AttachmentModel attachment,
   ) {
+    // 1. Loading State
+    if (attachment.isLoading) {
+      return Container(
+        width: 80,
+        decoration: BoxDecoration(
+          color: _DesignColors.toolbarIsland,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _DesignColors.divider.withOpacity(0.3)),
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              SizedBox(height: 4),
+              Text("Loading...", style: TextStyle(fontSize: 8)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final ext = attachment.fileName.split('.').last.toLowerCase();
+    final isImg = ['jpg', 'jpeg', 'png', 'webp', 'heic'].contains(ext);
+
     return GestureDetector(
       onTap: () => _viewAttachment(context, attachment),
-      onSecondaryTap: () =>
-          _showAttachmentMenu(context, attachment), // Right click
+      onSecondaryTap: () => _showAttachmentMenu(context, attachment),
       onLongPress: () => _showAttachmentMenu(context, attachment),
       child: Column(
         children: [
           Expanded(
-            child: FutureBuilder<Uint8List?>(
-              future: viewModel.readAttachment(attachment.id),
-              builder: (context, snapshot) {
-                final data = snapshot.data;
-                Widget content;
-
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  content = const Center(
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+            child: Container(
+              width: 80,
+              decoration: BoxDecoration(
+                color: _DesignColors.toolbarIsland,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: _DesignColors.divider.withOpacity(0.3),
+                ),
+              ),
+              child: isImg
+                  ? FutureBuilder<Uint8List?>(
+                      future: viewModel.readAttachment(attachment.id),
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return const Center(
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          );
+                        }
+                        if (snapshot.hasData && snapshot.data != null) {
+                          return ClipRRect(
+                            borderRadius: BorderRadius.circular(7),
+                            child: Image.memory(
+                              snapshot.data!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (c, e, s) => const Icon(
+                                Icons.broken_image,
+                                color: _DesignColors.subtleGray,
+                              ),
+                            ),
+                          );
+                        }
+                        return const Icon(
+                          Icons.broken_image,
+                          color: _DesignColors.subtleGray,
+                        );
+                      },
+                    )
+                  : const Center(
+                      child: Icon(
+                        Icons.insert_drive_file,
+                        size: 32,
+                        color: _DesignColors.accent,
+                      ),
                     ),
-                  );
-                } else if (data != null) {
-                  if (_isImage(attachment.fileName, data)) {
-                    content = ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.memory(data, fit: BoxFit.cover),
-                    );
-                  } else {
-                    content = const Icon(
-                      Icons.insert_drive_file,
-                      size: 32,
-                      color: _DesignColors.accent,
-                    );
-                  }
-                } else {
-                  content = const Icon(
-                    Icons.broken_image,
-                    color: _DesignColors.subtleGray,
-                  );
-                }
-
-                return Container(
-                  width: 80,
-                  decoration: BoxDecoration(
-                    color: _DesignColors.toolbarIsland,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: _DesignColors.divider.withOpacity(0.3),
-                    ),
-                  ),
-                  child: Center(child: content),
-                );
-              },
             ),
           ),
           const SizedBox(height: 4),
@@ -247,37 +278,46 @@ class ContentArea extends StatelessWidget {
               future: viewModel.readAttachment(attachment.id),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const CircularProgressIndicator();
+                  return Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: _DesignColors.toolbarIsland,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text(
+                          "Decrypting...",
+                          style: TextStyle(color: _DesignColors.textPrimary),
+                        ),
+                      ],
+                    ),
+                  );
                 }
-                if (snapshot.hasData && snapshot.data != null) {
-                  // If data is valid (not empty from error)
-                  final data = snapshot.data!;
-                  if (data.isNotEmpty && _isImage(attachment.fileName, data)) {
+
+                final data = snapshot.data;
+                if (data != null && data.isNotEmpty) {
+                  if (_isImage(attachment.fileName, data)) {
                     return InteractiveViewer(
+                      maxScale: 5.0,
                       child: Image.memory(
                         data,
+                        fit: BoxFit.contain,
                         errorBuilder: (context, error, stackTrace) {
-                          return const Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.broken_image,
-                                color: Colors.white,
-                                size: 48,
-                              ),
-                              SizedBox(height: 8),
-                              Text(
-                                "Image Error",
-                                style: TextStyle(color: Colors.white),
-                              ),
-                            ],
+                          return const Icon(
+                            Icons.broken_image,
+                            color: Colors.white,
+                            size: 64,
                           );
                         },
                       ),
                     );
                   } else {
                     return Container(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
                         color: _DesignColors.toolbarIsland,
                         borderRadius: BorderRadius.circular(12),
@@ -288,20 +328,19 @@ class ContentArea extends StatelessWidget {
                           const Icon(
                             Icons.insert_drive_file,
                             size: 64,
-                            color: _DesignColors.textPrimary,
+                            color: _DesignColors.accent,
                           ),
                           const SizedBox(height: 16),
                           Text(
                             attachment.fileName,
                             style: const TextStyle(
                               color: _DesignColors.textPrimary,
-                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
                             ),
-                            textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            "Size: ${attachment.size} bytes",
+                            "${(attachment.size / 1024).toStringAsFixed(1)} KB",
                             style: const TextStyle(
                               color: _DesignColors.textSecondary,
                             ),
@@ -315,18 +354,33 @@ class ContentArea extends StatelessWidget {
                       ),
                     );
                   }
+                } else {
+                  return Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: _DesignColors.toolbarIsland,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.error, color: Colors.red, size: 48),
+                        SizedBox(height: 16),
+                        Text(
+                          "Failed to load attachment",
+                          style: TextStyle(color: _DesignColors.textPrimary),
+                        ),
+                      ],
+                    ),
+                  );
                 }
-                return const Text(
-                  "Failed to load",
-                  style: TextStyle(color: Colors.red),
-                );
               },
             ),
             Positioned(
-              top: 20,
-              right: 20,
+              top: 0,
+              right: 0,
               child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                icon: const Icon(Icons.close, color: Colors.white),
                 onPressed: () => Navigator.pop(context),
               ),
             ),

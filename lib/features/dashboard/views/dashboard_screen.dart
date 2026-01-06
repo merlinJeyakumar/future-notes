@@ -201,20 +201,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       _showMasterSettings(context);
                     },
                   ),
-            body: Row(
+            body: Stack(
               children: [
-                if (isDesktop)
-                  Sidebar(
-                    recentFiles: _viewModel.recentFiles,
-                    onFileSelected: (path) => _viewModel.loadNote(path),
-                    onOpenFolder: _handleOpenFolder,
-                    onDelete: _handleDelete,
-                    onNewNote: _viewModel.reset,
-                    onImportNote: _handleImport,
-                    onSettings: () => _showMasterSettings(context),
+                Row(
+                  children: [
+                    if (isDesktop)
+                      Sidebar(
+                        recentFiles: _viewModel.recentFiles,
+                        onFileSelected: (path) => _viewModel.loadNote(path),
+                        onOpenFolder: _handleOpenFolder,
+                        onDelete: _handleDelete,
+                        onNewNote: _viewModel.reset,
+                        onImportNote: _handleImport,
+                        onSettings: () => _showMasterSettings(context),
+                      ),
+                    Expanded(child: ContentArea(viewModel: _viewModel)),
+                  ],
+                ),
+                if (_viewModel.isBusy)
+                  Container(
+                    color: Colors.black54,
+                    child: const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(color: Colors.blueAccent),
+                          SizedBox(height: 16),
+                          Text(
+                            "Processing...",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-
-                Expanded(child: ContentArea(viewModel: _viewModel)),
               ],
             ),
           ),

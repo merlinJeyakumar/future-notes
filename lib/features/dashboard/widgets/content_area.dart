@@ -52,340 +52,14 @@ class ContentArea extends StatelessWidget {
                   Expanded(child: _buildInputArea(context)),
 
                   // Attachments Bar
+                  // Attachments Bar
                   if (!viewModel.isLocked && viewModel.attachments.isNotEmpty)
-                    _buildAttachmentBar(context),
+                    AttachmentBar(viewModel: viewModel),
                 ],
               ),
             ),
           );
         },
-      ),
-    );
-  }
-
-  Widget _buildAttachmentBar(BuildContext context) {
-    return Container(
-      height: 120, // Increased height for label
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-      decoration: BoxDecoration(
-        color: _DesignColors.background,
-        border: Border(
-          top: BorderSide(color: _DesignColors.divider.withOpacity(0.3)),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            "Attachments (${viewModel.attachments.length})",
-            style: const TextStyle(
-              color: _DesignColors.textSecondary,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: viewModel.attachments.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (context, index) {
-                final attachment = viewModel.attachments[index];
-                return _buildAttachmentItem(context, attachment);
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAttachmentItem(
-    BuildContext context,
-    AttachmentModel attachment,
-  ) {
-    // 1. Loading State
-    if (attachment.isLoading) {
-      return Container(
-        width: 80,
-        decoration: BoxDecoration(
-          color: _DesignColors.toolbarIsland,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: _DesignColors.divider.withOpacity(0.3)),
-        ),
-        child: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              SizedBox(height: 4),
-              Text("Loading...", style: TextStyle(fontSize: 8)),
-            ],
-          ),
-        ),
-      );
-    }
-
-    final ext = attachment.fileName.split('.').last.toLowerCase();
-    final isImg = ['jpg', 'jpeg', 'png', 'webp', 'heic'].contains(ext);
-
-    return GestureDetector(
-      onTap: () => _viewAttachment(context, attachment),
-      onSecondaryTap: () => _showAttachmentMenu(context, attachment),
-      onLongPress: () => _showAttachmentMenu(context, attachment),
-      child: Column(
-        children: [
-          Expanded(
-            child: Container(
-              width: 80,
-              decoration: BoxDecoration(
-                color: _DesignColors.toolbarIsland,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _DesignColors.divider.withOpacity(0.3),
-                ),
-              ),
-              child: isImg
-                  ? FutureBuilder<Uint8List?>(
-                      future: viewModel.readAttachment(attachment.id),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState ==
-                            ConnectionState.waiting) {
-                          return const Center(
-                            child: SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          );
-                        }
-                        if (snapshot.hasData && snapshot.data != null) {
-                          return ClipRRect(
-                            borderRadius: BorderRadius.circular(7),
-                            child: Image.memory(
-                              snapshot.data!,
-                              fit: BoxFit.cover,
-                              errorBuilder: (c, e, s) => const Icon(
-                                Icons.broken_image,
-                                color: _DesignColors.subtleGray,
-                              ),
-                            ),
-                          );
-                        }
-                        return const Icon(
-                          Icons.broken_image,
-                          color: _DesignColors.subtleGray,
-                        );
-                      },
-                    )
-                  : const Center(
-                      child: Icon(
-                        Icons.insert_drive_file,
-                        size: 32,
-                        color: _DesignColors.accent,
-                      ),
-                    ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          SizedBox(
-            width: 80,
-            child: Text(
-              attachment.fileName,
-              style: const TextStyle(
-                color: _DesignColors.textSecondary,
-                fontSize: 10,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showAttachmentMenu(BuildContext context, AttachmentModel attachment) {
-    // We can't easily get position for PopupMenuButton without context or explicit tap details
-    // Using simple Dialog or converting to button is easier, or use showMenu with position if available
-    // For now, simpler: Show Bottom Sheet or Dialog
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: _DesignColors.toolbarIsland,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: const Icon(Icons.visibility, color: _DesignColors.accent),
-            title: const Text(
-              "View",
-              style: TextStyle(color: _DesignColors.textPrimary),
-            ),
-            onTap: () {
-              Navigator.pop(context);
-              _viewAttachment(context, attachment);
-            },
-          ),
-          ListTile(
-            leading: const Icon(
-              Icons.save_alt,
-              color: _DesignColors.saveButton,
-            ),
-            title: const Text(
-              "Save As...",
-              style: TextStyle(color: _DesignColors.textPrimary),
-            ),
-            onTap: () {
-              Navigator.pop(context);
-              viewModel.exportAttachment(attachment);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.delete, color: Colors.redAccent),
-            title: const Text(
-              "Delete",
-              style: TextStyle(color: Colors.redAccent),
-            ),
-            onTap: () {
-              Navigator.pop(context);
-              viewModel.removeAttachment(attachment.id);
-            },
-          ),
-          const SizedBox(height: 16),
-        ],
-      ),
-    );
-  }
-
-  void _viewAttachment(BuildContext context, AttachmentModel attachment) {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            FutureBuilder<Uint8List?>(
-              future: viewModel.readAttachment(attachment.id),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return Container(
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: _DesignColors.toolbarIsland,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text(
-                          "Decrypting...",
-                          style: TextStyle(color: _DesignColors.textPrimary),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final data = snapshot.data;
-                if (data != null && data.isNotEmpty) {
-                  if (_isImage(attachment.fileName, data)) {
-                    return InteractiveViewer(
-                      maxScale: 5.0,
-                      child: Image.memory(
-                        data,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) {
-                          return const Icon(
-                            Icons.broken_image,
-                            color: Colors.white,
-                            size: 64,
-                          );
-                        },
-                      ),
-                    );
-                  } else {
-                    return Container(
-                      padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(
-                        color: _DesignColors.toolbarIsland,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.insert_drive_file,
-                            size: 64,
-                            color: _DesignColors.accent,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            attachment.fileName,
-                            style: const TextStyle(
-                              color: _DesignColors.textPrimary,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            "${(attachment.size / 1024).toStringAsFixed(1)} KB",
-                            style: const TextStyle(
-                              color: _DesignColors.textSecondary,
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-                          const Text(
-                            "Preview not available for this file type.",
-                            style: TextStyle(color: _DesignColors.subtleGray),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-                } else {
-                  return Container(
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: _DesignColors.toolbarIsland,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.error, color: Colors.red, size: 48),
-                        SizedBox(height: 16),
-                        Text(
-                          "Failed to load attachment",
-                          style: TextStyle(color: _DesignColors.textPrimary),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-              },
-            ),
-            Positioned(
-              top: 0,
-              right: 0,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -1084,14 +758,33 @@ class ContentArea extends StatelessWidget {
                   : 'Set Password',
               onTap: () async {
                 Navigator.pop(context);
-                final mode = viewModel.isPasswordSet
-                    ? PasswordMode.update
-                    : PasswordMode.set;
-
-                final password = await _showPasswordDialog(context, mode: mode);
-                if (password != null && password.isNotEmpty) {
-                  viewModel.setPassword(password);
-                  _promptSave(context);
+                if (viewModel.isPasswordSet) {
+                  final password = await _showPasswordDialog(
+                    context,
+                    mode: PasswordMode.update,
+                  );
+                  if (password != null && password.isNotEmpty) {
+                    final count = await viewModel.changePassword(password);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Password updated. Re-encrypted $count notes.',
+                          ),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    }
+                  }
+                } else {
+                  final password = await _showPasswordDialog(
+                    context,
+                    mode: PasswordMode.set,
+                  );
+                  if (password != null && password.isNotEmpty) {
+                    viewModel.setPassword(password);
+                    _promptSave(context);
+                  }
                 }
               },
             ),
@@ -1196,39 +889,6 @@ class ContentArea extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  bool _isImage(String name, Uint8List? data) {
-    // Check extension
-    final ext = name.split('.').last.toLowerCase();
-    if (name.contains('.') &&
-        ['png', 'jpg', 'jpeg', 'webp', 'gif'].contains(ext)) {
-      return true;
-    }
-    // Check magic bytes
-    if (data != null && data.length > 12) {
-      // PNG: 89 50 4E 47
-      if (data[0] == 0x89 &&
-          data[1] == 0x50 &&
-          data[2] == 0x4E &&
-          data[3] == 0x47)
-        return true;
-      // JPG: FF D8 FF
-      if (data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF) return true;
-      // GIF: 47 49 46 38
-      if (data[0] == 0x47 &&
-          data[1] == 0x49 &&
-          data[2] == 0x46 &&
-          data[3] == 0x38)
-        return true;
-      // WEBP: RIFF ... WEBP (offset 8)
-      if (data[8] == 0x57 &&
-          data[9] == 0x45 &&
-          data[10] == 0x42 &&
-          data[11] == 0x50)
-        return true;
-    }
-    return false;
   }
 } // End of ContentArea
 
@@ -1378,5 +1038,396 @@ class _LinkHandlerState extends State<LinkHandler> {
   @override
   Widget build(BuildContext context) {
     return widget.child;
+  }
+}
+
+class AttachmentBar extends StatefulWidget {
+  final ContentViewModel viewModel;
+  const AttachmentBar({super.key, required this.viewModel});
+
+  @override
+  State<AttachmentBar> createState() => _AttachmentBarState();
+}
+
+class _AttachmentBarState extends State<AttachmentBar> {
+  bool _isExpanded = true;
+
+  ContentViewModel get viewModel => widget.viewModel;
+
+  @override
+  Widget build(BuildContext context) {
+    if (viewModel.attachments.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      decoration: BoxDecoration(
+        color: _DesignColors.background,
+        border: Border(
+          top: BorderSide(color: _DesignColors.divider.withOpacity(0.3)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GestureDetector(
+            onTap: () => setState(() => _isExpanded = !_isExpanded),
+            behavior: HitTestBehavior.opaque,
+            child: Row(
+              children: [
+                Icon(
+                  _isExpanded
+                      ? Icons.keyboard_arrow_down
+                      : Icons.keyboard_arrow_right,
+                  color: _DesignColors.textSecondary,
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  "Attachments (${viewModel.attachments.length})",
+                  style: const TextStyle(
+                    color: _DesignColors.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_isExpanded) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 90,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: viewModel.attachments.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  return _buildAttachmentItem(
+                    context,
+                    viewModel.attachments[index],
+                  );
+                },
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAttachmentItem(
+    BuildContext context,
+    AttachmentModel attachment,
+  ) {
+    // 1. Loading State
+    if (attachment.isLoading) {
+      return Container(
+        width: 60,
+        decoration: BoxDecoration(
+          color: _DesignColors.toolbarIsland,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _DesignColors.divider.withOpacity(0.3)),
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              SizedBox(height: 4),
+              Text("Loading...", style: TextStyle(fontSize: 7)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final ext = attachment.fileName.split('.').last.toLowerCase();
+    final isImg = ['jpg', 'jpeg', 'png', 'webp', 'heic'].contains(ext);
+
+    return GestureDetector(
+      onTap: () => _viewAttachment(context, attachment),
+      onSecondaryTap: () => _showAttachmentMenu(context, attachment),
+      onLongPress: () => _showAttachmentMenu(context, attachment),
+      child: Column(
+        children: [
+          Expanded(
+            child: Container(
+              width: 60,
+              decoration: BoxDecoration(
+                color: _DesignColors.toolbarIsland,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: _DesignColors.divider.withOpacity(0.3),
+                ),
+              ),
+              child: isImg
+                  ? FutureBuilder<Uint8List?>(
+                      future: viewModel.readAttachment(attachment.id),
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return const Center(
+                            child: SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          );
+                        }
+                        if (snapshot.hasData && snapshot.data != null) {
+                          return ClipRRect(
+                            borderRadius: BorderRadius.circular(7),
+                            child: Image.memory(
+                              snapshot.data!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (c, e, s) => const Icon(
+                                Icons.broken_image,
+                                color: _DesignColors.subtleGray,
+                                size: 20,
+                              ),
+                            ),
+                          );
+                        }
+                        return const Icon(
+                          Icons.broken_image,
+                          color: _DesignColors.subtleGray,
+                          size: 20,
+                        );
+                      },
+                    )
+                  : const Center(
+                      child: Icon(
+                        Icons.insert_drive_file,
+                        size: 24,
+                        color: _DesignColors.accent,
+                      ),
+                    ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          SizedBox(
+            width: 60,
+            child: Text(
+              attachment.fileName,
+              style: const TextStyle(
+                color: _DesignColors.textSecondary,
+                fontSize: 9,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAttachmentMenu(BuildContext context, AttachmentModel attachment) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _DesignColors.toolbarIsland,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.visibility, color: _DesignColors.accent),
+            title: const Text(
+              "View",
+              style: TextStyle(color: _DesignColors.textPrimary),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              _viewAttachment(context, attachment);
+            },
+          ),
+          ListTile(
+            leading: const Icon(
+              Icons.save_alt,
+              color: _DesignColors.saveButton,
+            ),
+            title: const Text(
+              "Save As...",
+              style: TextStyle(color: _DesignColors.textPrimary),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              viewModel.exportAttachment(attachment);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete, color: Colors.redAccent),
+            title: const Text(
+              "Delete",
+              style: TextStyle(color: Colors.redAccent),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              viewModel.removeAttachment(attachment.id);
+            },
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  void _viewAttachment(BuildContext context, AttachmentModel attachment) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            FutureBuilder<Uint8List?>(
+              future: viewModel.readAttachment(attachment.id),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: _DesignColors.toolbarIsland,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text(
+                          "Decrypting...",
+                          style: TextStyle(color: _DesignColors.textPrimary),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                final data = snapshot.data;
+                if (data != null && data.isNotEmpty) {
+                  if (_isImage(attachment.fileName, data)) {
+                    return InteractiveViewer(
+                      maxScale: 5.0,
+                      child: Image.memory(
+                        data,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return const Icon(
+                            Icons.broken_image,
+                            color: Colors.white,
+                            size: 64,
+                          );
+                        },
+                      ),
+                    );
+                  } else {
+                    return Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: _DesignColors.toolbarIsland,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.insert_drive_file,
+                            size: 64,
+                            color: _DesignColors.accent,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            attachment.fileName,
+                            style: const TextStyle(
+                              color: _DesignColors.textPrimary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            "${(attachment.size / 1024).toStringAsFixed(1)} KB",
+                            style: const TextStyle(
+                              color: _DesignColors.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          const Text(
+                            "Preview not available for this file type.",
+                            style: TextStyle(color: _DesignColors.subtleGray),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                } else {
+                  return Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: _DesignColors.toolbarIsland,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.error, color: Colors.red, size: 48),
+                        SizedBox(height: 16),
+                        Text(
+                          "Failed to load attachment",
+                          style: TextStyle(color: _DesignColors.textPrimary),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+              },
+            ),
+            Positioned(
+              top: 0,
+              right: 0,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool _isImage(String name, Uint8List? data) {
+    final ext = name.split('.').last.toLowerCase();
+    if (name.contains('.') &&
+        ['png', 'jpg', 'jpeg', 'webp', 'gif'].contains(ext)) {
+      return true;
+    }
+    if (data != null && data.length > 12) {
+      if (data[0] == 0x89 &&
+          data[1] == 0x50 &&
+          data[2] == 0x4E &&
+          data[3] == 0x47)
+        return true;
+      if (data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF) return true;
+      if (data[0] == 0x47 &&
+          data[1] == 0x49 &&
+          data[2] == 0x46 &&
+          data[3] == 0x38)
+        return true;
+      if (data[8] == 0x57 &&
+          data[9] == 0x45 &&
+          data[10] == 0x42 &&
+          data[11] == 0x50)
+        return true;
+    }
+    return false;
   }
 }

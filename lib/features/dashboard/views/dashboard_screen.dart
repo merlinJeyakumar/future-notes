@@ -9,6 +9,7 @@ import '../services/file_service.dart';
 import '../services/encryption_service.dart';
 import '../models/note_model.dart';
 import '../widgets/import_confirmation_dialog.dart';
+import '../services/settings_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -27,6 +28,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       fileService: FileService(),
       encryptionService: EncryptionService(),
     );
+    SettingsService().init();
   }
 
   @override
@@ -105,45 +107,105 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void _showMasterSettings(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Settings', style: TextStyle(color: Colors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.info_outline, color: Colors.white70),
-              title: const Text('About', style: TextStyle(color: Colors.white)),
-              subtitle: const Text(
-                'AntiGravity Notes v1.0',
-                style: TextStyle(color: Colors.grey),
-              ),
-              onTap: () {},
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          final settings = SettingsService();
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1E293B),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
             ),
-            ListTile(
-              leading: const Icon(
-                Icons.color_lens_outlined,
-                color: Colors.white70,
-              ),
-              title: const Text('Theme', style: TextStyle(color: Colors.white)),
-              subtitle: const Text(
-                'Dark Mode',
-                style: TextStyle(color: Colors.grey),
-              ),
-              onTap: () {},
+            title: const Text(
+              'Settings',
+              style: TextStyle(color: Colors.white),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Close',
-              style: TextStyle(color: Colors.blueAccent),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // File Compression Setting
+                ListTile(
+                  leading: const Icon(Icons.compress, color: Colors.white70),
+                  title: const Text(
+                    'File Compression',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  subtitle: DropdownButton<CompressionLevel>(
+                    value: settings.compressionLevel,
+                    dropdownColor: const Color(0xFF2D3748),
+                    style: const TextStyle(color: Colors.white),
+                    underline: Container(height: 1, color: Colors.blueAccent),
+                    isExpanded: true,
+                    icon: const Icon(
+                      Icons.arrow_drop_down,
+                      color: Colors.white70,
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: CompressionLevel.high,
+                        child: Text("High (Max Compression)"),
+                      ),
+                      DropdownMenuItem(
+                        value: CompressionLevel.medium,
+                        child: Text("Medium (Half Size)"),
+                      ),
+                      DropdownMenuItem(
+                        value: CompressionLevel.none,
+                        child: Text("None (Full Size)"),
+                      ),
+                    ],
+                    onChanged: (CompressionLevel? newValue) {
+                      if (newValue != null) {
+                        settings.setCompressionLevel(newValue).then((_) {
+                          setState(() {});
+                        });
+                      }
+                    },
+                  ),
+                ),
+                const Divider(color: Colors.grey),
+                ListTile(
+                  leading: const Icon(
+                    Icons.info_outline,
+                    color: Colors.white70,
+                  ),
+                  title: const Text(
+                    'About',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  subtitle: const Text(
+                    'AntiGravity Notes v1.0',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                  onTap: () {},
+                ),
+                ListTile(
+                  leading: const Icon(
+                    Icons.color_lens_outlined,
+                    color: Colors.white70,
+                  ),
+                  title: const Text(
+                    'Theme',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  subtitle: const Text(
+                    'Dark Mode',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                  onTap: () {},
+                ),
+              ],
             ),
-          ),
-        ],
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  'Close',
+                  style: TextStyle(color: Colors.blueAccent),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

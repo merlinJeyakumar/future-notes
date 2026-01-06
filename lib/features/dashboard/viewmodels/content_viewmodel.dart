@@ -35,7 +35,7 @@ class ContentViewModel extends BaseViewModel {
   StreamSubscription? _fileWatcherSubscription;
   final BackgroundService _backgroundService = BackgroundService();
   List<RecentFile> _recentFiles = [];
-  List<String> _attachments = [];
+  List<AttachmentModel> _attachments = [];
 
   final Map<String, String> _sessionPasswords = {};
   bool _isLocked = false;
@@ -43,7 +43,7 @@ class ContentViewModel extends BaseViewModel {
   bool get isLocked => _isLocked;
 
   List<RecentFile> get recentFiles => _recentFiles;
-  List<String> get attachments => _attachments;
+  List<AttachmentModel> get attachments => _attachments;
   bool get isPasswordSet => _currentPassword != null;
   String? get currentFileName => _currentFileName;
 
@@ -77,8 +77,11 @@ class ContentViewModel extends BaseViewModel {
 
       try {
         // 2. Read & Encrypt
-        final originalFile = File(result.files.single.path!);
+        final path = result.files.single.path!;
+        final originalFile = File(path);
         final bytes = await originalFile.readAsBytes();
+        final fileName = result.files.single.name;
+        final size = await originalFile.length();
 
         final encryptedBytes = _encryptionService.encryptBinary(
           bytes,
@@ -92,7 +95,14 @@ class ContentViewModel extends BaseViewModel {
         );
 
         // 4. Add to List
-        _attachments.add(attachmentId);
+        _attachments.add(
+          AttachmentModel(
+            id: attachmentId,
+            fileName: fileName,
+            size: size,
+            mimeType: 'image/${fileName.split('.').last}', // Simple guess
+          ),
+        );
         notifyListeners();
 
         // 5. Auto Save
@@ -105,8 +115,28 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
+  Future<void> exportAttachment(AttachmentModel attachment) async {
+    final data = await readAttachment(attachment.id);
+    if (data == null) return;
+
+    final String? outputFile = await FilePicker.platform.saveFile(
+      dialogTitle: 'Save Attachment',
+      fileName: attachment.fileName,
+      lockParentWindow: true,
+    );
+
+    if (outputFile != null) {
+      try {
+        final file = File(outputFile);
+        await file.writeAsBytes(data);
+      } catch (e) {
+        print("Error saving attachment: $e");
+      }
+    }
+  }
+
   void removeAttachment(String attachmentId) {
-    _attachments.remove(attachmentId);
+    _attachments.removeWhere((a) => a.id == attachmentId);
     notifyListeners();
     _scheduleAutoSave();
     // TODO: Physically delete the attachment file to clean up storage
@@ -130,6 +160,7 @@ class ContentViewModel extends BaseViewModel {
     quillController.document.changes.listen((change) {
       if (!_isHtmlMode) {
         onTextChanged();
+        _checkForMentionTrigger();
       }
     });
 
@@ -140,6 +171,85 @@ class ContentViewModel extends BaseViewModel {
         // but stripping tags might be expensive/complex to do continuously.
       }
     });
+
+    // Listen to selection to help deciding when to check trigger?
+    // Usually changes is enough.
+  }
+
+  final StreamController<void> _linkPickerRequest =
+      StreamController<void>.broadcast();
+  Stream<void> get linkPickerRequest => _linkPickerRequest.stream;
+
+  void _checkForMentionTrigger() {
+    final index = quillController.selection.baseOffset;
+    if (index > 0) {
+      // Check character before cursor
+      // Note: toPlainText might be expensive on huge docs, but usually fine.
+      // Optimization: access delta directly? Document has `collectStyle`, `queryChild`.
+      // `getPlainText` with range.
+      final text = quillController.document.getPlainText(index - 1, 1);
+      if (text == '@') {
+        // Trigger UI
+        _linkPickerRequest.add(null);
+      }
+    }
+  }
+
+  void insertInternalLink(String title, String id) {
+    final index = quillController.selection.baseOffset;
+    // Replaces '@' if we want? Yes.
+    // If we triggered on '@', cursor is AFTER '@'.
+    // So delete 1 char back, then insert link.
+
+    // But user might have moved cursor?
+    // We assume immediate action.
+    // Check if '@' is still there?
+
+    final start = index > 0 ? index - 1 : index;
+    final char = quillController.document.getPlainText(start, 1);
+
+    if (char == '@') {
+      quillController.document.replace(start, 1, title);
+      quillController.formatText(
+        start,
+        title.length,
+        LinkAttribute('note://$id'),
+      );
+      // Move cursor after link
+      quillController.moveCursorToPosition(start + title.length);
+      // Insert space
+      quillController.document.insert(start + title.length, ' ');
+      // Reset format?
+      quillController.formatText(start + title.length, 1, LinkAttribute(null));
+    } else {
+      // Just insert
+      quillController.document.insert(index, title);
+      quillController.formatText(
+        index,
+        title.length,
+        LinkAttribute('note://$id'),
+      );
+    }
+  }
+
+  Future<void> handleLinkClick(String url) async {
+    if (url.startsWith('note://')) {
+      final noteId = url.replaceFirst('note://', '');
+      // Find file with this noteId
+      // We need to match noteId to filename.
+      // Current assumption: filename is "note_$noteId".
+
+      // Check recent files for "note_$noteId"
+      final targetName = "note_$noteId";
+      await loadNote(targetName);
+    } else {
+      // Standard URL
+      // Default launch?
+      // We can use launchUrl from url_launcher
+      // But user needs to import it?
+      // For now print
+      print("External Link Clicked: $url");
+    }
   }
 
   void toggleEditorMode() {

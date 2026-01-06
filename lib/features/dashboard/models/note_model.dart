@@ -1,10 +1,40 @@
+class AttachmentModel {
+  final String id;
+  final String fileName;
+  final int size;
+  final String? mimeType;
+
+  AttachmentModel({
+    required this.id,
+    required this.fileName,
+    this.size = 0,
+    this.mimeType,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'fileName': fileName,
+    'size': size,
+    'mimeType': mimeType,
+  };
+
+  factory AttachmentModel.fromJson(Map<String, dynamic> json) {
+    return AttachmentModel(
+      id: json['id'] as String,
+      fileName: json['fileName'] as String? ?? 'Attachment',
+      size: json['size'] as int? ?? 0,
+      mimeType: json['mimeType'] as String?,
+    );
+  }
+}
+
 class NoteModel {
   final String id;
   final String title;
   final String content;
   final bool isLocked;
   final int timestamp;
-  final List<String> attachments;
+  final List<AttachmentModel> attachments;
 
   NoteModel({
     required this.id,
@@ -22,22 +52,41 @@ class NoteModel {
       'content': content,
       'isLocked': isLocked,
       'timestamp': timestamp,
-      'attachments': attachments,
+      'attachments': attachments.map((e) => e.toJson()).toList(),
     };
   }
 
   factory NoteModel.fromJson(Map<String, dynamic> json) {
+    var attachmentsList = <AttachmentModel>[];
+    if (json['attachments'] != null) {
+      if (json['attachments'] is List) {
+        final list = json['attachments'] as List;
+        if (list.isNotEmpty) {
+          if (list.first is String) {
+            // Legacy: List<String> IDs
+            attachmentsList = list
+                .map(
+                  (e) =>
+                      AttachmentModel(id: e as String, fileName: 'Attachment'),
+                )
+                .toList();
+          } else {
+            // New: List<Map>
+            attachmentsList = list
+                .map((e) => AttachmentModel.fromJson(e as Map<String, dynamic>))
+                .toList();
+          }
+        }
+      }
+    }
+
     return NoteModel(
       id: json['id'] as String,
       title: json['title'] as String,
       content: json['content'] as String,
       isLocked: json['isLocked'] as bool,
       timestamp: json['timestamp'] as int,
-      attachments:
-          (json['attachments'] as List<dynamic>?)
-              ?.map((e) => e as String)
-              .toList() ??
-          [],
+      attachments: attachmentsList,
     );
   }
 }

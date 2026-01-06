@@ -21,7 +21,9 @@ class EncryptionService implements IEncryptionService {
 
   EncryptionService() {
     // Default key/IV for when no password is provided
-    _defaultKey = Key.fromLength(32);
+    // MUST BE STABLE across restarts!
+    // Using simple derivation from App Secret
+    _defaultKey = Key.fromUtf8(_appSecretKey);
   }
 
   Key _deriveKey(String password) {

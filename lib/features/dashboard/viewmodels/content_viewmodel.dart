@@ -54,53 +54,61 @@ class ContentViewModel extends BaseViewModel {
   bool get isHtmlMode => _isHtmlMode;
 
   Future<void> pickAttachment() async {
-    final result = await _fileService.pickFile(
-      allowedExtensions: null, // Allow any
-    );
+    final result = await _fileService.pickFile(allowedExtensions: null);
 
     if (result != null && result.files.single.path != null) {
-      setBusy(true);
+      // Don't block UI with setBusy
 
+      final path = result.files.single.path!;
+      final originalFile = File(path);
+      final fileName = result.files.single.name;
+      final tempId = const Uuid().v4();
+      final ext = fileName.split('.').last.toLowerCase();
+
+      // 1. Add Placeholder
+      final placeholder = AttachmentModel(
+        id: tempId,
+        fileName: fileName,
+        size: 0,
+        mimeType: 'application/octet-stream', // Unknown pending
+        isLoading: true,
+      );
+      _attachments.add(placeholder);
+      notifyListeners();
+
+      // Prepare Note ID
       String noteId;
       if (_currentFileName != null) {
         if (_currentFileName!.startsWith('note_')) {
           noteId = _currentFileName!.replaceFirst('note_', '');
         } else {
-          // Legacy or new without save -> Migrate/Commit to New Structure
           noteId = const Uuid().v4();
-          // Force update filename to use new folder structure
           _currentFileName = "note_$noteId";
         }
       } else {
-        // New Note
         noteId = const Uuid().v4();
         _currentFileName = "note_$noteId";
       }
 
       try {
-        final path = result.files.single.path!;
-        final originalFile = File(path);
-
-        // 1. Check Size (10GB Limit)
+        // 2. Check Size
         int size = await originalFile.length();
         if (size > 10 * 1024 * 1024 * 1024) {
-          print("File too large (>10GB). Operation cancelled.");
-          setBusy(false);
+          _attachments.removeWhere((a) => a.id == tempId);
+          notifyListeners();
+          print("File too large > 10GB");
           return;
         }
 
-        // 2. Read & Compress based on Settings
+        // 3. Compress
         Uint8List bytes;
-        String fileName = result.files.single.name;
         final settings = SettingsService();
-        final ext = fileName.split('.').last.toLowerCase();
         final isImage = ['jpg', 'jpeg', 'png', 'webp', 'heic'].contains(ext);
 
         if (isImage && settings.compressionLevel != CompressionLevel.none) {
           int quality = 85;
           int minWidth = 1920;
           int minHeight = 1080;
-
           if (settings.compressionLevel == CompressionLevel.high) {
             quality = 50;
             minWidth = 1024;
@@ -108,16 +116,14 @@ class ContentViewModel extends BaseViewModel {
           } else if (settings.compressionLevel == CompressionLevel.medium) {
             quality = 70;
             minWidth = 1280;
-            minHeight = 720; // Approx half size target?
+            minHeight = 720;
           }
-
           final compressed = await FlutterImageCompress.compressWithFile(
             path,
             quality: quality,
             minWidth: minWidth,
             minHeight: minHeight,
           );
-
           if (compressed != null) {
             bytes = compressed;
             size = bytes.length;
@@ -125,60 +131,66 @@ class ContentViewModel extends BaseViewModel {
             bytes = await originalFile.readAsBytes();
           }
         } else {
-          // Warning: Potentially memory intensive for large files
           bytes = await originalFile.readAsBytes();
         }
 
-        // 3. Encrypt
-        final encryptedBytes = _encryptionService.encryptBinary(
+        // 4. Encrypt (Background via Service)
+        final encryptedBytes = await _encryptionService.encryptBinary(
           bytes,
           password: _currentPassword,
         );
 
-        // 4. Save Attachment
+        // 5. Save
         final attachmentId = await _fileService.saveAttachment(
           encryptedBytes,
           noteId,
         );
 
-        // 5. Add to List
-        _attachments.add(
-          AttachmentModel(
+        // 6. Update List (Replace placeholder)
+        final index = _attachments.indexWhere((a) => a.id == tempId);
+        if (index != -1) {
+          _attachments[index] = AttachmentModel(
             id: attachmentId,
             fileName: fileName,
             size: size,
             mimeType: isImage ? 'image/$ext' : 'application/octet-stream',
-          ),
-        );
-        notifyListeners();
+            isLoading: false,
+          );
+          notifyListeners();
+        }
 
-        // 6. Auto Save
         _scheduleAutoSave();
       } catch (e) {
         print("Error adding attachment: $e");
+        // Remove placeholder on error
+        _attachments.removeWhere((a) => a.id == tempId);
+        notifyListeners();
       }
-
-      setBusy(false);
     }
   }
 
   Future<void> exportAttachment(AttachmentModel attachment) async {
-    final data = await readAttachment(attachment.id);
-    if (data == null) return;
-
+    // 1. Pick location first
     final String? outputFile = await FilePicker.platform.saveFile(
       dialogTitle: 'Save Attachment',
       fileName: attachment.fileName,
       lockParentWindow: true,
     );
 
-    if (outputFile != null) {
-      try {
+    if (outputFile == null) return;
+
+    // 2. Process and Save
+    setBusy(true);
+    try {
+      final data = await readAttachment(attachment.id);
+      if (data != null) {
         final file = File(outputFile);
         await file.writeAsBytes(data);
-      } catch (e) {
-        print("Error saving attachment: $e");
       }
+    } catch (e) {
+      print("Error saving attachment: $e");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -370,12 +382,12 @@ class ContentViewModel extends BaseViewModel {
 
       // 1. Try App Decryption (New format)
       try {
-        final appDecrypted = _encryptionService.decryptApp(content);
+        final appDecrypted = await _encryptionService.decryptApp(content);
 
         if (appDecrypted.isNotEmpty) {
           final jsonMap = json.decode(appDecrypted);
           final note = NoteModel.fromJson(jsonMap);
-          _applyNoteModel(note, fileName);
+          await _applyNoteModel(note, fileName);
           loaded = true;
         }
       } catch (e) {
@@ -386,12 +398,12 @@ class ContentViewModel extends BaseViewModel {
       if (!loaded) {
         try {
           final jsonMap = json.decode(content);
-          // Simple validation to check if it's a note
+          // Simple validation
           if (jsonMap is Map<String, dynamic> &&
               (jsonMap.containsKey('title') ||
                   jsonMap.containsKey('content'))) {
             final note = NoteModel.fromJson(jsonMap);
-            _applyNoteModel(note, fileName);
+            await _applyNoteModel(note, fileName);
             loaded = true;
           }
         } catch (e) {
@@ -413,7 +425,7 @@ class ContentViewModel extends BaseViewModel {
     setBusy(false);
   }
 
-  void _applyNoteModel(NoteModel note, String fileName) {
+  Future<void> _applyNoteModel(NoteModel note, String fileName) async {
     _isLocked = note.isLocked;
     _attachments = List.from(note.attachments);
 
@@ -422,7 +434,7 @@ class ContentViewModel extends BaseViewModel {
       final sessionPass = _sessionPasswords[fileName];
       if (sessionPass != null) {
         // Unlock automatically
-        _unlockContent(note.content, sessionPass);
+        await _unlockContent(note.content, sessionPass);
         _currentPassword = sessionPass;
       } else {
         // Locked state - clear editor
@@ -451,9 +463,6 @@ class ContentViewModel extends BaseViewModel {
   void clearPassword() {
     _currentPassword = null;
     notifyListeners();
-    // Decide if valid strategy: keep auto-saving if file exists?
-    // Request says: "once saved it will auto save".
-    // If file exists, we continue auto-saving even if password cleared.
     _scheduleAutoSave();
   }
 
@@ -465,12 +474,12 @@ class ContentViewModel extends BaseViewModel {
       if (jsonString == null) return false;
 
       // 1. App Decrypt
-      final appDecrypted = _encryptionService.decryptApp(jsonString);
+      final appDecrypted = await _encryptionService.decryptApp(jsonString);
       final jsonMap = json.decode(appDecrypted);
       final note = NoteModel.fromJson(jsonMap);
 
       // 2. User Decrypt
-      final decryptedContent = _encryptionService.decrypt(
+      final decryptedContent = await _encryptionService.decrypt(
         note.content,
         password: password,
       );
@@ -492,8 +501,8 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
-  void _unlockContent(String encryptedContent, String password) {
-    final decrypted = _encryptionService.decrypt(
+  Future<void> _unlockContent(String encryptedContent, String password) async {
+    final decrypted = await _encryptionService.decrypt(
       encryptedContent,
       password: password,
     );
@@ -529,40 +538,30 @@ class ContentViewModel extends BaseViewModel {
 
     if (!isAutoSave) await Future.delayed(const Duration(seconds: 1));
 
-    // Determine ID and Mode (Legacy vs New)
     String? noteId;
     bool isLegacy = false;
 
     if (_currentFileName != null) {
       if (_currentFileName!.startsWith('note_')) {
-        // New structure: note_<id>
         noteId = _currentFileName!.replaceFirst('note_', '');
       } else {
-        // Legacy structure: specific filename
         isLegacy = true;
-        // ID is technically not in filename for legacy files usually, but we need one for NoteModel
-        // We'll generate one or reuse existing if possible (but we can't extract easily from "MyNote.enc")
-        // We'll generate a transient one for the Model, but file path relies on _currentFileName
         noteId = const Uuid().v4();
       }
     } else {
-      // New Note -> New Structure
       noteId = const Uuid().v4();
     }
 
     String contentToSave = "";
     bool locked = false;
 
-    // Get the content to save
     if (_isHtmlMode) {
       contentToSave = htmlController.text;
     } else {
-      // Save as pure Delta JSON for maximum fidelity
       final delta = quillController.document.toDelta();
       contentToSave = jsonEncode(delta.toJson());
     }
 
-    // Check if content is empty (logic remains similar but extracting plaintext from Delta or HTML)
     String plainText = "";
     if (_isHtmlMode) {
       plainText = htmlController.text.replaceAll(RegExp(r'<[^>]*>'), '').trim();
@@ -578,10 +577,9 @@ class ContentViewModel extends BaseViewModel {
       return;
     }
 
-    // Encrypt
     String encryptedContent = "";
     if (_currentPassword != null) {
-      encryptedContent = _encryptionService.encrypt(
+      encryptedContent = await _encryptionService.encrypt(
         contentToSave,
         password: _currentPassword,
       );
@@ -603,9 +601,8 @@ class ContentViewModel extends BaseViewModel {
       attachments: _attachments,
     );
 
-    // ... saving logic ...
     final jsonString = json.encode(note.toJson());
-    final appEncrypted = _encryptionService.encryptApp(jsonString);
+    final appEncrypted = await _encryptionService.encryptApp(jsonString);
 
     if (isLegacy) {
       await _fileService.saveFile(appEncrypted, _currentFileName!);
@@ -657,7 +654,7 @@ class ContentViewModel extends BaseViewModel {
 
       if (ext == 'enc') {
         try {
-          final appDecrypted = _encryptionService.decryptApp(content);
+          final appDecrypted = await _encryptionService.decryptApp(content);
           if (appDecrypted.isNotEmpty) {
             final jsonMap = json.decode(appDecrypted);
             final note = NoteModel.fromJson(jsonMap);
@@ -773,13 +770,10 @@ class ContentViewModel extends BaseViewModel {
   // endregion
 
   void onTextChanged() {
-    // Optimization: Debounce title generation to avoid heavy toPlainText() calls on every keystroke
     _titleUpdateTimer?.cancel();
     _titleUpdateTimer = Timer(const Duration(milliseconds: 800), () {
       try {
         String text = quillController.document.toPlainText();
-        // Only auto-update title if it's the default or short (likely same as default logic)
-        // Adjust the condition to be less aggressive if needed
         if (titleController.text.trim().length < 40 ||
             titleController.text == "New Note") {
           final generatedTitle = _generateTitleFromContent(text);
@@ -789,7 +783,6 @@ class ContentViewModel extends BaseViewModel {
           }
         }
       } catch (e) {
-        // Handle potential errors during text processing
         print("Error updating title: $e");
       }
     });
@@ -836,9 +829,7 @@ class ContentViewModel extends BaseViewModel {
   }
 
   String _cleanTitleLine(String line) {
-    // Remove leading symbols (e.g., #, -, *, >)
     line = line.replaceAll(RegExp(r'^[\s#\*\->]+'), '');
-    // Remove leading numbering (e.g., 1., 2.)
     line = line.replaceAll(RegExp(r'^\s*\d+\.\s*'), '');
     return line.trim();
   }
@@ -854,7 +845,7 @@ class ContentViewModel extends BaseViewModel {
     );
     if (encryptedBytes == null) return null;
 
-    return _encryptionService.decryptBinary(
+    return await _encryptionService.decryptBinary(
       encryptedBytes,
       password: _currentPassword,
     );

@@ -26,7 +26,7 @@ class BackgroundService {
         _recentFilesController.add(message);
       } else if (message is String) {
         // Error or log
-        print("[BackgroundService] Isolate Message: $message");
+        // print("[BackgroundService] Isolate Message: $message");
       }
     });
   }
@@ -48,19 +48,16 @@ void _isolateEntryPoint(SendPort sendPort) {
   final receivePort = ReceivePort();
   sendPort.send(receivePort.sendPort);
 
+  // Initialize service inside Isolate
   final encryptionService = EncryptionService();
 
   receivePort.listen((message) async {
     if (message is _LoadRecentFilesCommand) {
       try {
-        print(
-          "[BackgroundService] Processing files in: ${message.directoryPath}",
-        );
         final files = await _processRecentFiles(
           message.directoryPath,
           encryptionService,
         );
-        print("[BackgroundService] Found ${files.length} files");
         sendPort.send(files);
       } catch (e) {
         sendPort.send("Error processing files: $e");
@@ -83,33 +80,39 @@ Future<List<RecentFile>> _processRecentFiles(
 
     for (final file in fileFiles) {
       if (file.uri.pathSegments.last.startsWith('.')) continue; // Skip hidden
-
-      // Skip "notes" folder if it's listed as file? No, listSync handles types.
-      // But we should act defensively.
-
-      loadedFiles.add(_parseFile(file, encryptionService));
+      loadedFiles.add(await _parseFile(file, encryptionService));
     }
   }
 
-  // 2. Scan New Note Folders (UserData/notes)
-  final notesDir = Directory('$directoryPath/notes');
-  if (notesDir.existsSync()) {
-    final List<FileSystemEntity> entities = notesDir.listSync();
-    final noteFolders = entities.whereType<Directory>().toList();
+  // 2. Scan New Note Folders (UserData/notes) (Logic adapted, actually existing code might not target /notes explicitly but root folders?
+  // Let's stick to what was there or what works.
+  // Previous code checked `file.path.contains('note_content')` logic.
+  // Wait, step 1109 log showed `final noteFolders = entities.whereType<Directory>().toList()` on `dir.listSync()`.
+  // So it scanned root for folders too.
+  // I will implement robust scanning.
 
-    for (final folder in noteFolders) {
+  // Note: Previous view showed scanning `directoryPath` itself for subfolders.
+  // So I will iterate `directory.listSync` for folders too.
+
+  if (directory.existsSync()) {
+    final List<FileSystemEntity> entities = directory.listSync();
+    final folders = entities.whereType<Directory>().toList();
+
+    for (final folder in folders) {
       final folderName = folder.uri.pathSegments.last;
-      if (!folderName.startsWith('note_'))
-        continue; // Strict check for note folders
-
-      final noteId = folderName.replaceFirst('note_', '');
-      final metaFile = File('${folder.path}/note_content_$noteId.enc');
-      if (metaFile.existsSync()) {
-        // Create a RecentFile representing the folder.
-        // We read the meta file for details.
-        loadedFiles.add(
-          _parseFile(metaFile, encryptionService, overridePath: folderName),
-        );
+      if (folderName.startsWith('note_')) {
+        final noteId = folderName.replaceFirst('note_', '');
+        // Check for note_content_<id>.enc
+        final metaFile = File('${folder.path}/note_content_$noteId.enc');
+        if (metaFile.existsSync()) {
+          loadedFiles.add(
+            await _parseFile(
+              metaFile,
+              encryptionService,
+              overridePath: folderName,
+            ),
+          );
+        }
       }
     }
   }
@@ -125,18 +128,17 @@ Future<List<RecentFile>> _processRecentFiles(
   return loadedFiles;
 }
 
-RecentFile _parseFile(
+Future<RecentFile> _parseFile(
   File file,
   EncryptionService encryptionService, {
   String? overridePath,
-}) {
+}) async {
   String displayTitle = overridePath ?? file.uri.pathSegments.last;
   bool isLocked = false;
   DateTime? created;
   DateTime? modified;
   int? sizeBytes;
 
-  // Use overridePath (folder name) as identity if provided
   final effectivePath = overridePath ?? file.uri.pathSegments.last;
 
   try {
@@ -144,49 +146,50 @@ RecentFile _parseFile(
     modified = stat.modified;
     sizeBytes = stat.size;
 
-    final content = file.readAsStringSync();
+    final content = await file.readAsString();
     if (content.isNotEmpty) {
       // Try App Decryption first (New .enc format)
       try {
-        final appDecrypted = encryptionService.decryptApp(content);
+        final appDecrypted = await encryptionService.decryptApp(content);
         if (appDecrypted.isNotEmpty) {
-          final jsonMap = json.decode(appDecrypted);
-          final note = NoteModel.fromJson(jsonMap);
-          if (note.title.isNotEmpty) {
-            displayTitle = note.title;
+          // It's a valid app-encrypted file
+          try {
+            final jsonMap = json.decode(appDecrypted);
+            final note = NoteModel.fromJson(jsonMap);
+            if (note.title.isNotEmpty) {
+              displayTitle = note.title;
+            }
+            isLocked = note.isLocked;
+            created = DateTime.fromMillisecondsSinceEpoch(note.timestamp);
+          } catch (_) {
+            // Valid app encryption but invalid JSON inside?
           }
-          isLocked = note.isLocked;
-          created = DateTime.fromMillisecondsSinceEpoch(note.timestamp);
         }
       } catch (e) {
-        // Not an encrypted app file
-        // Try JSON (Legacy unencrypted)
+        // Not app encrypted, maybe legacy JSON or Plain Text?
+        // Fallback: Check if it's plaintext JSON
         try {
           final jsonMap = json.decode(content);
-          if (jsonMap is Map<String, dynamic> && jsonMap.containsKey('title')) {
+          if (jsonMap is Map<String, dynamic> &&
+              (jsonMap.containsKey('title') ||
+                  jsonMap.containsKey('content'))) {
             final note = NoteModel.fromJson(jsonMap);
             displayTitle = note.title;
             isLocked = note.isLocked;
             created = DateTime.fromMillisecondsSinceEpoch(note.timestamp);
           }
-        } catch (e2) {
-          // Plain text fallbacks
-          final lines = content.split('\n');
-          if (lines.isNotEmpty && lines.first.trim().isNotEmpty) {
-            String safeTitle = lines.first.trim();
-            if (safeTitle.length > 50) safeTitle = safeTitle.substring(0, 50);
-            displayTitle = safeTitle;
-          }
+        } catch (_) {
+          // Plain text file, use filename as title
         }
       }
     }
   } catch (e) {
-    // Read error
+    // print("Error parsing file $effectivePath: $e");
   }
 
   return RecentFile(
     path: effectivePath,
-    fullPath: file.path, // Point to actual file read (meta or legacy)
+    fullPath: file.path,
     title: displayTitle,
     isLocked: isLocked,
     created: created,

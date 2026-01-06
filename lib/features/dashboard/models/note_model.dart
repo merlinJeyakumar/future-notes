@@ -3,12 +3,14 @@ class AttachmentModel {
   final String fileName;
   final int size;
   final String? mimeType;
+  final bool isLoading; // Transient
 
   AttachmentModel({
     required this.id,
     required this.fileName,
     this.size = 0,
     this.mimeType,
+    this.isLoading = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -24,6 +26,7 @@ class AttachmentModel {
       fileName: json['fileName'] as String? ?? 'Attachment',
       size: json['size'] as int? ?? 0,
       mimeType: json['mimeType'] as String?,
+      isLoading: false,
     );
   }
 }

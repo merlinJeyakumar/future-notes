@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import 'dart:typed_data';
 import '../viewmodels/content_viewmodel.dart';
+import '../models/note_model.dart';
 import 'password_dialog.dart';
 
 import 'package:code_text_field/code_text_field.dart';
@@ -26,41 +28,44 @@ class ContentArea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Use a higher breakpoint to trigger "Mobile/Compact" mode earlier,
-        // preventing overflow on smaller tablets or when Sidebar is open on desktop.
-        final isMobile = constraints.maxWidth < 900;
+    return LinkHandler(
+      viewModel: viewModel,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Use a higher breakpoint to trigger "Mobile/Compact" mode earlier,
+          // preventing overflow on smaller tablets or when Sidebar is open on desktop.
+          final isMobile = constraints.maxWidth < 900;
 
-        return Container(
-          color: _DesignColors.background,
-          child: SafeArea(
-            // Ensure status bar doesn't overlap
-            child: Column(
-              children: [
-                // Top Strip - Clean breadcrumb + secondary actions
-                _buildTopStrip(context, isMobile),
+          return Container(
+            color: _DesignColors.background,
+            child: SafeArea(
+              // Ensure status bar doesn't overlap
+              child: Column(
+                children: [
+                  // Top Strip - Clean breadcrumb + secondary actions
+                  _buildTopStrip(context, isMobile),
 
-                // Floating Toolbar Island (only when not locked)
-                if (!viewModel.isLocked) _buildFloatingToolbar(isMobile),
+                  // Floating Toolbar Island (only when not locked)
+                  if (!viewModel.isLocked) _buildFloatingToolbar(isMobile),
 
-                // Spacious Editor Area
-                Expanded(child: _buildInputArea(context)),
+                  // Spacious Editor Area
+                  Expanded(child: _buildInputArea(context)),
 
-                // Attachments Bar
-                if (!viewModel.isLocked && viewModel.attachments.isNotEmpty)
-                  _buildAttachmentBar(context),
-              ],
+                  // Attachments Bar
+                  if (!viewModel.isLocked && viewModel.attachments.isNotEmpty)
+                    _buildAttachmentBar(context),
+                ],
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
   Widget _buildAttachmentBar(BuildContext context) {
     return Container(
-      height: 100,
+      height: 120, // Increased height for label
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       decoration: BoxDecoration(
         color: _DesignColors.background,
@@ -86,8 +91,8 @@ class ContentArea extends StatelessWidget {
               itemCount: viewModel.attachments.length,
               separatorBuilder: (_, __) => const SizedBox(width: 12),
               itemBuilder: (context, index) {
-                final id = viewModel.attachments[index];
-                return _buildAttachmentItem(context, id);
+                final attachment = viewModel.attachments[index];
+                return _buildAttachmentItem(context, attachment);
               },
             ),
           ),
@@ -96,66 +101,238 @@ class ContentArea extends StatelessWidget {
     );
   }
 
-  Widget _buildAttachmentItem(BuildContext context, String id) {
-    return FutureBuilder<Uint8List?>(
-      future: viewModel.readAttachment(id),
-      builder: (context, snapshot) {
-        final data = snapshot.data;
-        Widget content;
+  Widget _buildAttachmentItem(
+    BuildContext context,
+    AttachmentModel attachment,
+  ) {
+    return GestureDetector(
+      onTap: () => _viewAttachment(context, attachment),
+      onSecondaryTap: () =>
+          _showAttachmentMenu(context, attachment), // Right click
+      onLongPress: () => _showAttachmentMenu(context, attachment),
+      child: Column(
+        children: [
+          Expanded(
+            child: FutureBuilder<Uint8List?>(
+              future: viewModel.readAttachment(attachment.id),
+              builder: (context, snapshot) {
+                final data = snapshot.data;
+                Widget content;
 
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          content = const Center(
-            child: SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  content = const Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  );
+                } else if (data != null) {
+                  if (_isImage(attachment.fileName, data)) {
+                    content = ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.memory(data, fit: BoxFit.cover),
+                    );
+                  } else {
+                    content = const Icon(
+                      Icons.insert_drive_file,
+                      size: 32,
+                      color: _DesignColors.accent,
+                    );
+                  }
+                } else {
+                  content = const Icon(
+                    Icons.broken_image,
+                    color: _DesignColors.subtleGray,
+                  );
+                }
+
+                return Container(
+                  width: 80,
+                  decoration: BoxDecoration(
+                    color: _DesignColors.toolbarIsland,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _DesignColors.divider.withOpacity(0.3),
+                    ),
+                  ),
+                  child: Center(child: content),
+                );
+              },
             ),
-          );
-        } else if (data != null) {
-          // Assume image for now (since we only pick images)
-          // If we support other files later, check header or metadata
-          content = ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.memory(data, fit: BoxFit.cover),
-          );
-        } else {
-          content = const Icon(
-            Icons.broken_image,
-            color: _DesignColors.subtleGray,
-          );
-        }
-
-        return Stack(
-          children: [
-            Container(
-              width: 80,
-              decoration: BoxDecoration(
-                color: _DesignColors.toolbarIsland,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _DesignColors.divider.withOpacity(0.3),
-                ),
+          ),
+          const SizedBox(height: 4),
+          SizedBox(
+            width: 80,
+            child: Text(
+              attachment.fileName,
+              style: const TextStyle(
+                color: _DesignColors.textSecondary,
+                fontSize: 10,
               ),
-              child: content,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAttachmentMenu(BuildContext context, AttachmentModel attachment) {
+    // We can't easily get position for PopupMenuButton without context or explicit tap details
+    // Using simple Dialog or converting to button is easier, or use showMenu with position if available
+    // For now, simpler: Show Bottom Sheet or Dialog
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _DesignColors.toolbarIsland,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.visibility, color: _DesignColors.accent),
+            title: const Text(
+              "View",
+              style: TextStyle(color: _DesignColors.textPrimary),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              _viewAttachment(context, attachment);
+            },
+          ),
+          ListTile(
+            leading: const Icon(
+              Icons.save_alt,
+              color: _DesignColors.saveButton,
+            ),
+            title: const Text(
+              "Save As...",
+              style: TextStyle(color: _DesignColors.textPrimary),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              viewModel.exportAttachment(attachment);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete, color: Colors.redAccent),
+            title: const Text(
+              "Delete",
+              style: TextStyle(color: Colors.redAccent),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              viewModel.removeAttachment(attachment.id);
+            },
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  void _viewAttachment(BuildContext context, AttachmentModel attachment) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            FutureBuilder<Uint8List?>(
+              future: viewModel.readAttachment(attachment.id),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const CircularProgressIndicator();
+                }
+                if (snapshot.hasData && snapshot.data != null) {
+                  // If data is valid (not empty from error)
+                  final data = snapshot.data!;
+                  if (data.isNotEmpty && _isImage(attachment.fileName, data)) {
+                    return InteractiveViewer(
+                      child: Image.memory(
+                        data,
+                        errorBuilder: (context, error, stackTrace) {
+                          return const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.broken_image,
+                                color: Colors.white,
+                                size: 48,
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                "Image Error",
+                                style: TextStyle(color: Colors.white),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    );
+                  } else {
+                    return Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: _DesignColors.toolbarIsland,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.insert_drive_file,
+                            size: 64,
+                            color: _DesignColors.textPrimary,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            attachment.fileName,
+                            style: const TextStyle(
+                              color: _DesignColors.textPrimary,
+                              fontSize: 18,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            "Size: ${attachment.size} bytes",
+                            style: const TextStyle(
+                              color: _DesignColors.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          const Text(
+                            "Preview not available for this file type.",
+                            style: TextStyle(color: _DesignColors.subtleGray),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                }
+                return const Text(
+                  "Failed to load",
+                  style: TextStyle(color: Colors.red),
+                );
+              },
             ),
             Positioned(
-              top: 2,
-              right: 2,
-              child: InkWell(
-                onTap: () => viewModel.removeAttachment(id),
-                child: Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(
-                    color: Colors.black54,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.close, size: 14, color: Colors.white),
-                ),
+              top: 20,
+              right: 20,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                onPressed: () => Navigator.pop(context),
               ),
             ),
           ],
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -800,6 +977,9 @@ class ContentArea extends StatelessWidget {
                   padding: const EdgeInsets.all(8),
                   keyboardAppearance: Brightness.dark,
                   embedBuilders: [AttachmentEmbedBuilder(viewModel)],
+                  onLaunchUrl: (url) {
+                    viewModel.handleLinkClick(url);
+                  },
                 ),
                 focusNode: viewModel.focusNode,
                 scrollController: viewModel.scrollController,
@@ -963,6 +1143,39 @@ class ContentArea extends StatelessWidget {
       ),
     );
   }
+
+  bool _isImage(String name, Uint8List? data) {
+    // Check extension
+    final ext = name.split('.').last.toLowerCase();
+    if (name.contains('.') &&
+        ['png', 'jpg', 'jpeg', 'webp', 'gif'].contains(ext)) {
+      return true;
+    }
+    // Check magic bytes
+    if (data != null && data.length > 12) {
+      // PNG: 89 50 4E 47
+      if (data[0] == 0x89 &&
+          data[1] == 0x50 &&
+          data[2] == 0x4E &&
+          data[3] == 0x47)
+        return true;
+      // JPG: FF D8 FF
+      if (data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF) return true;
+      // GIF: 47 49 46 38
+      if (data[0] == 0x47 &&
+          data[1] == 0x49 &&
+          data[2] == 0x46 &&
+          data[3] == 0x38)
+        return true;
+      // WEBP: RIFF ... WEBP (offset 8)
+      if (data[8] == 0x57 &&
+          data[9] == 0x45 &&
+          data[10] == 0x42 &&
+          data[11] == 0x50)
+        return true;
+    }
+    return false;
+  }
 } // End of ContentArea
 
 class AttachmentEmbedBuilder extends EmbedBuilder {
@@ -994,5 +1207,122 @@ class AttachmentEmbedBuilder extends EmbedBuilder {
 
     // Fallback for base64 or other formats if needed, or return nothing
     return const SizedBox();
+  }
+}
+
+class LinkHandler extends StatefulWidget {
+  final ContentViewModel viewModel;
+  final Widget child;
+
+  const LinkHandler({super.key, required this.viewModel, required this.child});
+
+  @override
+  State<LinkHandler> createState() => _LinkHandlerState();
+}
+
+class _LinkHandlerState extends State<LinkHandler> {
+  StreamSubscription? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = widget.viewModel.linkPickerRequest.listen((_) {
+      _showLinkPicker();
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  void _showLinkPicker() {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: const Color(0xFF2D3748), // _DesignColors.toolbarIsland
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          width: 400,
+          constraints: const BoxConstraints(maxHeight: 500),
+          child: Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  "Link to Note",
+                  style: TextStyle(
+                    color: Color(0xFFE2E8F0), // _DesignColors.textPrimary
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const Divider(
+                color: Color(0xFF4A5568),
+                height: 1,
+              ), // _DesignColors.divider
+              Expanded(
+                child: widget.viewModel.recentFiles.isEmpty
+                    ? const Center(
+                        child: Text(
+                          "No recent notes found",
+                          style: TextStyle(color: Color(0xFF718096)),
+                        ),
+                      )
+                    : ListView.separated(
+                        itemCount: widget.viewModel.recentFiles.length,
+                        separatorBuilder: (_, __) =>
+                            const Divider(height: 1, color: Color(0xFF4A5568)),
+                        itemBuilder: (context, index) {
+                          final file = widget.viewModel.recentFiles[index];
+                          // Skip current file? Maybe not.
+                          // Extract ID if possible
+                          String id = file.path;
+                          if (file.path.startsWith('note_')) {
+                            id = file.path.replaceFirst('note_', '');
+                          }
+
+                          return ListTile(
+                            title: Text(
+                              file.title.isEmpty ? "Untitled" : file.title,
+                              style: const TextStyle(color: Color(0xFFE2E8F0)),
+                            ),
+                            subtitle: Text(
+                              file.path,
+                              style: const TextStyle(
+                                color: Color(0xFF718096),
+                                fontSize: 10,
+                              ),
+                            ),
+                            onTap: () {
+                              Navigator.pop(context);
+                              widget.viewModel.insertInternalLink(
+                                file.title.isEmpty ? "Note" : file.title,
+                                id,
+                              );
+                            },
+                          );
+                        },
+                      ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancel"),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.child;
   }
 }

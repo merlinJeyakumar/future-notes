@@ -423,7 +423,7 @@ class ContentArea extends StatelessWidget {
           _buildSubtleIconButton(
             Icons.attach_file_rounded,
             'Attach file',
-            onPressed: viewModel.pickImage,
+            onPressed: viewModel.pickAttachment,
           ),
         if (viewModel.isLocked || viewModel.isPasswordSet)
           _buildSubtleIconButton(

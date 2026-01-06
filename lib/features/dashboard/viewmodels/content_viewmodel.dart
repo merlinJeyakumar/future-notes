@@ -15,6 +15,8 @@ import 'package:uuid/uuid.dart';
 import 'package:code_text_field/code_text_field.dart';
 import 'package:highlight/languages/xml.dart'; // XML handles HTML highlighting
 import 'dart:typed_data';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import '../services/settings_service.dart';
 
 class ContentViewModel extends BaseViewModel {
   final IFileService _fileService;
@@ -51,9 +53,9 @@ class ContentViewModel extends BaseViewModel {
   bool _isHtmlMode = false;
   bool get isHtmlMode => _isHtmlMode;
 
-  Future<void> pickImage() async {
+  Future<void> pickAttachment() async {
     final result = await _fileService.pickFile(
-      allowedExtensions: ['png', 'jpg', 'jpeg', 'webp'],
+      allowedExtensions: null, // Allow any
     );
 
     if (result != null && result.files.single.path != null) {
@@ -76,36 +78,81 @@ class ContentViewModel extends BaseViewModel {
       }
 
       try {
-        // 2. Read & Encrypt
         final path = result.files.single.path!;
         final originalFile = File(path);
-        final bytes = await originalFile.readAsBytes();
-        final fileName = result.files.single.name;
-        final size = await originalFile.length();
 
+        // 1. Check Size (10GB Limit)
+        int size = await originalFile.length();
+        if (size > 10 * 1024 * 1024 * 1024) {
+          print("File too large (>10GB). Operation cancelled.");
+          setBusy(false);
+          return;
+        }
+
+        // 2. Read & Compress based on Settings
+        Uint8List bytes;
+        String fileName = result.files.single.name;
+        final settings = SettingsService();
+        final ext = fileName.split('.').last.toLowerCase();
+        final isImage = ['jpg', 'jpeg', 'png', 'webp', 'heic'].contains(ext);
+
+        if (isImage && settings.compressionLevel != CompressionLevel.none) {
+          int quality = 85;
+          int minWidth = 1920;
+          int minHeight = 1080;
+
+          if (settings.compressionLevel == CompressionLevel.high) {
+            quality = 50;
+            minWidth = 1024;
+            minHeight = 768;
+          } else if (settings.compressionLevel == CompressionLevel.medium) {
+            quality = 70;
+            minWidth = 1280;
+            minHeight = 720; // Approx half size target?
+          }
+
+          final compressed = await FlutterImageCompress.compressWithFile(
+            path,
+            quality: quality,
+            minWidth: minWidth,
+            minHeight: minHeight,
+          );
+
+          if (compressed != null) {
+            bytes = compressed;
+            size = bytes.length;
+          } else {
+            bytes = await originalFile.readAsBytes();
+          }
+        } else {
+          // Warning: Potentially memory intensive for large files
+          bytes = await originalFile.readAsBytes();
+        }
+
+        // 3. Encrypt
         final encryptedBytes = _encryptionService.encryptBinary(
           bytes,
           password: _currentPassword,
         );
 
-        // 3. Save Attachment
+        // 4. Save Attachment
         final attachmentId = await _fileService.saveAttachment(
           encryptedBytes,
           noteId,
         );
 
-        // 4. Add to List
+        // 5. Add to List
         _attachments.add(
           AttachmentModel(
             id: attachmentId,
             fileName: fileName,
             size: size,
-            mimeType: 'image/${fileName.split('.').last}', // Simple guess
+            mimeType: isImage ? 'image/$ext' : 'application/octet-stream',
           ),
         );
         notifyListeners();
 
-        // 5. Auto Save
+        // 6. Auto Save
         _scheduleAutoSave();
       } catch (e) {
         print("Error adding attachment: $e");

@@ -1281,41 +1281,71 @@ class _AttachmentBarState extends State<AttachmentBar> {
   }
 
   void _viewAttachment(BuildContext context, AttachmentModel attachment) {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
+    // Local helper to build consistent dialogs with integrated close button
+    Widget buildDialogContent(BuildContext ctx, List<Widget> children) {
+      return Container(
+        padding: EdgeInsets.zero,
+        decoration: BoxDecoration(
+          color: _DesignColors.toolbarIsland,
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: Stack(
           alignment: Alignment.center,
           children: [
-            FutureBuilder<Uint8List?>(
-              future: viewModel.readAttachment(attachment.id),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return Container(
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: _DesignColors.toolbarIsland,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text(
-                          "Decrypting...",
-                          style: TextStyle(color: _DesignColors.textPrimary),
-                        ),
-                      ],
-                    ),
-                  );
-                }
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+              child: Column(mainAxisSize: MainAxisSize.min, children: children),
+            ),
+            Positioned(
+              top: 4,
+              right: 4,
+              child: IconButton(
+                icon: const Icon(
+                  Icons.close,
+                  color: _DesignColors.textSecondary,
+                  size: 20,
+                ),
+                onPressed: () => Navigator.of(ctx).pop(),
+                tooltip: 'Close',
+                padding: const EdgeInsets.all(4),
+                constraints: const BoxConstraints(),
+                splashRadius: 20,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
-                final data = snapshot.data;
-                if (data != null && data.isNotEmpty) {
-                  if (_isImage(attachment.fileName, data)) {
-                    return InteractiveViewer(
+    showDialog(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: FutureBuilder<Uint8List?>(
+          future: viewModel.readAttachment(attachment.id),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return buildDialogContent(dialogContext, [
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  "Decrypting...",
+                  style: TextStyle(color: _DesignColors.textPrimary),
+                ),
+              ]);
+            }
+
+            final data = snapshot.data;
+            if (data != null && data.isNotEmpty) {
+              if (_isImage(attachment.fileName, data)) {
+                return Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    InteractiveViewer(
                       maxScale: 5.0,
                       child: Image.memory(
                         data,
@@ -1328,77 +1358,70 @@ class _AttachmentBarState extends State<AttachmentBar> {
                           );
                         },
                       ),
-                    );
-                  } else {
-                    return Container(
-                      padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(
-                        color: _DesignColors.toolbarIsland,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.insert_drive_file,
-                            size: 64,
-                            color: _DesignColors.accent,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            attachment.fileName,
-                            style: const TextStyle(
-                              color: _DesignColors.textPrimary,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            "${(attachment.size / 1024).toStringAsFixed(1)} KB",
-                            style: const TextStyle(
-                              color: _DesignColors.textSecondary,
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-                          const Text(
-                            "Preview not available for this file type.",
-                            style: TextStyle(color: _DesignColors.subtleGray),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-                } else {
-                  return Container(
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: _DesignColors.toolbarIsland,
-                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.error, color: Colors.red, size: 48),
-                        SizedBox(height: 16),
-                        Text(
-                          "Failed to load attachment",
-                          style: TextStyle(color: _DesignColors.textPrimary),
-                        ),
-                      ],
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white),
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        tooltip: 'Close',
+                      ),
                     ),
-                  );
-                }
-              },
-            ),
-            Positioned(
-              top: 0,
-              right: 0,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ),
-          ],
+                  ],
+                );
+              } else {
+                final sizeKb = (attachment.size / 1024).toStringAsFixed(1);
+                return buildDialogContent(dialogContext, [
+                  const Icon(
+                    Icons.insert_drive_file,
+                    size: 48,
+                    color: _DesignColors.accent,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    attachment.fileName,
+                    style: const TextStyle(
+                      color: _DesignColors.textPrimary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "$sizeKb KB",
+                    style: const TextStyle(
+                      color: _DesignColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    "No preview available",
+                    style: TextStyle(
+                      color: _DesignColors.subtleGray,
+                      fontSize: 12,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ]);
+              }
+            } else {
+              return buildDialogContent(dialogContext, [
+                const Icon(
+                  Icons.error_outline,
+                  color: Colors.redAccent,
+                  size: 40,
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  "Failed to load",
+                  style: TextStyle(color: _DesignColors.textPrimary),
+                ),
+              ]);
+            }
+          },
         ),
       ),
     );

@@ -14,6 +14,7 @@ class Sidebar extends StatelessWidget {
   final VoidCallback? onImportNote;
   final VoidCallback? onSettings;
   final VoidCallback? onRefresh; // Added callback
+  final Function(String)? onSearchChanged;
 
   const Sidebar({
     super.key,
@@ -25,6 +26,7 @@ class Sidebar extends StatelessWidget {
     this.onImportNote,
     this.onSettings,
     this.onRefresh,
+    this.onSearchChanged,
   });
 
   @override
@@ -140,58 +142,78 @@ class Sidebar extends StatelessWidget {
                 ),
               ),
               style: const TextStyle(color: Colors.white),
+              onChanged: onSearchChanged,
             ),
           ),
 
           const SizedBox(height: 24),
 
-          _buildSectionHeader('RECENT'),
+          _buildSectionHeader('FILES'),
           Expanded(
-            child: ListView.builder(
-              itemCount: recentFiles.length,
-              itemBuilder: (context, index) {
-                final file = recentFiles[index];
-                return ListTile(
-                  leading: const Icon(
-                    Icons.description,
-                    color: Colors.white70,
-                    size: 20,
-                  ),
-                  title: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          file.title,
-                          style: const TextStyle(color: Colors.white70),
-                          overflow: TextOverflow.ellipsis,
+            child: recentFiles.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.search_off,
+                          color: Colors.white24,
+                          size: 48,
                         ),
-                      ),
-                      if (file.isLocked)
-                        const Padding(
-                          padding: EdgeInsets.only(left: 8),
-                          child: Icon(
-                            Icons.lock_outline,
-                            color: Colors.amberAccent,
-                            size: 14,
-                          ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'No files found',
+                          style: TextStyle(color: Colors.white24, fontSize: 14),
                         ),
-                    ],
-                  ),
-                  onTap: () => onFileSelected(file.path),
-
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-                  dense: true,
-                  trailing: IconButton(
-                    icon: const Icon(
-                      Icons.more_vert,
-                      color: Colors.white70,
-                      size: 20,
+                      ],
                     ),
-                    onPressed: () => _showFileDetails(context, file),
+                  )
+                : ListView.builder(
+                    itemCount: recentFiles.length,
+                    itemBuilder: (context, index) {
+                      final file = recentFiles[index];
+                      return ListTile(
+                        leading: const Icon(
+                          Icons.description,
+                          color: Colors.white70,
+                          size: 20,
+                        ),
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                file.title,
+                                style: const TextStyle(color: Colors.white70),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (file.isLocked)
+                              const Padding(
+                                padding: EdgeInsets.only(left: 8),
+                                child: Icon(
+                                  Icons.lock_outline,
+                                  color: Colors.amberAccent,
+                                  size: 14,
+                                ),
+                              ),
+                          ],
+                        ),
+                        onTap: () => onFileSelected(file.path),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                        ),
+                        dense: true,
+                        trailing: IconButton(
+                          icon: const Icon(
+                            Icons.more_vert,
+                            color: Colors.white70,
+                            size: 20,
+                          ),
+                          onPressed: () => _showFileDetails(context, file),
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
           ),
         ],
       ),

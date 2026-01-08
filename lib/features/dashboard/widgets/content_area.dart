@@ -79,8 +79,6 @@ class ContentArea extends StatelessWidget {
           // Breadcrumb-style indicator
           Expanded(child: _buildBreadcrumb(isMobile)),
 
-          if (!isMobile) const Spacer(),
-
           // Secondary actions (right side)
           _buildSecondaryActions(context),
 
@@ -286,12 +284,6 @@ class ContentArea extends StatelessWidget {
                       ),
               ),
             ),
-          ),
-
-          // Fixed Toggle Button
-          Padding(
-            padding: const EdgeInsets.only(right: 8, left: 4),
-            child: _buildModeToggleButton(),
           ),
         ],
       ),

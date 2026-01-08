@@ -12,7 +12,8 @@ class Sidebar extends StatelessWidget {
   final Function(RecentFile) onDelete;
   final VoidCallback onNewNote;
   final VoidCallback? onImportNote;
-  final VoidCallback? onSettings; // Added callback
+  final VoidCallback? onSettings;
+  final VoidCallback? onRefresh; // Added callback
 
   const Sidebar({
     super.key,
@@ -23,6 +24,7 @@ class Sidebar extends StatelessWidget {
     required this.onNewNote,
     this.onImportNote,
     this.onSettings,
+    this.onRefresh,
   });
 
   @override
@@ -38,7 +40,7 @@ class Sidebar extends StatelessWidget {
             padding: const EdgeInsets.all(20.0),
             child: Row(
               children: [
-                Icon(Icons.inbox, color: Colors.blueAccent, size: 32),
+                const Icon(Icons.inbox, color: Colors.blueAccent, size: 32),
                 const SizedBox(width: 12),
                 const Text(
                   'Notes',
@@ -88,11 +90,6 @@ class Sidebar extends StatelessWidget {
                         tooltip: 'Settings',
                         splashRadius: 24,
                         padding: const EdgeInsets.symmetric(horizontal: 12),
-                        // Remove box constraint to allow filling height?
-                        // Actually icon button is fixed size usually.
-                        // We want the container to be wide enough but match height.
-                        // crossAxisAlignment.stretch handles height.
-                        // We just need center alignment which IconButton is by default?
                       ),
                     ),
                   ],
@@ -204,14 +201,30 @@ class Sidebar extends StatelessWidget {
   Widget _buildSectionHeader(String title) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
-      child: Text(
-        title,
-        style: const TextStyle(
-          color: Colors.grey,
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.2,
-        ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.grey,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.2,
+            ),
+          ),
+          if (onRefresh != null)
+            SizedBox(
+              height: 24,
+              width: 24,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: const Icon(Icons.refresh, color: Colors.grey, size: 16),
+                onPressed: onRefresh,
+                tooltip: 'Refresh',
+              ),
+            ),
+        ],
       ),
     );
   }

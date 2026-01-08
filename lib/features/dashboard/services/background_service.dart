@@ -25,8 +25,8 @@ class BackgroundService {
       } else if (message is List<RecentFile>) {
         _recentFilesController.add(message);
       } else if (message is String) {
-        // Error or log
-        // print("[BackgroundService] Isolate Message: $message");
+        // Error or log from isolate
+        print("[BackgroundService] Isolate: $message");
       }
     });
   }
@@ -66,6 +66,12 @@ void _isolateEntryPoint(SendPort sendPort) {
   });
 }
 
+/// Extracts the folder/file name from a path, handling both Windows and Unix separators.
+String _extractName(String path) {
+  final pathParts = path.split(RegExp(r'[/\\]'));
+  return pathParts.where((p) => p.isNotEmpty).last;
+}
+
 Future<List<RecentFile>> _processRecentFiles(
   String directoryPath,
   EncryptionService encryptionService,
@@ -79,27 +85,21 @@ Future<List<RecentFile>> _processRecentFiles(
     final fileFiles = entities.whereType<File>().toList();
 
     for (final file in fileFiles) {
-      if (file.uri.pathSegments.last.startsWith('.')) continue; // Skip hidden
+      final fileName = _extractName(file.path);
+      if (fileName.startsWith('.')) continue; // Skip hidden
       loadedFiles.add(await _parseFile(file, encryptionService));
     }
   }
 
-  // 2. Scan New Note Folders (UserData/notes) (Logic adapted, actually existing code might not target /notes explicitly but root folders?
-  // Let's stick to what was there or what works.
-  // Previous code checked `file.path.contains('note_content')` logic.
-  // Wait, step 1109 log showed `final noteFolders = entities.whereType<Directory>().toList()` on `dir.listSync()`.
-  // So it scanned root for folders too.
-  // I will implement robust scanning.
+  // 2. Scan New Note Folders in UserData/notes/ subdirectory
+  final notesDir = Directory('$directoryPath/notes');
+  if (notesDir.existsSync()) {
+    final List<FileSystemEntity> noteEntities = notesDir.listSync();
+    final noteFolders = noteEntities.whereType<Directory>().toList();
 
-  // Note: Previous view showed scanning `directoryPath` itself for subfolders.
-  // So I will iterate `directory.listSync` for folders too.
+    for (final folder in noteFolders) {
+      final folderName = _extractName(folder.path);
 
-  if (directory.existsSync()) {
-    final List<FileSystemEntity> entities = directory.listSync();
-    final folders = entities.whereType<Directory>().toList();
-
-    for (final folder in folders) {
-      final folderName = folder.uri.pathSegments.last;
       if (folderName.startsWith('note_')) {
         final noteId = folderName.replaceFirst('note_', '');
         // Check for note_content_<id>.enc
@@ -117,7 +117,31 @@ Future<List<RecentFile>> _processRecentFiles(
     }
   }
 
-  // 3. Sort by modified desc
+  // 3. Also scan root UserData for legacy note_ folders (backward compatibility)
+  if (directory.existsSync()) {
+    final List<FileSystemEntity> entities = directory.listSync();
+    final folders = entities.whereType<Directory>().toList();
+
+    for (final folder in folders) {
+      final folderName = _extractName(folder.path);
+      if (folderName.startsWith('note_')) {
+        final noteId = folderName.replaceFirst('note_', '');
+        // Check for note_content_<id>.enc
+        final metaFile = File('${folder.path}/note_content_$noteId.enc');
+        if (metaFile.existsSync()) {
+          loadedFiles.add(
+            await _parseFile(
+              metaFile,
+              encryptionService,
+              overridePath: folderName,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  // 4. Sort by modified desc
   loadedFiles.sort((a, b) {
     if (a.modified == null && b.modified == null) return 0;
     if (a.modified == null) return 1;
@@ -133,13 +157,13 @@ Future<RecentFile> _parseFile(
   EncryptionService encryptionService, {
   String? overridePath,
 }) async {
-  String displayTitle = overridePath ?? file.uri.pathSegments.last;
+  String displayTitle = overridePath ?? _extractName(file.path);
   bool isLocked = false;
   DateTime? created;
   DateTime? modified;
   int? sizeBytes;
 
-  final effectivePath = overridePath ?? file.uri.pathSegments.last;
+  final effectivePath = overridePath ?? _extractName(file.path);
 
   try {
     final stat = file.statSync();
@@ -184,7 +208,7 @@ Future<RecentFile> _parseFile(
       }
     }
   } catch (e) {
-    // print("Error parsing file $effectivePath: $e");
+    // Error parsing file - silently skip
   }
 
   return RecentFile(

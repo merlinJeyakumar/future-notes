@@ -78,7 +78,7 @@ Future<List<RecentFile>> _processRecentFiles(
 ) async {
   List<RecentFile> loadedFiles = [];
 
-  // 1. Scan Legacy Files (Root UserData)
+  // 1. Scan Legacy Files (Root UserData) - only add if valid note
   final directory = Directory(directoryPath);
   if (directory.existsSync()) {
     final List<FileSystemEntity> entities = directory.listSync();
@@ -87,7 +87,11 @@ Future<List<RecentFile>> _processRecentFiles(
     for (final file in fileFiles) {
       final fileName = _extractName(file.path);
       if (fileName.startsWith('.')) continue; // Skip hidden
-      loadedFiles.add(await _parseFile(file, encryptionService));
+      if (fileName == 'settings.json') continue; // Skip settings file
+      final parsed = await _parseFile(file, encryptionService);
+      if (parsed != null) {
+        loadedFiles.add(parsed);
+      }
     }
   }
 
@@ -105,13 +109,14 @@ Future<List<RecentFile>> _processRecentFiles(
         // Check for note_content_<id>.enc
         final metaFile = File('${folder.path}/note_content_$noteId.enc');
         if (metaFile.existsSync()) {
-          loadedFiles.add(
-            await _parseFile(
-              metaFile,
-              encryptionService,
-              overridePath: folderName,
-            ),
+          final parsed = await _parseFile(
+            metaFile,
+            encryptionService,
+            overridePath: folderName,
           );
+          if (parsed != null) {
+            loadedFiles.add(parsed);
+          }
         }
       }
     }
@@ -129,13 +134,14 @@ Future<List<RecentFile>> _processRecentFiles(
         // Check for note_content_<id>.enc
         final metaFile = File('${folder.path}/note_content_$noteId.enc');
         if (metaFile.existsSync()) {
-          loadedFiles.add(
-            await _parseFile(
-              metaFile,
-              encryptionService,
-              overridePath: folderName,
-            ),
+          final parsed = await _parseFile(
+            metaFile,
+            encryptionService,
+            overridePath: folderName,
           );
+          if (parsed != null) {
+            loadedFiles.add(parsed);
+          }
         }
       }
     }
@@ -152,7 +158,9 @@ Future<List<RecentFile>> _processRecentFiles(
   return loadedFiles;
 }
 
-Future<RecentFile> _parseFile(
+/// Parses a file and returns a RecentFile if it's a valid app note.
+/// Returns null if the file is not a recognized note format.
+Future<RecentFile?> _parseFile(
   File file,
   EncryptionService encryptionService, {
   String? overridePath,
@@ -162,6 +170,7 @@ Future<RecentFile> _parseFile(
   DateTime? created;
   DateTime? modified;
   int? sizeBytes;
+  bool isValidNote = false;
 
   final effectivePath = overridePath ?? _extractName(file.path);
 
@@ -179,36 +188,49 @@ Future<RecentFile> _parseFile(
           // It's a valid app-encrypted file
           try {
             final jsonMap = json.decode(appDecrypted);
-            final note = NoteModel.fromJson(jsonMap);
-            if (note.title.isNotEmpty) {
-              displayTitle = note.title;
+            if (jsonMap is Map<String, dynamic> &&
+                jsonMap.containsKey('title') &&
+                jsonMap.containsKey('content') &&
+                jsonMap.containsKey('timestamp')) {
+              final note = NoteModel.fromJson(jsonMap);
+              if (note.title.isNotEmpty) {
+                displayTitle = note.title;
+              }
+              isLocked = note.isLocked;
+              created = DateTime.fromMillisecondsSinceEpoch(note.timestamp);
+              isValidNote = true;
             }
-            isLocked = note.isLocked;
-            created = DateTime.fromMillisecondsSinceEpoch(note.timestamp);
           } catch (_) {
-            // Valid app encryption but invalid JSON inside?
+            // Valid app encryption but invalid JSON inside
           }
         }
       } catch (e) {
-        // Not app encrypted, maybe legacy JSON or Plain Text?
-        // Fallback: Check if it's plaintext JSON
+        // Not app encrypted, maybe legacy JSON?
+        // Fallback: Check if it's plaintext JSON with note structure
         try {
           final jsonMap = json.decode(content);
           if (jsonMap is Map<String, dynamic> &&
-              (jsonMap.containsKey('title') ||
-                  jsonMap.containsKey('content'))) {
+              jsonMap.containsKey('title') &&
+              jsonMap.containsKey('content') &&
+              jsonMap.containsKey('timestamp')) {
             final note = NoteModel.fromJson(jsonMap);
             displayTitle = note.title;
             isLocked = note.isLocked;
             created = DateTime.fromMillisecondsSinceEpoch(note.timestamp);
+            isValidNote = true;
           }
         } catch (_) {
-          // Plain text file, use filename as title
+          // Not a valid note file
         }
       }
     }
   } catch (e) {
-    // Error parsing file - silently skip
+    // Error parsing file - not a valid note
+  }
+
+  // Only return if this is a confirmed valid note
+  if (!isValidNote) {
+    return null;
   }
 
   return RecentFile(

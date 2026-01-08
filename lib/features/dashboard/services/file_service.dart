@@ -3,9 +3,9 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:path_provider/path_provider.dart';
 import 'package:universal_html/html.dart' as html;
 import 'package:uuid/uuid.dart';
+import 'settings_service.dart';
 
 abstract class IFileService {
   Future<FilePickerResult?> pickFile({List<String>? allowedExtensions});
@@ -36,9 +36,9 @@ class FileService implements IFileService {
   Future<String> saveAttachment(Uint8List data, String noteId) async {
     if (kIsWeb) return ""; // Not supported
 
-    final directory = await getApplicationDocumentsDirectory();
+    final userDataPath = await SettingsService().getUserDataPath();
     final attachmentsDir = Directory(
-      '${directory.path}/UserData/notes/note_$noteId/attachments',
+      '$userDataPath/notes/note_$noteId/attachments',
     );
     if (!await attachmentsDir.exists()) {
       await attachmentsDir.create(recursive: true);
@@ -55,9 +55,9 @@ class FileService implements IFileService {
   Future<Uint8List?> readAttachment(String noteId, String attachmentId) async {
     if (kIsWeb) return null;
     try {
-      final directory = await getApplicationDocumentsDirectory();
+      final userDataPath = await SettingsService().getUserDataPath();
       final file = File(
-        '${directory.path}/UserData/notes/note_$noteId/attachments/$attachmentId.med',
+        '$userDataPath/notes/note_$noteId/attachments/$attachmentId.med',
       );
 
       if (await file.exists()) {
@@ -80,8 +80,8 @@ class FileService implements IFileService {
         ..click();
       html.Url.revokeObjectUrl(url);
     } else {
-      final directory = await getApplicationDocumentsDirectory();
-      final userDataDir = Directory('${directory.path}/UserData');
+      final userDataPath = await SettingsService().getUserDataPath();
+      final userDataDir = Directory(userDataPath);
       if (!await userDataDir.exists())
         await userDataDir.create(recursive: true);
 
@@ -92,8 +92,8 @@ class FileService implements IFileService {
 
   Future<void> saveNoteContent(String noteId, String content) async {
     if (kIsWeb) return;
-    final directory = await getApplicationDocumentsDirectory();
-    final noteDir = Directory('${directory.path}/UserData/notes/note_$noteId');
+    final userDataPath = await SettingsService().getUserDataPath();
+    final noteDir = Directory('$userDataPath/notes/note_$noteId');
     if (!await noteDir.exists()) {
       await noteDir.create(recursive: true);
     }
@@ -106,8 +106,8 @@ class FileService implements IFileService {
   @override
   Stream<void> watchRecentFiles() async* {
     if (kIsWeb) return;
-    final directory = await getApplicationDocumentsDirectory();
-    final userDataDir = Directory('${directory.path}/UserData');
+    final userDataPath = await SettingsService().getUserDataPath();
+    final userDataDir = Directory(userDataPath);
 
     // Watch root UserData for legacy files
     if (await userDataDir.exists()) {
@@ -125,8 +125,8 @@ class FileService implements IFileService {
   Future<List<String>> getRecentFiles() async {
     if (kIsWeb) return [];
 
-    final directory = await getApplicationDocumentsDirectory();
-    final userDataDir = Directory('${directory.path}/UserData');
+    final userDataPath = await SettingsService().getUserDataPath();
+    final userDataDir = Directory(userDataPath);
     final List<String> files = [];
 
     if (await userDataDir.exists()) {
@@ -154,8 +154,8 @@ class FileService implements IFileService {
   Future<String?> readFile(String fileName) async {
     if (kIsWeb) return null;
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final basePath = '${directory.path}/UserData';
+      final userDataPath = await SettingsService().getUserDataPath();
+      final basePath = userDataPath;
 
       // Check if it's a new style note folder
       if (fileName.startsWith('note_')) {
@@ -183,8 +183,8 @@ class FileService implements IFileService {
   Future<void> deleteFile(String fileName) async {
     if (kIsWeb) return;
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final basePath = '${directory.path}/UserData';
+      final userDataPath = await SettingsService().getUserDataPath();
+      final basePath = userDataPath;
 
       if (fileName.startsWith('note_')) {
         final noteDir = Directory('$basePath/notes/$fileName');
@@ -209,8 +209,8 @@ class FileService implements IFileService {
   Future<FileStat?> getFileStats(String fileName) async {
     if (kIsWeb) return null;
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final basePath = '${directory.path}/UserData';
+      final userDataPath = await SettingsService().getUserDataPath();
+      final basePath = userDataPath;
 
       if (fileName.startsWith('note_')) {
         final noteId = fileName.replaceFirst('note_', '');
@@ -234,14 +234,11 @@ class FileService implements IFileService {
   Future<String> getFullPath(String fileName) async {
     if (kIsWeb) return fileName;
     try {
-      final directory = await getApplicationDocumentsDirectory();
+      final userDataPath = await SettingsService().getUserDataPath();
       if (fileName.startsWith('note_')) {
-        // Return path to the folder or the meta file?
-        // Sidebar uses this for "Show in folder".
-        // For a bundle, usually showing the folder is better.
-        return '${directory.path}/UserData/notes/$fileName';
+        return '$userDataPath/notes/$fileName';
       }
-      return '${directory.path}/UserData/$fileName';
+      return '$userDataPath/$fileName';
     } catch (e) {
       return fileName;
     }
@@ -251,21 +248,15 @@ class FileService implements IFileService {
   Future<String?> importFile(PlatformFile file) async {
     if (kIsWeb) return null;
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final userDataDir = Directory('${directory.path}/UserData');
+      final userDataPath = await SettingsService().getUserDataPath();
+      final userDataDir = Directory(userDataPath);
       if (!await userDataDir.exists()) {
         await userDataDir.create(recursive: true);
       }
 
-      // Generate unique name if collision? For now overwrite or strict name?
-      // User request: "move that file to the app storage"
-      // Let's keep original name but sanitize?
-      // Or just copy.
       final String fileName = file.name;
       final String destinationPath = '${userDataDir.path}/$fileName';
 
-      // Copy source to destination
-      // PlatformFile has 'path' on IO (except web which we handled)
       if (file.path != null) {
         await File(file.path!).copy(destinationPath);
         print("Imported file to: $destinationPath");
@@ -281,8 +272,8 @@ class FileService implements IFileService {
   Future<String> getUserDataPath() async {
     if (kIsWeb) return '';
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final userDataDir = Directory('${directory.path}/UserData');
+      final userDataPath = await SettingsService().getUserDataPath();
+      final userDataDir = Directory(userDataPath);
       if (!await userDataDir.exists()) {
         await userDataDir.create(recursive: true);
         print("Created UserData directory at: ${userDataDir.path}");

@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:file_picker/file_picker.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/content_area.dart';
 import '../viewmodels/content_viewmodel.dart';
@@ -28,7 +28,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       fileService: FileService(),
       encryptionService: EncryptionService(),
     );
-    SettingsService().init();
   }
 
   @override
@@ -38,16 +37,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _handleOpenFolder(RecentFile file) async {
-    // Assuming file.path is just filename (from getRecentFiles in ViewModel)
-    // We need to reconstruct full path.
-    // OR: Update ViewModel/Service to provide full path?
-    // Current IMPL: recentFiles are filenames.
-    // FileService puts them in UserData.
-
-    // We can duplicate the path logic here or use a helper.
-    // Replicating logic for expediency as FileService does hardcode 'UserData'.
-    final directory = await getApplicationDocumentsDirectory();
-    final fullPath = '${directory.path}/UserData/${file.path}';
+    final fullPath = file.fullPath;
     final normalizedPath = fullPath.replaceAll(
       '/',
       '\\',
@@ -162,6 +152,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     },
                   ),
                 ),
+                if (!Platform.isAndroid && !Platform.isIOS) ...[
+                  const Divider(color: Colors.grey),
+                  ListTile(
+                    leading: const Icon(
+                      Icons.folder_open,
+                      color: Colors.white70,
+                    ),
+                    title: const Text(
+                      'App Data Folder',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    subtitle: FutureBuilder<String>(
+                      future: settings.getUserDataPath(),
+                      builder: (context, snapshot) {
+                        return Text(
+                          snapshot.data ?? 'Loading...',
+                          style: const TextStyle(
+                            color: Colors.grey,
+                            fontSize: 12,
+                          ),
+                        );
+                      },
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.edit, color: Colors.blueAccent),
+                      onPressed: () async {
+                        final String? selectedDirectory = await FilePicker
+                            .platform
+                            .getDirectoryPath();
+                        if (selectedDirectory != null) {
+                          await settings.setCustomDataPath(selectedDirectory);
+                          setState(() {});
+                          _viewModel.loadRecentFiles();
+                        }
+                      },
+                    ),
+                  ),
+                ],
                 const Divider(color: Colors.grey),
                 ListTile(
                   leading: const Icon(

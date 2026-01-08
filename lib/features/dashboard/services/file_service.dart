@@ -24,6 +24,8 @@ abstract class IFileService {
 }
 
 class FileService implements IFileService {
+  final SettingsService _settings = SettingsService();
+
   @override
   Future<FilePickerResult?> pickFile({List<String>? allowedExtensions}) async {
     return await FilePicker.platform.pickFiles(
@@ -34,18 +36,22 @@ class FileService implements IFileService {
 
   @override
   Future<String> saveAttachment(Uint8List data, String noteId) async {
-    if (kIsWeb) return ""; // Not supported
+    if (kIsWeb) return "";
 
-    final userDataPath = await SettingsService().getUserDataPath();
-    final attachmentsDir = Directory(
-      '$userDataPath/notes/note_$noteId/attachments',
+    final attachmentsFolderPath = await _settings.getAttachmentsFolderPath(
+      noteId,
     );
+    final attachmentsDir = Directory(attachmentsFolderPath);
     if (!await attachmentsDir.exists()) {
       await attachmentsDir.create(recursive: true);
     }
 
     final attachmentId = const Uuid().v4();
-    final file = File('${attachmentsDir.path}/$attachmentId.med');
+    final filePath = await _settings.getAttachmentFilePath(
+      noteId,
+      attachmentId,
+    );
+    final file = File(filePath);
     await file.writeAsBytes(data);
 
     return attachmentId;
@@ -55,10 +61,11 @@ class FileService implements IFileService {
   Future<Uint8List?> readAttachment(String noteId, String attachmentId) async {
     if (kIsWeb) return null;
     try {
-      final userDataPath = await SettingsService().getUserDataPath();
-      final file = File(
-        '$userDataPath/notes/note_$noteId/attachments/$attachmentId.med',
+      final filePath = await _settings.getAttachmentFilePath(
+        noteId,
+        attachmentId,
       );
+      final file = File(filePath);
 
       if (await file.exists()) {
         return await file.readAsBytes();
@@ -80,25 +87,29 @@ class FileService implements IFileService {
         ..click();
       html.Url.revokeObjectUrl(url);
     } else {
-      final userDataPath = await SettingsService().getUserDataPath();
+      final userDataPath = await _settings.getUserDataPath();
       final userDataDir = Directory(userDataPath);
-      if (!await userDataDir.exists())
+      if (!await userDataDir.exists()) {
         await userDataDir.create(recursive: true);
+      }
 
-      final file = File('${userDataDir.path}/$fileName');
+      final file = File('$userDataPath/$fileName');
       await file.writeAsString(content);
     }
   }
 
+  @override
   Future<void> saveNoteContent(String noteId, String content) async {
     if (kIsWeb) return;
-    final userDataPath = await SettingsService().getUserDataPath();
-    final noteDir = Directory('$userDataPath/notes/note_$noteId');
+
+    final noteFolderPath = await _settings.getNoteFolderPath(noteId);
+    final noteDir = Directory(noteFolderPath);
     if (!await noteDir.exists()) {
       await noteDir.create(recursive: true);
     }
-    // Encoded filename with ID
-    final file = File('${noteDir.path}/note_content_$noteId.enc');
+
+    final noteFilePath = await _settings.getNoteFilePath(noteId);
+    final file = File(noteFilePath);
     await file.writeAsString(content);
     print('Saved note to: ${file.path}');
   }
@@ -106,18 +117,11 @@ class FileService implements IFileService {
   @override
   Stream<void> watchRecentFiles() async* {
     if (kIsWeb) return;
-    final userDataPath = await SettingsService().getUserDataPath();
+    final userDataPath = await _settings.getUserDataPath();
     final userDataDir = Directory(userDataPath);
 
-    // Watch root UserData for legacy files
     if (await userDataDir.exists()) {
       yield* userDataDir.watch(events: FileSystemEvent.all);
-    }
-
-    // Watch notes directory
-    final notesDir = Directory('${userDataDir.path}/notes');
-    if (await notesDir.exists()) {
-      yield* notesDir.watch(events: FileSystemEvent.all);
     }
   }
 
@@ -125,27 +129,25 @@ class FileService implements IFileService {
   Future<List<String>> getRecentFiles() async {
     if (kIsWeb) return [];
 
-    final userDataPath = await SettingsService().getUserDataPath();
+    final userDataPath = await _settings.getUserDataPath();
     final userDataDir = Directory(userDataPath);
     final List<String> files = [];
 
     if (await userDataDir.exists()) {
-      // 1. Legacy Files
-      final legacyEntities = userDataDir.listSync();
+      final entities = userDataDir.listSync();
+
+      // Files directly in folder
       files.addAll(
-        legacyEntities.whereType<File>().map((e) => e.uri.pathSegments.last),
+        entities.whereType<File>().map((e) => e.uri.pathSegments.last),
       );
 
-      // 2. New Note Folders
-      final notesDir = Directory('${userDataDir.path}/notes');
-      if (await notesDir.exists()) {
-        final noteFolders = notesDir.listSync();
-        files.addAll(
-          noteFolders.whereType<Directory>().map(
-            (e) => e.uri.pathSegments.last,
-          ),
-        ); // e.g., "note_123"
-      }
+      // note_ folders directly in folder
+      files.addAll(
+        entities
+            .whereType<Directory>()
+            .where((d) => d.uri.pathSegments.last.startsWith('note_'))
+            .map((e) => e.uri.pathSegments.last),
+      );
     }
     return files;
   }
@@ -154,21 +156,19 @@ class FileService implements IFileService {
   Future<String?> readFile(String fileName) async {
     if (kIsWeb) return null;
     try {
-      final userDataPath = await SettingsService().getUserDataPath();
-      final basePath = userDataPath;
+      final basePath = await _settings.getUserDataPath();
 
-      // Check if it's a new style note folder
+      // Check if it's a note folder
       if (fileName.startsWith('note_')) {
         final noteId = fileName.replaceFirst('note_', '');
-        final noteFile = File(
-          '$basePath/notes/$fileName/note_content_$noteId.enc',
-        );
+        final noteFilePath = await _settings.getNoteFilePath(noteId);
+        final noteFile = File(noteFilePath);
         if (await noteFile.exists()) {
           return await noteFile.readAsString();
         }
       }
 
-      // Fallback to legacy file
+      // Fallback to legacy file directly in folder
       final file = File('$basePath/$fileName');
       if (await file.exists()) {
         return await file.readAsString();
@@ -183,11 +183,12 @@ class FileService implements IFileService {
   Future<void> deleteFile(String fileName) async {
     if (kIsWeb) return;
     try {
-      final userDataPath = await SettingsService().getUserDataPath();
-      final basePath = userDataPath;
+      final basePath = await _settings.getUserDataPath();
 
       if (fileName.startsWith('note_')) {
-        final noteDir = Directory('$basePath/notes/$fileName');
+        final noteId = fileName.replaceFirst('note_', '');
+        final noteFolderPath = await _settings.getNoteFolderPath(noteId);
+        final noteDir = Directory(noteFolderPath);
         if (await noteDir.exists()) {
           await noteDir.delete(recursive: true);
           print("Deleted note folder: ${noteDir.path}");
@@ -209,14 +210,12 @@ class FileService implements IFileService {
   Future<FileStat?> getFileStats(String fileName) async {
     if (kIsWeb) return null;
     try {
-      final userDataPath = await SettingsService().getUserDataPath();
-      final basePath = userDataPath;
+      final basePath = await _settings.getUserDataPath();
 
       if (fileName.startsWith('note_')) {
         final noteId = fileName.replaceFirst('note_', '');
-        final noteFile = File(
-          '$basePath/notes/$fileName/note_content_$noteId.enc',
-        );
+        final noteFilePath = await _settings.getNoteFilePath(noteId);
+        final noteFile = File(noteFilePath);
         if (await noteFile.exists()) return await noteFile.stat();
       }
 
@@ -234,11 +233,12 @@ class FileService implements IFileService {
   Future<String> getFullPath(String fileName) async {
     if (kIsWeb) return fileName;
     try {
-      final userDataPath = await SettingsService().getUserDataPath();
       if (fileName.startsWith('note_')) {
-        return '$userDataPath/notes/$fileName';
+        final noteId = fileName.replaceFirst('note_', '');
+        return await _settings.getNoteFolderPath(noteId);
       }
-      return '$userDataPath/$fileName';
+      final basePath = await _settings.getUserDataPath();
+      return '$basePath/$fileName';
     } catch (e) {
       return fileName;
     }
@@ -248,14 +248,14 @@ class FileService implements IFileService {
   Future<String?> importFile(PlatformFile file) async {
     if (kIsWeb) return null;
     try {
-      final userDataPath = await SettingsService().getUserDataPath();
+      final userDataPath = await _settings.getUserDataPath();
       final userDataDir = Directory(userDataPath);
       if (!await userDataDir.exists()) {
         await userDataDir.create(recursive: true);
       }
 
       final String fileName = file.name;
-      final String destinationPath = '${userDataDir.path}/$fileName';
+      final String destinationPath = '$userDataPath/$fileName';
 
       if (file.path != null) {
         await File(file.path!).copy(destinationPath);
@@ -272,7 +272,7 @@ class FileService implements IFileService {
   Future<String> getUserDataPath() async {
     if (kIsWeb) return '';
     try {
-      final userDataPath = await SettingsService().getUserDataPath();
+      final userDataPath = await _settings.getUserDataPath();
       final userDataDir = Directory(userDataPath);
       if (!await userDataDir.exists()) {
         await userDataDir.create(recursive: true);

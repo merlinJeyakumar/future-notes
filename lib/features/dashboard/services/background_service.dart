@@ -78,70 +78,40 @@ Future<List<RecentFile>> _processRecentFiles(
 ) async {
   List<RecentFile> loadedFiles = [];
 
-  // 1. Scan Legacy Files (Root UserData) - only add if valid note
   final directory = Directory(directoryPath);
-  if (directory.existsSync()) {
-    final List<FileSystemEntity> entities = directory.listSync();
-    final fileFiles = entities.whereType<File>().toList();
+  if (!directory.existsSync()) {
+    return loadedFiles;
+  }
 
-    for (final file in fileFiles) {
-      final fileName = _extractName(file.path);
-      if (fileName.startsWith('.')) continue; // Skip hidden
-      if (fileName == 'settings.json') continue; // Skip settings file
-      final parsed = await _parseFile(file, encryptionService);
-      if (parsed != null) {
-        loadedFiles.add(parsed);
-      }
+  final List<FileSystemEntity> entities = directory.listSync();
+
+  // 1. Scan files directly in the selected folder
+  final fileFiles = entities.whereType<File>().toList();
+  for (final file in fileFiles) {
+    final fileName = _extractName(file.path);
+    if (fileName.startsWith('.')) continue; // Skip hidden
+    if (fileName == 'settings.json') continue; // Skip settings file
+    final parsed = await _parseFile(file, encryptionService);
+    if (parsed != null) {
+      loadedFiles.add(parsed);
     }
   }
 
-  // 2. Scan New Note Folders in UserData/notes/ subdirectory
-  final notesDir = Directory('$directoryPath/notes');
-  if (notesDir.existsSync()) {
-    final List<FileSystemEntity> noteEntities = notesDir.listSync();
-    final noteFolders = noteEntities.whereType<Directory>().toList();
-
-    for (final folder in noteFolders) {
-      final folderName = _extractName(folder.path);
-
-      if (folderName.startsWith('note_')) {
-        final noteId = folderName.replaceFirst('note_', '');
-        // Check for note_content_<id>.enc
-        final metaFile = File('${folder.path}/note_content_$noteId.enc');
-        if (metaFile.existsSync()) {
-          final parsed = await _parseFile(
-            metaFile,
-            encryptionService,
-            overridePath: folderName,
-          );
-          if (parsed != null) {
-            loadedFiles.add(parsed);
-          }
-        }
-      }
-    }
-  }
-
-  // 3. Also scan root UserData for legacy note_ folders (backward compatibility)
-  if (directory.existsSync()) {
-    final List<FileSystemEntity> entities = directory.listSync();
-    final folders = entities.whereType<Directory>().toList();
-
-    for (final folder in folders) {
-      final folderName = _extractName(folder.path);
-      if (folderName.startsWith('note_')) {
-        final noteId = folderName.replaceFirst('note_', '');
-        // Check for note_content_<id>.enc
-        final metaFile = File('${folder.path}/note_content_$noteId.enc');
-        if (metaFile.existsSync()) {
-          final parsed = await _parseFile(
-            metaFile,
-            encryptionService,
-            overridePath: folderName,
-          );
-          if (parsed != null) {
-            loadedFiles.add(parsed);
-          }
+  // 2. Scan note_ folders directly in the selected folder
+  final folders = entities.whereType<Directory>().toList();
+  for (final folder in folders) {
+    final folderName = _extractName(folder.path);
+    if (folderName.startsWith('note_')) {
+      final noteId = folderName.replaceFirst('note_', '');
+      final metaFile = File('${folder.path}/note_content_$noteId.enc');
+      if (metaFile.existsSync()) {
+        final parsed = await _parseFile(
+          metaFile,
+          encryptionService,
+          overridePath: folderName,
+        );
+        if (parsed != null) {
+          loadedFiles.add(parsed);
         }
       }
     }

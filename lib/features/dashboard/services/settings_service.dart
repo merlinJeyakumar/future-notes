@@ -19,6 +19,10 @@ class SettingsService {
 
   CompressionLevel get compressionLevel => _compressionLevel;
 
+  String? _customDataPath;
+
+  String? get customDataPath => _customDataPath;
+
   Future<void> init() async {
     await _loadSettings();
   }
@@ -26,6 +30,22 @@ class SettingsService {
   Future<void> setCompressionLevel(CompressionLevel level) async {
     _compressionLevel = level;
     await _saveSettings();
+  }
+
+  Future<void> setCustomDataPath(String? path) async {
+    _customDataPath = path;
+    await _saveSettings();
+  }
+
+  /// Returns the effective path for storing user data.
+  /// If a custom path is set, returns that.
+  /// Otherwise, returns '[Documents]/UserData'.
+  Future<String> getUserDataPath() async {
+    if (_customDataPath != null && _customDataPath!.isNotEmpty) {
+      return _customDataPath!;
+    }
+    final directory = await getApplicationDocumentsDirectory();
+    return '${directory.path}/UserData';
   }
 
   Future<void> _loadSettings() async {
@@ -37,6 +57,9 @@ class SettingsService {
         final Map<String, dynamic> json = jsonDecode(content);
         if (json.containsKey('compressionLevel')) {
           _compressionLevel = CompressionLevel.values[json['compressionLevel']];
+        }
+        if (json.containsKey('customDataPath')) {
+          _customDataPath = json['customDataPath'];
         }
       }
     } catch (e) {
@@ -53,7 +76,10 @@ class SettingsService {
       }
       final file = File('${directory.path}/UserData/settings.json');
 
-      final json = {'compressionLevel': _compressionLevel.index};
+      final json = {
+        'compressionLevel': _compressionLevel.index,
+        'customDataPath': _customDataPath,
+      };
 
       await file.writeAsString(jsonEncode(json));
     } catch (e) {

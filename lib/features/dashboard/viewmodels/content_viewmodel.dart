@@ -212,7 +212,8 @@ class ContentViewModel extends BaseViewModel {
       language: xml, // Highlighting for XML/HTML
     );
 
-    loadRecentFiles();
+    // Ensure settings are loaded before loading files
+    _initAsync();
     _initFileWatcher();
 
     // Listen to changes for auto-save and title generation
@@ -358,6 +359,12 @@ class ContentViewModel extends BaseViewModel {
         loadRecentFiles();
       });
     });
+  }
+
+  Future<void> _initAsync() async {
+    // Wait for settings to load so custom data path is available
+    await SettingsService().init();
+    loadRecentFiles();
   }
   // endregion
 

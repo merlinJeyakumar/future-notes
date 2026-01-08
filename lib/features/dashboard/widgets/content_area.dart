@@ -86,6 +86,11 @@ class ContentArea extends StatelessWidget {
 
           SizedBox(width: isMobile ? 8 : 16),
 
+          // HTML/Rich Text Toggle Button
+          if (!viewModel.isLocked) _buildModeToggleButton(),
+
+          SizedBox(width: isMobile ? 8 : 12),
+
           // Save Button - Prominent pill style
           _buildSaveButton(isMobile),
         ],

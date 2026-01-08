@@ -262,6 +262,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       Navigator.pop(context);
                       _showMasterSettings(context);
                     },
+                    onRefresh: _viewModel.loadRecentFiles,
                   ),
             body: Stack(
               children: [
@@ -276,6 +277,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         onNewNote: _viewModel.reset,
                         onImportNote: _handleImport,
                         onSettings: () => _showMasterSettings(context),
+                        onRefresh: _viewModel.loadRecentFiles,
                       ),
                     Expanded(child: ContentArea(viewModel: _viewModel)),
                   ],

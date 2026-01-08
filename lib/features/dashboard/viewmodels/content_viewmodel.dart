@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
@@ -34,9 +35,11 @@ class ContentViewModel extends BaseViewModel {
   Timer? _autoSaveTimer;
   Timer? _debounceTimer; // For file watching
   Timer? _titleUpdateTimer; // For optimizing typing performance
+  Timer? _searchDebounceTimer;
   StreamSubscription? _fileWatcherSubscription;
   final BackgroundService _backgroundService = BackgroundService();
   List<RecentFile> _recentFiles = [];
+  List<RecentFile> _filteredFiles = [];
   List<AttachmentModel> _attachments = [];
 
   final Map<String, String> _sessionPasswords = {};
@@ -44,7 +47,10 @@ class ContentViewModel extends BaseViewModel {
 
   bool get isLocked => _isLocked;
 
-  List<RecentFile> get recentFiles => _recentFiles;
+  String _searchQuery = "";
+
+  List<RecentFile> get recentFiles =>
+      _searchQuery.isEmpty ? _recentFiles : _filteredFiles;
   List<AttachmentModel> get attachments => _attachments;
   bool get isPasswordSet => _currentPassword != null;
   String? get currentFileName => _currentFileName;
@@ -658,6 +664,37 @@ class ContentViewModel extends BaseViewModel {
       setBusy(false);
     }
     return count;
+  }
+
+  void setSearchQuery(String query) {
+    _searchQuery = query;
+
+    if (_searchDebounceTimer?.isActive ?? false) _searchDebounceTimer!.cancel();
+
+    if (query.isEmpty) {
+      _filteredFiles = [];
+      notifyListeners();
+      return;
+    }
+
+    _searchDebounceTimer = Timer(const Duration(milliseconds: 300), () async {
+      final results = await compute(_filterFiles, {
+        'files': _recentFiles,
+        'query': query,
+      });
+      _filteredFiles = results;
+      notifyListeners();
+    });
+  }
+
+  static List<RecentFile> _filterFiles(Map<String, dynamic> params) {
+    final List<RecentFile> files = params['files'];
+    final String query = params['query'].toString().toLowerCase();
+
+    return files.where((file) {
+      final title = file.title.toLowerCase();
+      return title.contains(query);
+    }).toList();
   }
 
   // endregion

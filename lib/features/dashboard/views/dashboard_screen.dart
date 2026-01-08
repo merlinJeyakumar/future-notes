@@ -291,6 +291,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       _showMasterSettings(context);
                     },
                     onRefresh: _viewModel.loadRecentFiles,
+                    onSearchChanged: _viewModel.setSearchQuery,
                   ),
             body: Stack(
               children: [
@@ -306,6 +307,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         onImportNote: _handleImport,
                         onSettings: () => _showMasterSettings(context),
                         onRefresh: _viewModel.loadRecentFiles,
+                        onSearchChanged: _viewModel.setSearchQuery,
                       ),
                     Expanded(child: ContentArea(viewModel: _viewModel)),
                   ],

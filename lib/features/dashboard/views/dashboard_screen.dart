@@ -240,8 +240,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isDesktop = MediaQuery.of(context).size.width > 800;
-
     return ListenableBuilder(
       listenable: _viewModel,
       builder: (context, _) {
@@ -252,91 +250,97 @@ class _DashboardScreenState extends State<DashboardScreen> {
             SingleActivator(LogicalKeyboardKey.keyN, control: true): () =>
                 _viewModel.reset(),
           },
-          child: Scaffold(
-            resizeToAvoidBottomInset:
-                false, // We handle insets manually in ContentArea
-            backgroundColor: const Color(0xFF1B2535),
-            appBar: isDesktop
-                ? null
-                : AppBar(
-                    backgroundColor: const Color(0xFF161E2D),
-                    title: const Text('Dashboard'),
-                    iconTheme: const IconThemeData(color: Colors.white),
-                    titleTextStyle: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                    ),
-                    actions: [
-                      IconButton(
-                        icon: const Icon(Icons.settings),
-                        onPressed: () => _showMasterSettings(context),
-                      ),
-                    ],
-                  ),
-            drawer: isDesktop
-                ? null
-                : Sidebar(
-                    recentFiles: _viewModel.recentFiles,
-                    onFileSelected: (path) {
-                      _viewModel.loadNote(path);
-                      Navigator.pop(context); // Close drawer
-                    },
-                    onOpenFolder: _handleOpenFolder,
-                    onDelete: _handleDelete,
-                    onNewNote: () {
-                      _viewModel.reset();
-                      Navigator.pop(context);
-                    },
-                    onImportNote: _handleImport,
-                    onSettings: () {
-                      Navigator.pop(context);
-                      _showMasterSettings(context);
-                    },
-                    onRefresh: _viewModel.loadRecentFiles,
-                    onSearchChanged: _viewModel.setSearchQuery,
-                  ),
-            body: Stack(
-              children: [
-                Row(
-                  children: [
-                    if (isDesktop)
-                      Sidebar(
-                        recentFiles: _viewModel.recentFiles,
-                        onFileSelected: (path) => _viewModel.loadNote(path),
-                        onOpenFolder: _handleOpenFolder,
-                        onDelete: _handleDelete,
-                        onNewNote: _viewModel.reset,
-                        onImportNote: _handleImport,
-                        onSettings: () => _showMasterSettings(context),
-                        onRefresh: _viewModel.loadRecentFiles,
-                        onSearchChanged: _viewModel.setSearchQuery,
-                      ),
-                    Expanded(child: ContentArea(viewModel: _viewModel)),
-                  ],
-                ),
-                if (_viewModel.isBusy)
-                  Container(
-                    color: Colors.black54,
-                    child: const Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CircularProgressIndicator(color: Colors.blueAccent),
-                          SizedBox(height: 16),
-                          Text(
-                            "Processing...",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isDesktop = constraints.maxWidth > 800;
+              return Scaffold(
+                resizeToAvoidBottomInset: true,
+                backgroundColor: const Color(0xFF1B2535),
+                appBar: isDesktop
+                    ? null
+                    : AppBar(
+                        backgroundColor: const Color(0xFF161E2D),
+                        title: const Text('Dashboard'),
+                        iconTheme: const IconThemeData(color: Colors.white),
+                        titleTextStyle: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                        ),
+                        actions: [
+                          IconButton(
+                            icon: const Icon(Icons.settings),
+                            onPressed: () => _showMasterSettings(context),
                           ),
                         ],
                       ),
+                drawer: isDesktop
+                    ? null
+                    : Sidebar(
+                        recentFiles: _viewModel.recentFiles,
+                        onFileSelected: (path) {
+                          _viewModel.loadNote(path);
+                          Navigator.pop(context); // Close drawer
+                        },
+                        onOpenFolder: _handleOpenFolder,
+                        onDelete: _handleDelete,
+                        onNewNote: () {
+                          _viewModel.reset();
+                          Navigator.pop(context);
+                        },
+                        onImportNote: _handleImport,
+                        onSettings: () {
+                          Navigator.pop(context);
+                          _showMasterSettings(context);
+                        },
+                        onRefresh: _viewModel.loadRecentFiles,
+                        onSearchChanged: _viewModel.setSearchQuery,
+                      ),
+                body: Stack(
+                  children: [
+                    Row(
+                      children: [
+                        if (isDesktop)
+                          Sidebar(
+                            recentFiles: _viewModel.recentFiles,
+                            onFileSelected: (path) => _viewModel.loadNote(path),
+                            onOpenFolder: _handleOpenFolder,
+                            onDelete: _handleDelete,
+                            onNewNote: _viewModel.reset,
+                            onImportNote: _handleImport,
+                            onSettings: () => _showMasterSettings(context),
+                            onRefresh: _viewModel.loadRecentFiles,
+                            onSearchChanged: _viewModel.setSearchQuery,
+                          ),
+                        Expanded(child: ContentArea(viewModel: _viewModel)),
+                      ],
                     ),
-                  ),
-              ],
-            ),
+                    if (_viewModel.isBusy)
+                      Container(
+                        color: Colors.black54,
+                        child: const Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              CircularProgressIndicator(
+                                color: Colors.blueAccent,
+                              ),
+                              SizedBox(height: 16),
+                              Text(
+                                "Processing...",
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
           ),
         );
       },

@@ -253,6 +253,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 _viewModel.reset(),
           },
           child: Scaffold(
+            resizeToAvoidBottomInset:
+                false, // We handle insets manually in ContentArea
             backgroundColor: const Color(0xFF1B2535),
             appBar: isDesktop
                 ? null

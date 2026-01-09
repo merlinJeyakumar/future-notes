@@ -54,11 +54,11 @@ void _isolateEntryPoint(SendPort sendPort) {
   receivePort.listen((message) async {
     if (message is _LoadRecentFilesCommand) {
       try {
-        final files = await _processRecentFiles(
+        await _processRecentFiles(
           message.directoryPath,
           encryptionService,
+          sendPort,
         );
-        sendPort.send(files);
       } catch (e) {
         sendPort.send("Error processing files: $e");
       }
@@ -72,60 +72,107 @@ String _extractName(String path) {
   return pathParts.where((p) => p.isNotEmpty).last;
 }
 
-Future<List<RecentFile>> _processRecentFiles(
+class _FileCandidate {
+  final FileSystemEntity entity;
+  final DateTime modified;
+  final bool isFolder;
+
+  _FileCandidate(this.entity, this.modified, {required this.isFolder});
+}
+
+Future<void> _processRecentFiles(
   String directoryPath,
   EncryptionService encryptionService,
+  SendPort sendPort,
 ) async {
-  List<RecentFile> loadedFiles = [];
-
   final directory = Directory(directoryPath);
   if (!directory.existsSync()) {
-    return loadedFiles;
+    sendPort.send(<RecentFile>[]);
+    return;
   }
 
   final List<FileSystemEntity> entities = directory.listSync();
+  final List<_FileCandidate> candidates = [];
 
-  // 1. Scan files directly in the selected folder
-  final fileFiles = entities.whereType<File>().toList();
-  for (final file in fileFiles) {
-    final fileName = _extractName(file.path);
-    if (fileName.startsWith('.')) continue; // Skip hidden
-    if (fileName == 'settings.json') continue; // Skip settings file
-    final parsed = await _parseFile(file, encryptionService);
-    if (parsed != null) {
-      loadedFiles.add(parsed);
+  // 1. Collect candidates and get stats (fast)
+  for (final entity in entities) {
+    try {
+      if (entity is File) {
+        final fileName = _extractName(entity.path);
+        if (fileName.startsWith('.')) continue; // Skip hidden
+        if (fileName == 'settings.json') continue; // Skip settings file
+
+        candidates.add(
+          _FileCandidate(entity, entity.statSync().modified, isFolder: false),
+        );
+      } else if (entity is Directory) {
+        final folderName = _extractName(entity.path);
+        if (folderName.startsWith('note_')) {
+          final noteId = folderName.replaceFirst('note_', '');
+          final metaFile = File('${entity.path}/note_content_$noteId.enc');
+          if (metaFile.existsSync()) {
+            candidates.add(
+              _FileCandidate(
+                metaFile, // Use the content file for processing
+                metaFile.statSync().modified,
+                isFolder: true,
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      // Ignore stat errors
     }
   }
 
-  // 2. Scan note_ folders directly in the selected folder
-  final folders = entities.whereType<Directory>().toList();
-  for (final folder in folders) {
-    final folderName = _extractName(folder.path);
-    if (folderName.startsWith('note_')) {
-      final noteId = folderName.replaceFirst('note_', '');
-      final metaFile = File('${folder.path}/note_content_$noteId.enc');
-      if (metaFile.existsSync()) {
-        final parsed = await _parseFile(
-          metaFile,
-          encryptionService,
-          overridePath: folderName,
-        );
-        if (parsed != null) {
-          loadedFiles.add(parsed);
-        }
+  // 2. Sort by modified desc (Newest first)
+  candidates.sort((a, b) => b.modified.compareTo(a.modified));
+
+  // 3. Process and stream
+  List<RecentFile> loadedFiles = [];
+  int processedCount = 0;
+
+  // Batches: Send first 10, then next 40, then remainder
+  final batchSizes = [10, 40];
+  int currentBatchIndex = 0;
+  int nextUpdateAt = batchSizes[0];
+
+  for (final candidate in candidates) {
+    try {
+      final parsed = await _parseFile(
+        candidate.entity as File,
+        encryptionService,
+        overridePath: candidate.isFolder
+            ? _extractName(candidate.entity.parent.path)
+            : null,
+      );
+
+      if (parsed != null) {
+        loadedFiles.add(parsed);
+      }
+    } catch (e) {
+      // Skip error
+    }
+
+    processedCount++;
+
+    // Send update if we hit a batch boundary
+    if (processedCount >= nextUpdateAt) {
+      sendPort.send(List<RecentFile>.from(loadedFiles));
+
+      currentBatchIndex++;
+      if (currentBatchIndex < batchSizes.length) {
+        nextUpdateAt += batchSizes[currentBatchIndex];
+      } else {
+        // Update every 50 sorted files thereafter
+        nextUpdateAt += 50;
       }
     }
   }
 
-  // 4. Sort by modified desc
-  loadedFiles.sort((a, b) {
-    if (a.modified == null && b.modified == null) return 0;
-    if (a.modified == null) return 1;
-    if (b.modified == null) return -1;
-    return b.modified!.compareTo(a.modified!);
-  });
-
-  return loadedFiles;
+  // Final update
+  sendPort.send(loadedFiles);
 }
 
 /// Parses a file and returns a RecentFile if it's a valid app note.
@@ -154,7 +201,7 @@ Future<RecentFile?> _parseFile(
       // Try App Decryption first (New .enc format)
       try {
         // Use sync version since we're already in an isolate (compute doesn't work inside isolates)
-        final appDecrypted = encryptionService.decryptAppSync(content);
+        final appDecrypted = EncryptionService.decryptAppSync(content);
         if (appDecrypted.isNotEmpty) {
           // It's a valid app-encrypted file
           try {

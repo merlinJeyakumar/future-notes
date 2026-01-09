@@ -395,41 +395,13 @@ class ContentViewModel extends BaseViewModel {
 
     final content = await _fileService.readFile(fileName);
     if (content != null) {
-      bool loaded = false;
+      // Offload heavy parsing (Decryption + JSON Decode) to isolate
+      final note = await compute(_parseNoteIsolate, content);
 
-      // 1. Try App Decryption (New format)
-      try {
-        final appDecrypted = await _encryptionService.decryptApp(content);
-
-        if (appDecrypted.isNotEmpty) {
-          final jsonMap = json.decode(appDecrypted);
-          final note = NoteModel.fromJson(jsonMap);
-          await _applyNoteModel(note, fileName);
-          loaded = true;
-        }
-      } catch (e) {
-        print("App decryption failed: $e");
-      }
-
-      // 2. Try Legacy JSON (Unencrypted old notes)
-      if (!loaded) {
-        try {
-          final jsonMap = json.decode(content);
-          // Simple validation
-          if (jsonMap is Map<String, dynamic> &&
-              (jsonMap.containsKey('title') ||
-                  jsonMap.containsKey('content'))) {
-            final note = NoteModel.fromJson(jsonMap);
-            await _applyNoteModel(note, fileName);
-            loaded = true;
-          }
-        } catch (e) {
-          print("Legacy JSON failed: $e");
-        }
-      }
-
-      // 3. Fallback to Plain Text
-      if (!loaded) {
+      if (note != null) {
+        await _applyNoteModel(note, fileName);
+      } else {
+        // 3. Fallback to Plain Text
         print("Loading as plain text");
         _loadContentToQuill(content);
         titleController.text = _generateTitleFromContent(content);
@@ -998,6 +970,34 @@ class ContentViewModel extends BaseViewModel {
     }
 
     return title.isEmpty ? "New Note" : title;
+  }
+
+  static Future<NoteModel?> _parseNoteIsolate(String content) async {
+    // 1. Try App Decryption
+    try {
+      final appDecrypted = EncryptionService.decryptAppSync(content);
+      if (appDecrypted.isNotEmpty) {
+        final jsonMap = json.decode(appDecrypted);
+        if (jsonMap is Map<String, dynamic>) {
+          return NoteModel.fromJson(jsonMap);
+        }
+      }
+    } catch (e) {
+      // Decryption failed
+    }
+
+    // 2. Try Legacy JSON
+    try {
+      final jsonMap = json.decode(content);
+      if (jsonMap is Map<String, dynamic> &&
+          (jsonMap.containsKey('title') || jsonMap.containsKey('content'))) {
+        return NoteModel.fromJson(jsonMap);
+      }
+    } catch (e) {
+      // Not JSON
+    }
+
+    return null;
   }
 
   void _scheduleAutoSave() {

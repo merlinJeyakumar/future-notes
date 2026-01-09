@@ -111,7 +111,7 @@ class EncryptionService implements IEncryptionService {
 
   /// Synchronous version of decryptApp for use inside isolates
   /// (compute cannot be called from within an isolate)
-  String decryptAppSync(String encryptedText) {
+  static String decryptAppSync(String encryptedText) {
     try {
       final key = Key.fromUtf8(_appSecretKey);
       final iv = IV.fromUtf8(_appIV);

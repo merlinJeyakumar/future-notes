@@ -53,10 +53,16 @@ class ContentArea extends StatelessWidget {
 
                   // Attachments Bar - hide when keyboard is visible on mobile
                   // Attachments Bar
-                  if (!viewModel.isLocked &&
-                      viewModel.attachments.isNotEmpty &&
-                      MediaQuery.of(context).viewInsets.bottom == 0)
-                    AttachmentBar(viewModel: viewModel),
+                  Builder(
+                    builder: (context) {
+                      if (!viewModel.isLocked &&
+                          viewModel.attachments.isNotEmpty &&
+                          MediaQuery.of(context).viewInsets.bottom == 0) {
+                        return AttachmentBar(viewModel: viewModel);
+                      }
+                      return const SizedBox.shrink();
+                    },
+                  ),
                 ],
               ),
             ),
@@ -673,46 +679,50 @@ class ContentArea extends StatelessWidget {
     }
 
     // Spacious editor with increased padding
-    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(24, 16, 24, 16 + bottomInset),
-      child: viewModel.isHtmlMode
-          ? CodeTheme(
-              data: CodeThemeData(styles: atomOneDarkTheme),
-              child: CodeField(
-                controller: viewModel.htmlController,
-                textStyle: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 14,
-                ),
-                expands: true,
-                decoration: const BoxDecoration(), // Remove default border
-              ),
-            )
-          : GestureDetector(
-              onTap: () {
-                if (!viewModel.focusNode.hasFocus) {
-                  viewModel.focusNode.requestFocus();
-                }
-              },
-              behavior: HitTestBehavior.translucent,
-              child: QuillEditor.basic(
-                controller: viewModel.quillController,
-                config: QuillEditorConfig(
-                  autoFocus: false,
-                  scrollable: true,
-                  expands: true,
-                  padding: const EdgeInsets.all(8),
-                  keyboardAppearance: Brightness.dark,
-                  embedBuilders: [AttachmentEmbedBuilder(viewModel)],
-                  onLaunchUrl: (url) {
-                    viewModel.handleLinkClick(url);
+    return Builder(
+      builder: (context) {
+        final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+        return Padding(
+          padding: EdgeInsets.fromLTRB(24, 16, 24, 16 + bottomInset),
+          child: viewModel.isHtmlMode
+              ? CodeTheme(
+                  data: CodeThemeData(styles: atomOneDarkTheme),
+                  child: CodeField(
+                    controller: viewModel.htmlController,
+                    textStyle: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 14,
+                    ),
+                    expands: true,
+                    decoration: const BoxDecoration(), // Remove default border
+                  ),
+                )
+              : GestureDetector(
+                  onTap: () {
+                    if (!viewModel.focusNode.hasFocus) {
+                      viewModel.focusNode.requestFocus();
+                    }
                   },
+                  behavior: HitTestBehavior.translucent,
+                  child: QuillEditor.basic(
+                    controller: viewModel.quillController,
+                    config: QuillEditorConfig(
+                      autoFocus: false,
+                      scrollable: true,
+                      expands: true,
+                      padding: const EdgeInsets.all(8),
+                      keyboardAppearance: Brightness.dark,
+                      embedBuilders: [AttachmentEmbedBuilder(viewModel)],
+                      onLaunchUrl: (url) {
+                        viewModel.handleLinkClick(url);
+                      },
+                    ),
+                    focusNode: viewModel.focusNode,
+                    scrollController: viewModel.scrollController,
+                  ),
                 ),
-                focusNode: viewModel.focusNode,
-                scrollController: viewModel.scrollController,
-              ),
-            ),
+        );
+      },
     );
   }
 

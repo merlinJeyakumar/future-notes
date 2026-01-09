@@ -36,6 +36,7 @@ class ContentViewModel extends BaseViewModel {
   Timer? _debounceTimer; // For file watching
   Timer? _titleUpdateTimer; // For optimizing typing performance
   Timer? _searchDebounceTimer;
+  Timer? _textChangeDebounceTimer;
   StreamSubscription? _fileWatcherSubscription;
   final BackgroundService _backgroundService = BackgroundService();
   List<RecentFile> _recentFiles = [];
@@ -222,11 +223,14 @@ class ContentViewModel extends BaseViewModel {
     _initAsync();
     _initFileWatcher();
 
-    // Listen to changes for auto-save and title generation
+    // Listen to changes for auto-save and title generation (debounced)
     quillController.document.changes.listen((change) {
       if (!_isHtmlMode) {
-        onTextChanged();
-        _checkForMentionTrigger();
+        _textChangeDebounceTimer?.cancel();
+        _textChangeDebounceTimer = Timer(const Duration(milliseconds: 150), () {
+          onTextChanged();
+          _checkForMentionTrigger();
+        });
       }
     });
 
@@ -938,12 +942,15 @@ class ContentViewModel extends BaseViewModel {
 
   void onTextChanged() {
     _titleUpdateTimer?.cancel();
-    _titleUpdateTimer = Timer(const Duration(milliseconds: 800), () {
+    _titleUpdateTimer = Timer(const Duration(milliseconds: 800), () async {
       try {
         String text = quillController.document.toPlainText();
         if (titleController.text.trim().length < 40 ||
             titleController.text == "New Note") {
-          final generatedTitle = _generateTitleFromContent(text);
+          final generatedTitle = await compute(
+            _generateTitleFromContentIsolate,
+            text,
+          );
           if (generatedTitle != "New Note" &&
               generatedTitle != titleController.text) {
             titleController.text = generatedTitle;
@@ -955,6 +962,38 @@ class ContentViewModel extends BaseViewModel {
     });
 
     _scheduleAutoSave();
+  }
+
+  static String _generateTitleFromContentIsolate(String content) {
+    if (content.trim().isEmpty) return "New Note";
+
+    final lines = content.split('\n');
+    final contentLines = lines.where((line) => line.trim().isNotEmpty).toList();
+
+    if (contentLines.isEmpty) return "New Note";
+
+    String title = "";
+
+    for (var line in contentLines) {
+      // Inline _cleanTitleLine logic since static functions can't call instance methods
+      String cleaned = line.replaceAll(RegExp(r'^[\s#\*\->]+'), '');
+      cleaned = cleaned.replaceAll(RegExp(r'^\s*\d+\.\s*'), '');
+      cleaned = cleaned.trim();
+      if (cleaned.isEmpty) continue;
+
+      if (title.isNotEmpty) {
+        title += " ";
+      }
+      title += cleaned;
+
+      if (title.length >= 40) break;
+    }
+
+    if (title.length > 40) {
+      title = title.substring(0, 40);
+    }
+
+    return title.isEmpty ? "New Note" : title;
   }
 
   void _scheduleAutoSave() {

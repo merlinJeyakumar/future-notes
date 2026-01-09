@@ -153,7 +153,8 @@ Future<RecentFile?> _parseFile(
     if (content.isNotEmpty) {
       // Try App Decryption first (New .enc format)
       try {
-        final appDecrypted = await encryptionService.decryptApp(content);
+        // Use sync version since we're already in an isolate (compute doesn't work inside isolates)
+        final appDecrypted = encryptionService.decryptAppSync(content);
         if (appDecrypted.isNotEmpty) {
           // It's a valid app-encrypted file
           try {

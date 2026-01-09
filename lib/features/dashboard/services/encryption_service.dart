@@ -108,6 +108,20 @@ class EncryptionService implements IEncryptionService {
       'iv': _appIV,
     });
   }
+
+  /// Synchronous version of decryptApp for use inside isolates
+  /// (compute cannot be called from within an isolate)
+  String decryptAppSync(String encryptedText) {
+    try {
+      final key = Key.fromUtf8(_appSecretKey);
+      final iv = IV.fromUtf8(_appIV);
+      final encrypter = Encrypter(AES(key));
+      final encrypted = Encrypted.fromBase64(encryptedText);
+      return encrypter.decrypt(encrypted, iv: iv);
+    } catch (e) {
+      return "";
+    }
+  }
 }
 
 // --- Top Level Tasks ---

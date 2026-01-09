@@ -715,6 +715,10 @@ class ContentViewModel extends BaseViewModel {
     if (_currentFileName != null) {
       if (_currentFileName!.startsWith('note_')) {
         noteId = _currentFileName!.replaceFirst('note_', '');
+        // Strip any file extension (e.g., .enc) from the noteId
+        if (noteId.contains('.')) {
+          noteId = noteId.split('.').first;
+        }
       } else {
         isLegacy = true;
         noteId = const Uuid().v4();

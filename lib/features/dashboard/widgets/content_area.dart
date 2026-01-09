@@ -51,9 +51,11 @@ class ContentArea extends StatelessWidget {
                   // Spacious Editor Area
                   Expanded(child: _buildInputArea(context)),
 
+                  // Attachments Bar - hide when keyboard is visible on mobile
                   // Attachments Bar
-                  // Attachments Bar
-                  if (!viewModel.isLocked && viewModel.attachments.isNotEmpty)
+                  if (!viewModel.isLocked &&
+                      viewModel.attachments.isNotEmpty &&
+                      MediaQuery.of(context).viewInsets.bottom == 0)
                     AttachmentBar(viewModel: viewModel),
                 ],
               ),
@@ -671,8 +673,9 @@ class ContentArea extends StatelessWidget {
     }
 
     // Spacious editor with increased padding
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      padding: EdgeInsets.fromLTRB(24, 16, 24, 16 + bottomInset),
       child: viewModel.isHtmlMode
           ? CodeTheme(
               data: CodeThemeData(styles: atomOneDarkTheme),

@@ -28,38 +28,35 @@ class ContentArea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LinkHandler(
-      viewModel: viewModel,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          // Use a higher breakpoint to trigger "Mobile/Compact" mode earlier,
-          // preventing overflow on smaller tablets or when Sidebar is open on desktop.
-          final isMobile = constraints.maxWidth < 900;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Use a higher breakpoint to trigger "Mobile/Compact" mode earlier,
+        // preventing overflow on smaller tablets or when Sidebar is open on desktop.
+        final isMobile = constraints.maxWidth < 900;
 
-          return Container(
-            color: _DesignColors.background,
-            child: SafeArea(
-              // Ensure status bar doesn't overlap
-              child: Column(
-                children: [
-                  // Top Strip - Clean breadcrumb + secondary actions
-                  _buildTopStrip(context, isMobile),
+        return Container(
+          color: _DesignColors.background,
+          child: SafeArea(
+            // Ensure status bar doesn't overlap
+            child: Column(
+              children: [
+                // Top Strip - Clean breadcrumb + secondary actions
+                _buildTopStrip(context, isMobile),
 
-                  // Floating Toolbar Island (only when not locked)
-                  if (!viewModel.isLocked) _buildFloatingToolbar(isMobile),
+                // Floating Toolbar Island (only when not locked)
+                if (!viewModel.isLocked) _buildFloatingToolbar(isMobile),
 
-                  // Spacious Editor Area
-                  Expanded(child: _buildInputArea(context)),
+                // Spacious Editor Area
+                Expanded(child: _buildInputArea(context)),
 
-                  // Attachments Bar
-                  if (!viewModel.isLocked && viewModel.attachments.isNotEmpty)
-                    AttachmentBar(viewModel: viewModel),
-                ],
-              ),
+                // Attachments Bar
+                if (!viewModel.isLocked && viewModel.attachments.isNotEmpty)
+                  AttachmentBar(viewModel: viewModel),
+              ],
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -692,21 +689,23 @@ class ContentArea extends StatelessWidget {
                 }
               },
               behavior: HitTestBehavior.translucent,
-              child: QuillEditor.basic(
-                controller: viewModel.quillController,
-                config: QuillEditorConfig(
-                  autoFocus: false,
-                  scrollable: true,
-                  expands: true,
-                  padding: const EdgeInsets.all(8),
-                  keyboardAppearance: Brightness.dark,
-                  embedBuilders: [AttachmentEmbedBuilder(viewModel)],
-                  onLaunchUrl: (url) {
-                    viewModel.handleLinkClick(url);
-                  },
+              child: RepaintBoundary(
+                child: QuillEditor.basic(
+                  controller: viewModel.quillController,
+                  config: QuillEditorConfig(
+                    autoFocus: false,
+                    scrollable: true,
+                    expands: true,
+                    padding: const EdgeInsets.all(8),
+                    keyboardAppearance: Brightness.dark,
+                    embedBuilders: [AttachmentEmbedBuilder(viewModel)],
+                    onLaunchUrl: (url) {
+                      viewModel.handleLinkClick(url);
+                    },
+                  ),
+                  focusNode: viewModel.focusNode,
+                  scrollController: viewModel.scrollController,
                 ),
-                focusNode: viewModel.focusNode,
-                scrollController: viewModel.scrollController,
               ),
             ),
     );
@@ -917,123 +916,6 @@ class AttachmentEmbedBuilder extends EmbedBuilder {
 
     // Fallback for base64 or other formats if needed, or return nothing
     return const SizedBox();
-  }
-}
-
-class LinkHandler extends StatefulWidget {
-  final ContentViewModel viewModel;
-  final Widget child;
-
-  const LinkHandler({super.key, required this.viewModel, required this.child});
-
-  @override
-  State<LinkHandler> createState() => _LinkHandlerState();
-}
-
-class _LinkHandlerState extends State<LinkHandler> {
-  StreamSubscription? _sub;
-
-  @override
-  void initState() {
-    super.initState();
-    _sub = widget.viewModel.linkPickerRequest.listen((_) {
-      _showLinkPicker();
-    });
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
-
-  void _showLinkPicker() {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        backgroundColor: const Color(0xFF2D3748), // _DesignColors.toolbarIsland
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          width: 400,
-          constraints: const BoxConstraints(maxHeight: 500),
-          child: Column(
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  "Link to Note",
-                  style: TextStyle(
-                    color: Color(0xFFE2E8F0), // _DesignColors.textPrimary
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              const Divider(
-                color: Color(0xFF4A5568),
-                height: 1,
-              ), // _DesignColors.divider
-              Expanded(
-                child: widget.viewModel.recentFiles.isEmpty
-                    ? const Center(
-                        child: Text(
-                          "No recent notes found",
-                          style: TextStyle(color: Color(0xFF718096)),
-                        ),
-                      )
-                    : ListView.separated(
-                        itemCount: widget.viewModel.recentFiles.length,
-                        separatorBuilder: (_, __) =>
-                            const Divider(height: 1, color: Color(0xFF4A5568)),
-                        itemBuilder: (context, index) {
-                          final file = widget.viewModel.recentFiles[index];
-                          // Skip current file? Maybe not.
-                          // Extract ID if possible
-                          String id = file.path;
-                          if (file.path.startsWith('note_')) {
-                            id = file.path.replaceFirst('note_', '');
-                          }
-
-                          return ListTile(
-                            title: Text(
-                              file.title.isEmpty ? "Untitled" : file.title,
-                              style: const TextStyle(color: Color(0xFFE2E8F0)),
-                            ),
-                            subtitle: Text(
-                              file.path,
-                              style: const TextStyle(
-                                color: Color(0xFF718096),
-                                fontSize: 10,
-                              ),
-                            ),
-                            onTap: () {
-                              Navigator.pop(context);
-                              widget.viewModel.insertInternalLink(
-                                file.title.isEmpty ? "Note" : file.title,
-                                id,
-                              );
-                            },
-                          );
-                        },
-                      ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("Cancel"),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return widget.child;
   }
 }
 

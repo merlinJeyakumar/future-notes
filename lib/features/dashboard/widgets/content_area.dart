@@ -21,10 +21,46 @@ class _DesignColors {
   static const textSecondary = Color(0xFFA0AEC0);
 }
 
-class ContentArea extends StatelessWidget {
+class ContentArea extends StatefulWidget {
   final ContentViewModel viewModel;
 
   const ContentArea({super.key, required this.viewModel});
+
+  @override
+  State<ContentArea> createState() => _ContentAreaState();
+}
+
+class _ContentAreaState extends State<ContentArea> {
+  late final AttachmentEmbedBuilder _embedBuilder;
+  late final QuillEditorConfig _editorConfig;
+  late final FocusNode _focusNode;
+  late final ScrollController _scrollController;
+
+  ContentViewModel get viewModel => widget.viewModel;
+
+  @override
+  void initState() {
+    super.initState();
+    _embedBuilder = AttachmentEmbedBuilder(viewModel);
+    // Cache local references to avoid property access in build/config
+    _focusNode = viewModel.focusNode;
+    _scrollController = viewModel.scrollController;
+
+    _editorConfig = QuillEditorConfig(
+      autoFocus: false,
+      scrollable: true,
+      expands: true,
+      padding: const EdgeInsets.all(16), // Increased padding here directly
+      keyboardAppearance: Brightness.dark,
+      embedBuilders: [_embedBuilder],
+      onLaunchUrl: (url) {
+        viewModel.handleLinkClick(url);
+      },
+      // Optimization: Disable some heavy features if not needed
+      enableInteractiveSelection: true,
+      enableSelectionToolbar: true,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -704,30 +740,12 @@ class ContentArea extends StatelessWidget {
                 decoration: const BoxDecoration(), // Remove default border
               ),
             )
-          : GestureDetector(
-              onTap: () {
-                if (!viewModel.focusNode.hasFocus) {
-                  viewModel.focusNode.requestFocus();
-                }
-              },
-              behavior: HitTestBehavior.translucent,
-              child: RepaintBoundary(
-                child: QuillEditor.basic(
-                  controller: viewModel.quillController,
-                  config: QuillEditorConfig(
-                    autoFocus: false,
-                    scrollable: true,
-                    expands: true,
-                    padding: const EdgeInsets.all(8),
-                    keyboardAppearance: Brightness.dark,
-                    embedBuilders: [AttachmentEmbedBuilder(viewModel)],
-                    onLaunchUrl: (url) {
-                      viewModel.handleLinkClick(url);
-                    },
-                  ),
-                  focusNode: viewModel.focusNode,
-                  scrollController: viewModel.scrollController,
-                ),
+          : RepaintBoundary(
+              child: QuillEditor.basic(
+                controller: viewModel.quillController,
+                config: _editorConfig,
+                focusNode: _focusNode,
+                scrollController: _scrollController,
               ),
             ),
     );

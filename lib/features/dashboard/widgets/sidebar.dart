@@ -15,6 +15,7 @@ class Sidebar extends StatelessWidget {
   final VoidCallback? onSettings;
   final VoidCallback? onRefresh; // Added callback
   final Function(String)? onSearchChanged;
+  final Function(RecentFile)? onExportPack;
 
   const Sidebar({
     super.key,
@@ -27,6 +28,7 @@ class Sidebar extends StatelessWidget {
     this.onSettings,
     this.onRefresh,
     this.onSearchChanged,
+    this.onExportPack,
   });
 
   @override
@@ -259,6 +261,7 @@ class Sidebar extends StatelessWidget {
           file: file,
           onOpenFolder: onOpenFolder,
           onDelete: onDelete,
+          onExportPack: onExportPack,
         );
       },
     );

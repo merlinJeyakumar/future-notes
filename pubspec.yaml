@@ -49,6 +49,7 @@ dependencies:
   code_text_field: ^1.1.0
   flutter_highlight: ^0.7.0
   flutter_image_compress: ^2.4.0
+  archive: ^4.0.4
 
 dev_dependencies:
   flutter_test:

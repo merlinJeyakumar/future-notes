@@ -9,6 +9,7 @@ import '../services/file_service.dart';
 import '../services/encryption_service.dart';
 import '../models/note_model.dart';
 import '../widgets/import_confirmation_dialog.dart';
+import '../widgets/export_options_dialog.dart';
 import '../services/settings_service.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -53,6 +54,131 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _handleDelete(RecentFile file) {
     _viewModel.deleteNote(file.path);
+  }
+
+  Future<void> _handleExportPack(RecentFile file) async {
+    // First load the note so we have access to attachments and metadata
+    await _viewModel.loadNote(file.path);
+
+    if (!mounted) return;
+
+    // If note is locked, require password to export
+    if (_viewModel.isLocked) {
+      final unlocked = await _showUnlockForExportDialog();
+      if (!unlocked) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Cannot export: incorrect password or cancelled'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    if (!mounted) return;
+
+    // Show export options dialog
+    final options = await showDialog<ExportOptions>(
+      context: context,
+      builder: (context) => ExportOptionsDialog(
+        hasAttachments: _viewModel.attachments.isNotEmpty,
+      ),
+    );
+
+    if (options != null) {
+      await _viewModel.exportNotePack(
+        format: options.format,
+        password: options.password,
+      );
+    }
+  }
+
+  Future<bool> _showUnlockForExportDialog() async {
+    final passwordController = TextEditingController();
+    String? errorText;
+
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: const Color(0xFF161E2D),
+          title: const Text(
+            'Unlock to Export',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'This note is password protected. Enter the password to export.',
+                style: TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: passwordController,
+                obscureText: true,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  labelStyle: const TextStyle(color: Colors.grey),
+                  filled: true,
+                  fillColor: const Color(0xFF1E293B),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFF334155)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFF334155)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Colors.blueAccent),
+                  ),
+                  errorText: errorText,
+                  errorStyle: const TextStyle(color: Colors.redAccent),
+                ),
+                onSubmitted: (value) async {
+                  final success = await _viewModel.unlockNote(value);
+                  if (success) {
+                    Navigator.pop(context, true);
+                  } else {
+                    setState(() => errorText = 'Incorrect password');
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final success = await _viewModel.unlockNote(
+                  passwordController.text,
+                );
+                if (success) {
+                  Navigator.pop(context, true);
+                } else {
+                  setState(() => errorText = 'Incorrect password');
+                }
+              },
+              child: const Text('Unlock'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    passwordController.dispose();
+    return result ?? false;
   }
 
   Future<void> _handleImport() async {
@@ -294,6 +420,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         },
                         onRefresh: _viewModel.loadRecentFiles,
                         onSearchChanged: _viewModel.setSearchQuery,
+                        onExportPack: (file) {
+                          Navigator.pop(context);
+                          _handleExportPack(file);
+                        },
                       ),
                 body: Stack(
                   children: [
@@ -310,6 +440,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             onSettings: () => _showMasterSettings(context),
                             onRefresh: _viewModel.loadRecentFiles,
                             onSearchChanged: _viewModel.setSearchQuery,
+                            onExportPack: _handleExportPack,
                           ),
                         Expanded(child: ContentArea(viewModel: _viewModel)),
                       ],

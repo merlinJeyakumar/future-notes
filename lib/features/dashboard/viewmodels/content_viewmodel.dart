@@ -19,7 +19,10 @@ import 'package:code_text_field/code_text_field.dart';
 import 'package:highlight/languages/xml.dart'; // XML handles HTML highlighting
 import 'dart:typed_data';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import '../services/settings_service.dart';
+import '../services/pack_service.dart';
 
 class ContentViewModel extends BaseViewModel {
   final IFileService _fileService;
@@ -807,6 +810,221 @@ class ContentViewModel extends BaseViewModel {
     if (importedName != null) {
       await loadRecentFiles();
     }
+  }
+
+  /// Export the current note as a pack file (binary or zip) with optional password
+  Future<void> exportNotePack({
+    required ExportFormat format,
+    String? password,
+  }) async {
+    if (_currentFileName == null) return;
+
+    setBusy(true);
+    try {
+      // 1. Get current note data
+      final content = await _fileService.readFile(_currentFileName!);
+      if (content == null) {
+        setBusy(false);
+        return;
+      }
+
+      // Try to parse as NoteModel
+      NoteModel? note;
+      try {
+        final appDecrypted = await _encryptionService.decryptApp(content);
+        if (appDecrypted.isNotEmpty) {
+          final jsonMap = json.decode(appDecrypted);
+          note = NoteModel.fromJson(jsonMap);
+        }
+      } catch (e) {
+        print('Error parsing note for export: $e');
+      }
+
+      if (note == null) {
+        setBusy(false);
+        return;
+      }
+
+      // 2. If note is locked, decrypt the content for export
+      String exportContent = note.content;
+      if (note.isLocked && _currentPassword != null) {
+        final decrypted = await _encryptionService.decrypt(
+          note.content,
+          password: _currentPassword,
+        );
+        if (!decrypted.startsWith('Error decrypting')) {
+          exportContent = decrypted;
+        }
+      }
+
+      // Create note with decrypted content for export
+      final exportNote = NoteModel(
+        id: note.id,
+        title: note.title,
+        content: exportContent,
+        isLocked:
+            password != null &&
+            password.isNotEmpty, // Will be locked with new password if provided
+        timestamp: note.timestamp,
+        attachments: note.attachments,
+      );
+
+      // 3. Gather all attachment data
+      final attachmentData = <String, Uint8List>{};
+      String noteId = note.id;
+
+      for (final attachment in note.attachments) {
+        final encryptedBytes = await _fileService.readAttachment(
+          noteId,
+          attachment.id,
+        );
+        if (encryptedBytes != null) {
+          // Decrypt attachments for export
+          final decrypted = await _encryptionService.decryptBinary(
+            encryptedBytes,
+            password: _currentPassword,
+          );
+          if (decrypted.isNotEmpty) {
+            attachmentData[attachment.id] = decrypted;
+          }
+        }
+      }
+
+      // 4. Create pack
+      final packService = PackService(_encryptionService);
+      Uint8List packData;
+      String extension;
+
+      if (format == ExportFormat.zip) {
+        packData = await packService.createZipPack(
+          exportNote,
+          attachmentData,
+          password: password,
+        );
+        extension = 'zip';
+      } else {
+        packData = await packService.createPack(
+          exportNote,
+          attachmentData,
+          password: password,
+        );
+        extension = 'fnote';
+      }
+
+      // 5. Save to temp file and share
+      final tempDir = await getTemporaryDirectory();
+      final safeTitle = note.title.replaceAll(RegExp(r'[^\w\s-]'), '').trim();
+      final fileName = '${safeTitle.isEmpty ? "note" : safeTitle}.$extension';
+      final tempFile = File('${tempDir.path}/$fileName');
+      await tempFile.writeAsBytes(packData);
+
+      await Share.shareXFiles([XFile(tempFile.path)], text: note.title);
+    } catch (e) {
+      print('Error exporting note pack: $e');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /// Import a note pack file (.fnote or .zip)
+  Future<bool> importNotePack(String filePath, {String? password}) async {
+    setBusy(true);
+    try {
+      final file = File(filePath);
+      final data = await file.readAsBytes();
+
+      final packService = PackService(_encryptionService);
+      PackResult? result;
+
+      if (packService.isPack(data)) {
+        // Binary pack
+        result = await packService.extractPack(data, password: password);
+      } else if (packService.isZip(data)) {
+        // ZIP pack
+        result = await packService.extractZipPack(data, password: password);
+      }
+
+      if (result == null) {
+        setBusy(false);
+        return false;
+      }
+
+      // Save the imported note
+      final noteId = const Uuid().v4();
+
+      // Re-encrypt attachments and save them
+      final newAttachments = <AttachmentModel>[];
+      for (final entry in result.attachments.entries) {
+        final encrypted = await _encryptionService.encryptBinary(entry.value);
+        final attachmentId = await _fileService.saveAttachment(
+          encrypted,
+          noteId,
+        );
+
+        // Find original attachment model for metadata
+        final original = result.note.attachments.firstWhere(
+          (a) => a.id == entry.key,
+          orElse: () => AttachmentModel(id: entry.key, fileName: 'attachment'),
+        );
+
+        newAttachments.add(
+          AttachmentModel(
+            id: attachmentId,
+            fileName: original.fileName,
+            size: entry.value.length,
+            mimeType: original.mimeType,
+          ),
+        );
+      }
+
+      // Create the imported note
+      final importedNote = NoteModel(
+        id: noteId,
+        title: result.note.title,
+        content: result.note.content,
+        isLocked: false, // Reset lock status on import
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+        attachments: newAttachments,
+      );
+
+      final jsonString = json.encode(importedNote.toJson());
+      final appEncrypted = await _encryptionService.encryptApp(jsonString);
+      await _fileService.saveNoteContent(noteId, appEncrypted);
+
+      await loadRecentFiles();
+      setBusy(false);
+      return true;
+    } catch (e) {
+      print('Error importing note pack: $e');
+      setBusy(false);
+      return false;
+    }
+  }
+
+  /// Check if a file is an encrypted pack (needs password)
+  Future<bool> isPackEncrypted(String filePath) async {
+    try {
+      final file = File(filePath);
+      final data = await file.readAsBytes();
+      final packService = PackService(_encryptionService);
+
+      if (packService.isPack(data)) {
+        return packService.isEncrypted(data);
+      }
+      // For ZIP, we try to extract without password first
+      // If it fails, it might be encrypted
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Pick a pack file for import
+  Future<PlatformFile?> pickImportPackFile() async {
+    final result = await _fileService.pickFile(
+      allowedExtensions: ['txt', 'enc', 'fnote', 'zip'],
+    );
+    return result?.files.single;
   }
   // endregion
 

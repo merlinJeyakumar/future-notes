@@ -1,19 +1,20 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:share_plus/share_plus.dart';
 import '../models/note_model.dart';
 
 class FileDetailsDialog extends StatelessWidget {
   final RecentFile file;
   final Function(RecentFile) onOpenFolder;
   final Function(RecentFile) onDelete;
+  final Function(RecentFile)? onExportPack;
 
   const FileDetailsDialog({
     super.key,
     required this.file,
     required this.onOpenFolder,
     required this.onDelete,
+    this.onExportPack,
   });
 
   @override
@@ -70,12 +71,18 @@ class FileDetailsDialog extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.share, color: Colors.greenAccent),
               title: const Text(
-                "Export File",
+                "Export Note Package",
                 style: TextStyle(color: Colors.white),
+              ),
+              subtitle: const Text(
+                "Export with attachments",
+                style: TextStyle(color: Colors.grey, fontSize: 11),
               ),
               onTap: () {
                 Navigator.pop(context);
-                Share.shareXFiles([XFile(file.fullPath)], text: file.title);
+                if (onExportPack != null) {
+                  onExportPack!(file);
+                }
               },
             ),
           ListTile(

@@ -41,17 +41,39 @@ class ContentArea extends StatelessWidget {
             child: Column(
               children: [
                 // Top Strip - Clean breadcrumb + secondary actions
-                _buildTopStrip(context, isMobile),
+                ValueListenableBuilder<bool>(
+                  valueListenable: viewModel.isLockedNotifier,
+                  builder: (context, isLocked, child) {
+                    return _buildTopStrip(context, isMobile);
+                  },
+                ),
 
                 // Floating Toolbar Island (only when not locked)
-                if (!viewModel.isLocked) _buildFloatingToolbar(isMobile),
+                ValueListenableBuilder<bool>(
+                  valueListenable: viewModel.isLockedNotifier,
+                  builder: (context, isLocked, child) {
+                    if (isLocked) return const SizedBox.shrink();
+                    return _buildFloatingToolbar(isMobile);
+                  },
+                ),
 
                 // Spacious Editor Area
                 Expanded(child: _buildInputArea(context)),
 
                 // Attachments Bar
-                if (!viewModel.isLocked && viewModel.attachments.isNotEmpty)
-                  AttachmentBar(viewModel: viewModel),
+                ValueListenableBuilder<bool>(
+                  valueListenable: viewModel.isLockedNotifier,
+                  builder: (context, isLocked, child) {
+                    if (isLocked) return const SizedBox.shrink();
+                    return ValueListenableBuilder<List<AttachmentModel>>(
+                      valueListenable: viewModel.attachmentsNotifier,
+                      builder: (context, attachments, child) {
+                        if (attachments.isEmpty) return const SizedBox.shrink();
+                        return AttachmentBar(viewModel: viewModel);
+                      },
+                    );
+                  },
+                ),
               ],
             ),
           ),

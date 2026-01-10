@@ -44,7 +44,13 @@ class ContentViewModel extends BaseViewModel {
   List<RecentFile> _filteredFiles = [];
   List<AttachmentModel> _attachments = [];
 
+  final ValueNotifier<List<AttachmentModel>> attachmentsNotifier =
+      ValueNotifier([]);
+  final ValueNotifier<bool> isLockedNotifier = ValueNotifier(false);
+  final ValueNotifier<bool> isAutoSavingNotifier = ValueNotifier(false);
+
   final Map<String, String> _sessionPasswords = {};
+  final Map<String, Uint8List> _attachmentCache = {};
   bool _isLocked = false;
 
   bool get isLocked => _isLocked;
@@ -82,6 +88,7 @@ class ContentViewModel extends BaseViewModel {
         isLoading: true,
       );
       _attachments.add(placeholder);
+      attachmentsNotifier.value = List.from(_attachments);
       // notifyListeners(); // Removed to reduce rebuilds
 
       // Prepare Note ID
@@ -103,7 +110,8 @@ class ContentViewModel extends BaseViewModel {
         int size = await originalFile.length();
         if (size > 10 * 1024 * 1024 * 1024) {
           _attachments.removeWhere((a) => a.id == tempId);
-          notifyListeners();
+          attachmentsNotifier.value = List.from(_attachments);
+          // notifyListeners();
           print("File too large > 10GB");
           return;
         }
@@ -164,7 +172,8 @@ class ContentViewModel extends BaseViewModel {
             mimeType: isImage ? 'image/$ext' : 'application/octet-stream',
             isLoading: false,
           );
-          notifyListeners();
+          attachmentsNotifier.value = List.from(_attachments);
+          // notifyListeners();
         }
 
         _scheduleAutoSave();
@@ -172,7 +181,8 @@ class ContentViewModel extends BaseViewModel {
         print("Error adding attachment: $e");
         // Remove placeholder on error
         _attachments.removeWhere((a) => a.id == tempId);
-        notifyListeners();
+        attachmentsNotifier.value = List.from(_attachments);
+        // notifyListeners();
       }
     }
   }
@@ -204,7 +214,9 @@ class ContentViewModel extends BaseViewModel {
 
   void removeAttachment(String attachmentId) {
     _attachments.removeWhere((a) => a.id == attachmentId);
-    notifyListeners();
+    attachmentsNotifier.value = List.from(_attachments);
+    _attachmentCache.remove(attachmentId);
+    // notifyListeners();
     _scheduleAutoSave();
     // TODO: Physically delete the attachment file to clean up storage
   }
@@ -263,36 +275,34 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
-  void toggleEditorMode() {
+  Future<void> toggleEditorMode() async {
+    setBusy(true);
     if (_isHtmlMode) {
       // Switch to Rich Text
       // Convert HTML string to Delta
       try {
         final html = htmlController.text;
-        final delta = HtmlToDelta().convert(html);
-        quillController.document = Document.fromDelta(delta);
-
+        // Offload to background
+        final deltaList = await compute(_htmlToDeltaTask, html);
+        quillController.document = Document.fromJson(deltaList);
         // Move cursor to end to avoid issues
         quillController.moveCursorToPosition(quillController.document.length);
       } catch (e) {
         print("Error converting HTML to Delta: $e");
-        // Fallback or show error? For now, we just switch and maybe get empty/broken state.
-        // But HtmlToDelta is usually robust enough to giving *something*.
       }
       _isHtmlMode = false;
     } else {
       // Switch to HTML Editor
       // Convert Delta to HTML string
       final delta = quillController.document.toDelta();
-      final converter = QuillDeltaToHtmlConverter(
-        delta.toJson(),
-        ConverterOptions.forEmail(),
-      );
-      final html = converter.convert();
-      htmlController.text = html; // This triggers listener, schedules auto-save
+      // Offload to background
+      final html = await compute(_deltaToHtmlTask, delta.toJson());
+
+      htmlController.text = html;
       _isHtmlMode = true;
     }
     notifyListeners();
+    setBusy(false);
   }
 
   void _initFileWatcher() {
@@ -330,6 +340,7 @@ class ContentViewModel extends BaseViewModel {
   Future<void> loadNote(String fileName) async {
     setBusy(true);
     _currentFileName = fileName;
+    _attachmentCache.clear();
 
     // Reset mode to Rich Text on new load for consistency
     _isHtmlMode = false;
@@ -347,17 +358,20 @@ class ContentViewModel extends BaseViewModel {
         _loadContentToQuill(content);
         titleController.text = _generateTitleFromContent(content);
         _isLocked = false;
+        isLockedNotifier.value = false;
         _currentPassword = null;
       }
 
-      notifyListeners();
+      notifyListeners(); // Keep this for now as it's a full load
     }
     setBusy(false);
   }
 
   Future<void> _applyNoteModel(NoteModel note, String fileName) async {
     _isLocked = note.isLocked;
+    isLockedNotifier.value = _isLocked;
     _attachments = List.from(note.attachments);
+    attachmentsNotifier.value = List.from(_attachments);
 
     if (note.isLocked) {
       // Check if we have a session password
@@ -368,6 +382,8 @@ class ContentViewModel extends BaseViewModel {
         _currentPassword = sessionPass;
       } else {
         // Locked state - clear editor
+        _isLocked = true;
+        isLockedNotifier.value = true;
         quillController.document = Document();
         htmlController.clear();
         _currentPassword = null;
@@ -423,7 +439,8 @@ class ContentViewModel extends BaseViewModel {
       _sessionPasswords[_currentFileName!] = password;
       _loadContentToQuill(decryptedContent);
       _isLocked = false;
-      notifyListeners();
+      isLockedNotifier.value = false;
+      notifyListeners(); // Keep for unlock transition
       return true;
     } catch (e) {
       print("Unlock failed: $e");
@@ -440,9 +457,11 @@ class ContentViewModel extends BaseViewModel {
       quillController.document = Document()..insert(0, "Incorrect Password");
       _sessionPasswords.remove(_currentFileName); // Invalid pass
       _isLocked = true;
+      isLockedNotifier.value = true;
     } else {
       _loadContentToQuill(decrypted);
       _isLocked = false;
+      isLockedNotifier.value = false;
     }
   }
 
@@ -455,8 +474,10 @@ class ContentViewModel extends BaseViewModel {
       _sessionPasswords.remove(_currentFileName);
       _currentPassword = null;
       _isLocked = true;
+      isLockedNotifier.value = true;
       quillController.document = Document();
       htmlController.clear();
+      _attachmentCache.clear();
       notifyListeners();
     }
   }
@@ -837,6 +858,7 @@ class ContentViewModel extends BaseViewModel {
     quillController.document = Document();
     htmlController.clear();
     titleController.text = "New Note";
+    _attachmentCache.clear();
     notifyListeners();
   }
 
@@ -972,16 +994,22 @@ class ContentViewModel extends BaseViewModel {
       return null;
     final noteId = _currentFileName!.replaceFirst('note_', '');
 
+    if (_attachmentCache.containsKey(attachmentId)) {
+      return _attachmentCache[attachmentId];
+    }
+
     final encryptedBytes = await _fileService.readAttachment(
       noteId,
       attachmentId,
     );
     if (encryptedBytes == null) return null;
 
-    return await _encryptionService.decryptBinary(
+    final decrypted = await _encryptionService.decryptBinary(
       encryptedBytes,
       password: _currentPassword,
     );
+    _attachmentCache[attachmentId] = decrypted;
+    return decrypted;
   }
 
   // endregion
@@ -997,4 +1025,17 @@ class ImportVerificationResult {
     required this.message,
     this.previewInfo,
   });
+}
+
+Future<List<dynamic>> _htmlToDeltaTask(String html) async {
+  final delta = HtmlToDelta().convert(html);
+  return delta.toJson();
+}
+
+Future<String> _deltaToHtmlTask(List<dynamic> deltaJson) async {
+  final converter = QuillDeltaToHtmlConverter(
+    deltaJson.cast<Map<String, dynamic>>(),
+    ConverterOptions.forEmail(),
+  );
+  return converter.convert();
 }

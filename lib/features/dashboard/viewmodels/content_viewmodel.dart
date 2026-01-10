@@ -881,9 +881,7 @@ class ContentViewModel extends BaseViewModel {
   // endregion
 
   void onTextChanged() {
-    // Only schedule auto-save - NO other processing during typing
-    // This ensures ZERO overhead and smooth 60fps input
-    // Auto-save is now handled via debounce timer; no extra scheduling needed
+    _scheduleAutoSave();
   }
 
   // Title generation removed - was causing performance issues

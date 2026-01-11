@@ -57,6 +57,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _handleExportPack(RecentFile file) async {
+    // Close the sidebar first on mobile
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+
     // First load the note so we have access to attachments and metadata
     await _viewModel.loadNote(file.path);
 
@@ -69,7 +74,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Cannot export: incorrect password or cancelled'),
+              content: Text(
+                'Cannot export: incorrect file password or cancelled',
+              ),
               backgroundColor: Colors.red,
             ),
           );
@@ -88,10 +95,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
 
-    if (options != null) {
+    if (options == null) return;
+
+    if (!mounted) return;
+
+    // Show loading indicator
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            ),
+            SizedBox(width: 12),
+            Text('Preparing export...'),
+          ],
+        ),
+        duration: Duration(seconds: 30),
+      ),
+    );
+
+    try {
+      // Export runs in background (uses compute internally)
       await _viewModel.exportNotePack(
         format: options.format,
         password: options.password,
+      );
+
+      if (!mounted) return;
+
+      // Hide loading and show success
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Export ready! Share sheet will appear.'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Export failed: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
@@ -176,48 +231,182 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ),
     );
-
-    passwordController.dispose();
+    // Don't dispose controller here - it may still be referenced during rebuild
+    // It will be garbage collected automatically
     return result ?? false;
   }
 
   Future<void> _handleImport() async {
-    final file = await _viewModel.pickImportFile();
-    if (file != null) {
-      // Show loading? Logic is fast enough usually.
-      final verification = await _viewModel.verifyImportFile(file);
+    // Close the drawer first on mobile
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
 
-      if (!mounted) return;
+    final file = await _viewModel.pickImportPackFile();
+    if (file == null) return;
 
-      if (!verification.isValid) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(verification.message),
-            backgroundColor: Colors.red,
-          ),
-        );
+    if (!mounted) return;
+
+    // Verify the file
+    final verification = await _viewModel.verifyImportFile(file);
+
+    if (!mounted) return;
+
+    if (!verification.isValid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Invalid file: ${verification.message}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Show confirmation dialog
+    final shouldImport = await showDialog<bool>(
+      context: context,
+      builder: (context) => ImportConfirmationDialog(
+        fileName: file.name,
+        fileType: verification.message,
+        previewInfo: verification.previewInfo,
+      ),
+    );
+
+    if (shouldImport != true) return;
+
+    if (!mounted) return;
+
+    String? importedNoteId;
+    String? errorMessage;
+
+    if (verification.isPack) {
+      // Handle pack file import - always ask for optional archive password
+      final password = await _showPackPasswordDialog(
+        isRequired: verification.isPackEncrypted,
+      );
+
+      // If password is required and user cancelled, abort
+      if (verification.isPackEncrypted && password == null) {
         return;
       }
 
-      // Show confirmation dialog
-      final shouldImport = await showDialog<bool>(
-        context: context,
-        builder: (context) => ImportConfirmationDialog(
-          fileName: file.name,
-          fileType: verification.message,
-          previewInfo: verification.previewInfo,
+      // Import runs in background (uses compute internally)
+      importedNoteId = await _viewModel.importNotePack(
+        file.path!,
+        archivePassword: password,
+      );
+
+      if (importedNoteId == null) {
+        // Determine error reason
+        if (password != null && password.isNotEmpty) {
+          errorMessage = 'Import failed - incorrect archive password';
+        } else {
+          errorMessage = 'Import failed - archive may be password protected';
+        }
+      }
+    } else {
+      // Handle regular file import
+      await _viewModel.performImport(file);
+      importedNoteId = 'success'; // placeholder for success check
+    }
+
+    if (!mounted) return;
+
+    // Show result message
+    if (importedNoteId != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('File imported successfully!'),
+          backgroundColor: Colors.green,
         ),
       );
 
-      if (shouldImport == true) {
-        await _viewModel.performImport(file);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("File imported successfully")),
-          );
-        }
+      // Load the imported file if we have a real ID
+      if (importedNoteId != 'success') {
+        await _viewModel.loadNote(importedNoteId);
       }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage ?? 'Import failed'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
+  }
+
+  Future<String?> _showPackPasswordDialog({bool isRequired = false}) async {
+    final passwordController = TextEditingController();
+
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF161E2D),
+        title: Text(
+          isRequired ? 'Enter Archive Password' : 'Archive Password (Optional)',
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              isRequired
+                  ? 'This archive is password protected. Enter the password to import.'
+                  : 'If this archive has a password, enter it below. Leave empty if no password.',
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: passwordController,
+              obscureText: true,
+              autofocus: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Archive Password',
+                hintText: isRequired ? null : 'Leave empty if no password',
+                hintStyle: const TextStyle(color: Colors.grey),
+                labelStyle: const TextStyle(color: Colors.grey),
+                filled: true,
+                fillColor: const Color(0xFF1E293B),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFF334155)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFF334155)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Colors.blueAccent),
+                ),
+              ),
+              onSubmitted: (value) => Navigator.pop(context, value),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('Cancel'),
+          ),
+          if (!isRequired)
+            TextButton(
+              onPressed: () => Navigator.pop(context, ''),
+              child: const Text('Skip'),
+            ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, passwordController.text),
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+
+    // Don't dispose controller here - it will be garbage collected
+    // If result is empty string (from Skip or empty input), treat as no password
+    return result?.isEmpty == true ? null : result;
   }
 
   void _showMasterSettings(BuildContext context) {

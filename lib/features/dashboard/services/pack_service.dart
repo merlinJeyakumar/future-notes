@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart';
 import '../models/note_model.dart';
 import 'encryption_service.dart';
 
@@ -196,9 +197,9 @@ class PackService {
       ArchiveFile('metadata.json', metadataBytes.length, metadataBytes),
     );
 
-    // Encode to ZIP
-    final zipData = ZipEncoder().encode(archive);
-    return Uint8List.fromList(zipData);
+    // Encode to ZIP in background isolate
+    final zipData = await compute(_zipEncodeTask, archive);
+    return zipData;
   }
 
   /// Extract a ZIP pack to note and attachments
@@ -207,7 +208,8 @@ class PackService {
     String? password,
   }) async {
     try {
-      final archive = ZipDecoder().decodeBytes(zipData);
+      // Decode ZIP in background isolate
+      final archive = await compute(_zipDecodeTask, zipData);
 
       // Find note.json
       final noteFile = archive.files.firstWhere(
@@ -326,4 +328,14 @@ class PackService {
         (bytes[offset + 2] << 8) |
         bytes[offset + 3];
   }
+}
+
+// Isolate-friendly static functions for compute()
+Uint8List _zipEncodeTask(Archive archive) {
+  final zipData = ZipEncoder().encode(archive);
+  return Uint8List.fromList(zipData);
+}
+
+Archive _zipDecodeTask(Uint8List data) {
+  return ZipDecoder().decodeBytes(data);
 }

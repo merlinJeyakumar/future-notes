@@ -761,8 +761,50 @@ class ContentViewModel extends BaseViewModel {
 
     try {
       final fileObj = File(file.path!);
-      final content = await fileObj.readAsString();
       final ext = file.name.split('.').last.toLowerCase();
+
+      // Handle pack files (binary data)
+      if (ext == 'fnote' || ext == 'zip') {
+        final data = await fileObj.readAsBytes();
+        final packService = PackService(_encryptionService);
+
+        if (ext == 'fnote') {
+          if (packService.isPack(data)) {
+            final isEncrypted = packService.isEncrypted(data);
+            return ImportVerificationResult(
+              isValid: true,
+              message: "Note Pack File",
+              previewInfo:
+                  "Format: Binary Pack (.fnote)\nEncrypted: ${isEncrypted ? 'Yes (password required)' : 'No'}",
+              isPack: true,
+              isPackEncrypted: isEncrypted,
+            );
+          } else {
+            return ImportVerificationResult(
+              isValid: false,
+              message: "Invalid pack file format",
+            );
+          }
+        } else if (ext == 'zip') {
+          if (packService.isZip(data)) {
+            return ImportVerificationResult(
+              isValid: true,
+              message: "ZIP Archive",
+              previewInfo: "Format: ZIP Archive\nSize: ${data.length} bytes",
+              isPack: true,
+              isPackEncrypted: false, // We can't easily detect this for ZIP
+            );
+          } else {
+            return ImportVerificationResult(
+              isValid: false,
+              message: "Invalid ZIP file",
+            );
+          }
+        }
+      }
+
+      // Handle text-based files
+      final content = await fileObj.readAsString();
 
       if (ext == 'enc') {
         try {
@@ -812,7 +854,8 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
-  /// Export the current note as a pack file (binary or zip) with optional password
+  /// Export the current note as a pack file (binary or zip) with optional archive password
+  /// Note: Content is packed as-is (preserving original encryption), archive password is separate
   Future<void> exportNotePack({
     required ExportFormat format,
     String? password,
@@ -821,14 +864,14 @@ class ContentViewModel extends BaseViewModel {
 
     setBusy(true);
     try {
-      // 1. Get current note data
+      // 1. Get current note data (encrypted)
       final content = await _fileService.readFile(_currentFileName!);
       if (content == null) {
         setBusy(false);
         return;
       }
 
-      // Try to parse as NoteModel
+      // Parse to get note metadata (but keep original encrypted content in file)
       NoteModel? note;
       try {
         final appDecrypted = await _encryptionService.decryptApp(content);
@@ -845,31 +888,18 @@ class ContentViewModel extends BaseViewModel {
         return;
       }
 
-      // 2. If note is locked, decrypt the content for export
-      String exportContent = note.content;
-      if (note.isLocked && _currentPassword != null) {
-        final decrypted = await _encryptionService.decrypt(
-          note.content,
-          password: _currentPassword,
-        );
-        if (!decrypted.startsWith('Error decrypting')) {
-          exportContent = decrypted;
-        }
-      }
-
-      // Create note with decrypted content for export
+      // 2. Keep the note content as-is (don't decrypt file password protected content)
+      // The note.isLocked flag indicates if the CONTENT is password protected
       final exportNote = NoteModel(
         id: note.id,
         title: note.title,
-        content: exportContent,
-        isLocked:
-            password != null &&
-            password.isNotEmpty, // Will be locked with new password if provided
+        content: note.content, // Keep encrypted content as-is
+        isLocked: note.isLocked, // Preserve lock status
         timestamp: note.timestamp,
         attachments: note.attachments,
       );
 
-      // 3. Gather all attachment data
+      // 3. Gather all attachment data AS-IS (encrypted)
       final attachmentData = <String, Uint8List>{};
       String noteId = note.id;
 
@@ -879,18 +909,12 @@ class ContentViewModel extends BaseViewModel {
           attachment.id,
         );
         if (encryptedBytes != null) {
-          // Decrypt attachments for export
-          final decrypted = await _encryptionService.decryptBinary(
-            encryptedBytes,
-            password: _currentPassword,
-          );
-          if (decrypted.isNotEmpty) {
-            attachmentData[attachment.id] = decrypted;
-          }
+          // Keep attachments encrypted as-is
+          attachmentData[attachment.id] = encryptedBytes;
         }
       }
 
-      // 4. Create pack
+      // 4. Create pack (archive password is separate from file password)
       final packService = PackService(_encryptionService);
       Uint8List packData;
       String extension;
@@ -899,14 +923,14 @@ class ContentViewModel extends BaseViewModel {
         packData = await packService.createZipPack(
           exportNote,
           attachmentData,
-          password: password,
+          password: password, // This is ARCHIVE password
         );
         extension = 'zip';
       } else {
         packData = await packService.createPack(
           exportNote,
           attachmentData,
-          password: password,
+          password: password, // This is ARCHIVE password
         );
         extension = 'fnote';
       }
@@ -927,7 +951,13 @@ class ContentViewModel extends BaseViewModel {
   }
 
   /// Import a note pack file (.fnote or .zip)
-  Future<bool> importNotePack(String filePath, {String? password}) async {
+  /// Returns the noteId on success, null on failure
+  /// archivePassword: password to decrypt the archive itself
+  /// Content inside is preserved as-is (with original file password encryption if any)
+  Future<String?> importNotePack(
+    String filePath, {
+    String? archivePassword,
+  }) async {
     setBusy(true);
     try {
       final file = File(filePath);
@@ -937,27 +967,30 @@ class ContentViewModel extends BaseViewModel {
       PackResult? result;
 
       if (packService.isPack(data)) {
-        // Binary pack
-        result = await packService.extractPack(data, password: password);
+        // Binary pack - use archive password to decrypt the pack
+        result = await packService.extractPack(data, password: archivePassword);
       } else if (packService.isZip(data)) {
-        // ZIP pack
-        result = await packService.extractZipPack(data, password: password);
+        // ZIP pack - use archive password to decrypt the pack
+        result = await packService.extractZipPack(
+          data,
+          password: archivePassword,
+        );
       }
 
       if (result == null) {
         setBusy(false);
-        return false;
+        return null;
       }
 
       // Save the imported note
       final noteId = const Uuid().v4();
 
-      // Re-encrypt attachments and save them
+      // Save attachments AS-IS (they're already encrypted with file password)
       final newAttachments = <AttachmentModel>[];
       for (final entry in result.attachments.entries) {
-        final encrypted = await _encryptionService.encryptBinary(entry.value);
+        // Save the encrypted attachment data directly (no re-encryption)
         final attachmentId = await _fileService.saveAttachment(
-          encrypted,
+          entry.value, // Already encrypted with file password
           noteId,
         );
 
@@ -977,12 +1010,14 @@ class ContentViewModel extends BaseViewModel {
         );
       }
 
-      // Create the imported note
+      // Create the imported note with original content (encrypted with file password if any)
       final importedNote = NoteModel(
         id: noteId,
         title: result.note.title,
-        content: result.note.content,
-        isLocked: false, // Reset lock status on import
+        content: result
+            .note
+            .content, // Keep content as-is (may be encrypted with file password)
+        isLocked: result.note.isLocked, // Preserve original lock status
         timestamp: DateTime.now().millisecondsSinceEpoch,
         attachments: newAttachments,
       );
@@ -993,11 +1028,11 @@ class ContentViewModel extends BaseViewModel {
 
       await loadRecentFiles();
       setBusy(false);
-      return true;
+      return "note_$noteId";
     } catch (e) {
       print('Error importing note pack: $e');
       setBusy(false);
-      return false;
+      return null;
     }
   }
 
@@ -1235,11 +1270,15 @@ class ImportVerificationResult {
   final bool isValid;
   final String message;
   final String? previewInfo;
+  final bool isPack;
+  final bool isPackEncrypted;
 
   ImportVerificationResult({
     required this.isValid,
     required this.message,
     this.previewInfo,
+    this.isPack = false,
+    this.isPackEncrypted = false,
   });
 }
 

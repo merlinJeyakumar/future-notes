@@ -567,7 +567,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             builder: (context, constraints) {
               final isDesktop = constraints.maxWidth > 800;
               return Scaffold(
-                resizeToAvoidBottomInset: false,
+                resizeToAvoidBottomInset: true,
                 backgroundColor: const Color(0xFF1B2535),
                 appBar: isDesktop
                     ? null

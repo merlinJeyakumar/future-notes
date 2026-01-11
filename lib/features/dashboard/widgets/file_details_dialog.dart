@@ -67,24 +67,24 @@ class FileDetailsDialog extends StatelessWidget {
               }
             },
           ),
-          if (Platform.isAndroid || Platform.isIOS)
-            ListTile(
-              leading: const Icon(Icons.share, color: Colors.greenAccent),
-              title: const Text(
-                "Export Note Package",
-                style: TextStyle(color: Colors.white),
-              ),
-              subtitle: const Text(
-                "Export with attachments",
-                style: TextStyle(color: Colors.grey, fontSize: 11),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                if (onExportPack != null) {
-                  onExportPack!(file);
-                }
-              },
+          // Export Note Package - available on all platforms
+          ListTile(
+            leading: const Icon(Icons.share, color: Colors.greenAccent),
+            title: const Text(
+              "Export Note Package",
+              style: TextStyle(color: Colors.white),
             ),
+            subtitle: const Text(
+              "Export with attachments",
+              style: TextStyle(color: Colors.grey, fontSize: 11),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              if (onExportPack != null) {
+                onExportPack!(file);
+              }
+            },
+          ),
           ListTile(
             leading: const Icon(Icons.delete, color: Colors.redAccent),
             title: const Text(

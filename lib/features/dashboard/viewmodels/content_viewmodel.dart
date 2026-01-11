@@ -935,14 +935,30 @@ class ContentViewModel extends BaseViewModel {
         extension = 'fnote';
       }
 
-      // 5. Save to temp file and share
-      final tempDir = await getTemporaryDirectory();
+      // 5. Save or share based on platform
       final safeTitle = note.title.replaceAll(RegExp(r'[^\w\s-]'), '').trim();
       final fileName = '${safeTitle.isEmpty ? "note" : safeTitle}.$extension';
-      final tempFile = File('${tempDir.path}/$fileName');
-      await tempFile.writeAsBytes(packData);
 
-      await Share.shareXFiles([XFile(tempFile.path)], text: note.title);
+      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        // Desktop: use file picker to save
+        final outputPath = await FilePicker.platform.saveFile(
+          dialogTitle: 'Save Note Package',
+          fileName: fileName,
+          type: FileType.custom,
+          allowedExtensions: [extension],
+        );
+
+        if (outputPath != null) {
+          final file = File(outputPath);
+          await file.writeAsBytes(packData);
+        }
+      } else {
+        // Mobile: use share sheet
+        final tempDir = await getTemporaryDirectory();
+        final tempFile = File('${tempDir.path}/$fileName');
+        await tempFile.writeAsBytes(packData);
+        await Share.shareXFiles([XFile(tempFile.path)], text: note.title);
+      }
     } catch (e) {
       print('Error exporting note pack: $e');
     } finally {

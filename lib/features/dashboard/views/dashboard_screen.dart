@@ -176,7 +176,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               TextField(
                 controller: passwordController,
                 obscureText: true,
-                autofocus: true,
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
                   labelText: 'Password',
@@ -360,7 +359,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             TextField(
               controller: passwordController,
               obscureText: true,
-              autofocus: true,
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 labelText: 'Archive Password',

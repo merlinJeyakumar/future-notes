@@ -165,7 +165,6 @@ class _PasswordDialogState extends State<PasswordDialog> {
               _buildTextField(
                 controller: _currentController,
                 label: 'Current Password',
-                autofocus: true,
               ),
 
             if (widget.mode == PasswordMode.update) const SizedBox(height: 12),
@@ -176,9 +175,6 @@ class _PasswordDialogState extends State<PasswordDialog> {
               label: widget.mode == PasswordMode.unlock
                   ? 'Password'
                   : 'New Password',
-              autofocus:
-                  widget.mode !=
-                  PasswordMode.update, // Autofocus if first field
             ),
 
             if (widget.mode != PasswordMode.unlock) ...[

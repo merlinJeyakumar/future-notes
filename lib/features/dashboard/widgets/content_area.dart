@@ -833,7 +833,30 @@ class _ContentAreaState extends State<ContentArea> {
                 iconColor: Colors.orangeAccent,
                 onTap: () async {
                   Navigator.pop(context);
-                  final success = await viewModel.removePassword();
+                  // Prompt for password verification before removing
+                  final password = await _showPasswordDialog(
+                    context,
+                    mode: PasswordMode.unlock,
+                  );
+                  if (password == null || password.isEmpty) return;
+
+                  // Verify the password first
+                  final verified = viewModel.verifyPassword(password);
+                  if (!verified) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Incorrect password.'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                    return;
+                  }
+
+                  final success = await viewModel.removePassword(
+                    password: password,
+                  );
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(

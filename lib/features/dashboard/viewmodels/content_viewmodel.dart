@@ -417,9 +417,10 @@ class ContentViewModel extends BaseViewModel {
 
   /// Removes password protection from the current note.
   /// Decrypts all attachments and saves the note without encryption.
-  Future<bool> removePassword() async {
-    final password = _currentPassword;
-    if (password == null || _currentFileName == null) return false;
+  /// If [password] is provided, it will be used instead of the stored password.
+  Future<bool> removePassword({String? password}) async {
+    final effectivePassword = password ?? _currentPassword;
+    if (effectivePassword == null || _currentFileName == null) return false;
 
     // Extract noteId from _currentFileName
     String noteId;
@@ -444,7 +445,7 @@ class ContentViewModel extends BaseViewModel {
         if (encryptedData != null) {
           final decryptedData = await _encryptionService.decryptBinary(
             encryptedData,
-            password: password,
+            password: effectivePassword,
           );
           if (decryptedData.isNotEmpty) {
             // Re-encrypt with app key (no user password) and save with new ID

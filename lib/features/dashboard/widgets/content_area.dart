@@ -831,11 +831,21 @@ class _ContentAreaState extends State<ContentArea> {
                 title: 'Remove Password',
                 textColor: Colors.orangeAccent,
                 iconColor: Colors.orangeAccent,
-                onTap: () {
-                  Navigator.pop(context); // Close settings
-                  _handleLockAction(
-                    context,
-                  ); // This handles the remove logic/dialog
+                onTap: () async {
+                  Navigator.pop(context);
+                  final success = await viewModel.removePassword();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          success
+                              ? 'Password removed. Content decrypted.'
+                              : 'Failed to remove password.',
+                        ),
+                        backgroundColor: success ? Colors.green : Colors.red,
+                      ),
+                    );
+                  }
                 },
               ),
 

@@ -799,7 +799,18 @@ class _ContentAreaState extends State<ContentArea> {
                     mode: PasswordMode.update,
                   );
                   if (password != null && password.isNotEmpty) {
+                    // Show progress dialog
+                    showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (ctx) => _ProgressDialog(viewModel: viewModel),
+                    );
+
                     final count = await viewModel.changePassword(password);
+
+                    // Close progress dialog
+                    if (context.mounted) Navigator.of(context).pop();
+
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
@@ -853,10 +864,20 @@ class _ContentAreaState extends State<ContentArea> {
                     }
                     return;
                   }
+                  // Show progress dialog
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (ctx) => _ProgressDialog(viewModel: viewModel),
+                  );
 
                   final success = await viewModel.removePassword(
                     password: password,
                   );
+
+                  // Close progress dialog
+                  if (context.mounted) Navigator.of(context).pop();
+
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
@@ -959,6 +980,53 @@ class _ContentAreaState extends State<ContentArea> {
     );
   }
 } // End of ContentArea
+
+/// Progress dialog that shows the current operation status
+class _ProgressDialog extends StatelessWidget {
+  final ContentViewModel viewModel;
+
+  const _ProgressDialog({required this.viewModel});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: _DesignColors.toolbarIsland,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: ValueListenableBuilder<String?>(
+          valueListenable: viewModel.progressNotifier,
+          builder: (context, progress, _) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      _DesignColors.accent,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  progress ?? 'Processing...',
+                  style: const TextStyle(
+                    color: _DesignColors.textPrimary,
+                    fontSize: 14,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
 
 class AttachmentEmbedBuilder extends EmbedBuilder {
   final ContentViewModel viewModel;

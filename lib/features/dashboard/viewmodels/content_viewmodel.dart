@@ -415,6 +415,87 @@ class ContentViewModel extends BaseViewModel {
     _scheduleAutoSave();
   }
 
+  /// Removes password protection from the current note.
+  /// Decrypts all attachments and saves the note without encryption.
+  Future<bool> removePassword() async {
+    final password = _currentPassword;
+    if (password == null || _currentFileName == null) return false;
+
+    // Extract noteId from _currentFileName
+    String noteId;
+    if (_currentFileName!.startsWith('note_')) {
+      noteId = _currentFileName!.replaceFirst('note_', '');
+      if (noteId.contains('.')) {
+        noteId = noteId.split('.').first;
+      }
+    } else {
+      noteId = const Uuid().v4();
+    }
+
+    setBusy(true);
+    try {
+      // 1. Decrypt all attachments and save them unencrypted
+      final List<AttachmentModel> newAttachments = [];
+      for (final attachment in _attachments) {
+        final encryptedData = await _fileService.readAttachment(
+          noteId,
+          attachment.id,
+        );
+        if (encryptedData != null) {
+          final decryptedData = await _encryptionService.decryptBinary(
+            encryptedData,
+            password: password,
+          );
+          if (decryptedData.isNotEmpty) {
+            // Re-encrypt with app key (no user password) and save with new ID
+            final reEncryptedData = await _encryptionService.encryptBinary(
+              decryptedData,
+              password: null, // App key only, no user password
+            );
+            final newId = await _fileService.saveAttachment(
+              reEncryptedData,
+              noteId,
+            );
+            newAttachments.add(
+              AttachmentModel(
+                id: newId,
+                fileName: attachment.fileName,
+                size: attachment.size,
+                mimeType: attachment.mimeType,
+                isLoading: false,
+              ),
+            );
+          } else {
+            // Decryption failed, keep original
+            newAttachments.add(attachment);
+          }
+        } else {
+          // No data found, keep original
+          newAttachments.add(attachment);
+        }
+      }
+
+      // 2. Update attachments list
+      _attachments = newAttachments;
+      attachmentsNotifier.value = List.from(_attachments);
+
+      // 3. Clear password (content is already in memory unencrypted)
+      _currentPassword = null;
+      _sessionPasswords.remove(_currentFileName!);
+
+      // 4. Save the note (will save without encryption since password is null)
+      await saveNote();
+
+      notifyListeners();
+      return true;
+    } catch (e) {
+      print("Error removing password: $e");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   Future<bool> unlockNote(String password) async {
     if (_currentFileName == null) return false;
 

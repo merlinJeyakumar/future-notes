@@ -52,6 +52,10 @@ class ContentViewModel extends BaseViewModel {
   final ValueNotifier<bool> isLockedNotifier = ValueNotifier(false);
   final ValueNotifier<bool> isAutoSavingNotifier = ValueNotifier(false);
 
+  /// Progress notifier for long-running operations like password change/removal.
+  /// Format: "status message" or null when not in progress
+  final ValueNotifier<String?> progressNotifier = ValueNotifier(null);
+
   final Map<String, String> _sessionPasswords = {};
   final Map<String, Uint8List> _attachmentCache = {};
   bool _isLocked = false;
@@ -435,9 +439,25 @@ class ContentViewModel extends BaseViewModel {
 
     setBusy(true);
     try {
+      final totalSteps =
+          _attachments.length + 2; // content + attachments + saving
+      int currentStep = 0;
+
+      // Report starting
+      progressNotifier.value = 'Decrypting content...';
+      currentStep++;
+
       // 1. Decrypt all attachments and save them unencrypted
       final List<AttachmentModel> newAttachments = [];
-      for (final attachment in _attachments) {
+      for (int i = 0; i < _attachments.length; i++) {
+        final attachment = _attachments[i];
+        final percent = ((currentStep / totalSteps) * 100).round();
+        progressNotifier.value =
+            'Decrypting $percent% (${attachment.fileName})';
+
+        // Yield to event loop to keep UI responsive
+        await Future.delayed(Duration.zero);
+
         final encryptedData = await _fileService.readAttachment(
           noteId,
           attachment.id,
@@ -474,6 +494,7 @@ class ContentViewModel extends BaseViewModel {
           // No data found, keep original
           newAttachments.add(attachment);
         }
+        currentStep++;
       }
 
       // 2. Update attachments list
@@ -485,15 +506,19 @@ class ContentViewModel extends BaseViewModel {
       _sessionPasswords.remove(_currentFileName!);
 
       // 4. Save the note (will save without encryption since password is null)
+      progressNotifier.value = 'Saving note...';
       await saveNote();
 
+      progressNotifier.value = null; // Clear progress
       notifyListeners();
       return true;
     } catch (e) {
       print("Error removing password: $e");
+      progressNotifier.value = null;
       return false;
     } finally {
       setBusy(false);
+      progressNotifier.value = null;
     }
   }
 
@@ -575,8 +600,17 @@ class ContentViewModel extends BaseViewModel {
     int count = 0;
     try {
       final files = await _fileService.getRecentFiles();
-      for (final fileName in files) {
+      final totalFiles = files.length;
+
+      for (int fileIndex = 0; fileIndex < files.length; fileIndex++) {
+        final fileName = files[fileIndex];
         try {
+          final filePercent = ((fileIndex / totalFiles) * 100).round();
+          progressNotifier.value = 'Scanning $filePercent% ($fileName)';
+
+          // Yield to event loop to keep UI responsive
+          await Future.delayed(Duration.zero);
+
           // Read file
           final content = await _fileService.readFile(fileName);
           if (content == null) continue;
@@ -591,6 +625,8 @@ class ContentViewModel extends BaseViewModel {
 
           // Check if locked
           if (note.isLocked) {
+            progressNotifier.value = 'Decrypting $filePercent% (${note.title})';
+
             // Try decrypt content
             final decrypted = await _encryptionService.decrypt(
               note.content,
@@ -602,6 +638,8 @@ class ContentViewModel extends BaseViewModel {
             }
 
             // Re-encrypt content
+            progressNotifier.value =
+                'Re-encrypting $filePercent% (${note.title})';
             final newEncrypted = await _encryptionService.encrypt(
               decrypted,
               password: newPassword,
@@ -609,8 +647,17 @@ class ContentViewModel extends BaseViewModel {
 
             // Re-encrypt attachments
             final List<AttachmentModel> newAttachments = [];
+            final totalAttach = note.attachments.length;
 
-            for (final attachment in note.attachments) {
+            for (int i = 0; i < note.attachments.length; i++) {
+              final attachment = note.attachments[i];
+              final attachPercent = ((i / totalAttach) * 100).round();
+              progressNotifier.value =
+                  'Re-encrypting $filePercent% (${attachment.fileName}) $attachPercent%';
+
+              // Yield to event loop to keep UI responsive
+              await Future.delayed(Duration.zero);
+
               final oldData = await _fileService.readAttachment(
                 note.id,
                 attachment.id,
@@ -659,6 +706,7 @@ class ContentViewModel extends BaseViewModel {
             );
 
             // Encrypt App Layer
+            progressNotifier.value = 'Saving $filePercent% (${note.title})';
             final newJson = json.encode(newNote.toJson());
             final newAppEncrypted = await _encryptionService.encryptApp(
               newJson,
@@ -685,6 +733,7 @@ class ContentViewModel extends BaseViewModel {
       }
     } finally {
       setBusy(false);
+      progressNotifier.value = null;
     }
     return count;
   }

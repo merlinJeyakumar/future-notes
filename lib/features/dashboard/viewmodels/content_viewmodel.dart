@@ -592,152 +592,127 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
-  /// Changes the password for all locked notes.
+  /// Changes the password for the current note only.
   /// If [oldPassword] is provided, it will be used instead of the stored password.
-  Future<int> changePassword(String newPassword, {String? oldPassword}) async {
+  Future<String> changePassword(
+    String newPassword, {
+    String? oldPassword,
+  }) async {
     final effectiveOldPassword = oldPassword ?? _currentPassword;
-    if (effectiveOldPassword == null) return 0;
+    if (effectiveOldPassword == null) return "Error: No active password";
+    if (_currentFileName == null) return "Error: No file selected";
+
+    // Extract noteId from currentFileName
+    String noteId;
+    if (_currentFileName!.startsWith('note_')) {
+      noteId = _currentFileName!.replaceFirst('note_', '');
+      if (noteId.contains('.')) {
+        noteId = noteId.split('.').first;
+      }
+    } else {
+      noteId = const Uuid().v4();
+    }
 
     setBusy(true);
-    int count = 0;
     try {
-      final files = await _fileService.getRecentFiles();
-      final totalFiles = files.length;
+      // 1. Get content from editor (already decrypted in memory)
+      progressNotifier.value = 'Re-encrypting content...';
+      await Future.delayed(Duration.zero);
 
-      for (int fileIndex = 0; fileIndex < files.length; fileIndex++) {
-        final fileName = files[fileIndex];
-        try {
-          final filePercent = ((fileIndex / totalFiles) * 100).round();
-          progressNotifier.value = 'Scanning $filePercent% ($fileName)';
+      String contentToSave = "";
+      if (_isHtmlMode) {
+        contentToSave = htmlController.text;
+      } else {
+        final delta = quillController.document.toDelta();
+        contentToSave = jsonEncode(delta.toJson());
+      }
 
-          // Yield to event loop to keep UI responsive
-          await Future.delayed(Duration.zero);
+      // Re-encrypt content with new password
+      final newEncryptedContent = await _encryptionService.encrypt(
+        contentToSave,
+        password: newPassword,
+      );
 
-          // Read file
-          final content = await _fileService.readFile(fileName);
-          if (content == null) continue;
+      // 2. Re-encrypt all attachments
+      final List<AttachmentModel> newAttachments = [];
+      final totalAttach = _attachments.length;
 
-          // Decrypt App Layer
-          final appDecrypted = await _encryptionService.decryptApp(content);
-          if (appDecrypted.isEmpty) continue; // Not app encrypted or fail
+      for (int i = 0; i < _attachments.length; i++) {
+        final attachment = _attachments[i];
+        progressNotifier.value =
+            'Re-encrypting attachment ${i + 1}/$totalAttach...';
+        await Future.delayed(Duration.zero);
 
-          // Parse
-          final jsonMap = json.decode(appDecrypted);
-          final note = NoteModel.fromJson(jsonMap);
-
-          // Check if locked
-          if (note.isLocked) {
-            progressNotifier.value = 'Decrypting $filePercent% (${note.title})';
-
-            // Try decrypt content
-            final decrypted = await _encryptionService.decrypt(
-              note.content,
-              password: effectiveOldPassword,
-            );
-            if (decrypted.startsWith("Error decrypting")) {
-              print("Skipping $fileName: Decryption failed with old password");
-              continue;
-            }
-
-            // Re-encrypt content
-            progressNotifier.value =
-                'Re-encrypting $filePercent% (${note.title})';
-            final newEncrypted = await _encryptionService.encrypt(
-              decrypted,
+        final encryptedData = await _fileService.readAttachment(
+          noteId,
+          attachment.id,
+        );
+        if (encryptedData != null) {
+          final decryptedData = await _encryptionService.decryptBinary(
+            encryptedData,
+            password: effectiveOldPassword,
+          );
+          if (decryptedData.isNotEmpty) {
+            final newEncryptedData = await _encryptionService.encryptBinary(
+              decryptedData,
               password: newPassword,
             );
-
-            // Re-encrypt attachments
-            final List<AttachmentModel> newAttachments = [];
-            final totalAttach = note.attachments.length;
-
-            for (int i = 0; i < note.attachments.length; i++) {
-              final attachment = note.attachments[i];
-              final attachPercent = ((i / totalAttach) * 100).round();
-              progressNotifier.value =
-                  'Re-encrypting $filePercent% (${attachment.fileName}) $attachPercent%';
-
-              // Yield to event loop to keep UI responsive
-              await Future.delayed(Duration.zero);
-
-              final oldData = await _fileService.readAttachment(
-                note.id,
-                attachment.id,
-              );
-              if (oldData != null) {
-                final decryptedData = await _encryptionService.decryptBinary(
-                  oldData,
-                  password: effectiveOldPassword,
-                );
-                if (decryptedData.isNotEmpty) {
-                  final newData = await _encryptionService.encryptBinary(
-                    decryptedData,
-                    password: newPassword,
-                  );
-                  // Generate new ID for re-encrypted attachment
-                  final newId = await _fileService.saveAttachment(
-                    newData,
-                    note.id,
-                  );
-
-                  newAttachments.add(
-                    AttachmentModel(
-                      id: newId,
-                      fileName: attachment.fileName,
-                      size: attachment.size,
-                      mimeType: attachment.mimeType,
-                      isLoading: false,
-                    ),
-                  );
-                } else {
-                  newAttachments.add(attachment);
-                }
-              } else {
-                newAttachments.add(attachment);
-              }
-            }
-
-            // Update Note
-            final newNote = NoteModel(
-              id: note.id,
-              title: note.title,
-              content: newEncrypted,
-              isLocked: true, // Remains locked
-              timestamp: note.timestamp,
-              attachments: newAttachments,
+            final newId = await _fileService.saveAttachment(
+              newEncryptedData,
+              noteId,
             );
-
-            // Encrypt App Layer
-            progressNotifier.value = 'Saving $filePercent% (${note.title})';
-            final newJson = json.encode(newNote.toJson());
-            final newAppEncrypted = await _encryptionService.encryptApp(
-              newJson,
+            newAttachments.add(
+              AttachmentModel(
+                id: newId,
+                fileName: attachment.fileName,
+                size: attachment.size,
+                mimeType: attachment.mimeType,
+                isLoading: false,
+              ),
             );
-
-            // Save
-            if (fileName.startsWith('note_')) {
-              await _fileService.saveNoteContent(note.id, newAppEncrypted);
-            } else {
-              await _fileService.saveFile(newAppEncrypted, fileName);
-            }
-
-            count++;
-
-            // If this is the current file, update session
-            if (_currentFileName == fileName) {
-              _currentPassword = newPassword;
-              _sessionPasswords[fileName] = newPassword;
-            }
+          } else {
+            newAttachments.add(attachment);
           }
-        } catch (e) {
-          print("Error processing $fileName: $e");
+        } else {
+          newAttachments.add(attachment);
         }
       }
+
+      // 3. Update internal state
+      _attachments = newAttachments;
+      attachmentsNotifier.value = List.from(_attachments);
+      _currentPassword = newPassword;
+      _sessionPasswords[_currentFileName!] = newPassword;
+
+      // 4. Build and save the note
+      progressNotifier.value = 'Saving...';
+      final note = NoteModel(
+        id: noteId,
+        title: titleController.text,
+        content: newEncryptedContent,
+        isLocked: true,
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+        attachments: newAttachments,
+      );
+
+      final jsonString = json.encode(note.toJson());
+      final appEncrypted = await _encryptionService.encryptApp(jsonString);
+
+      if (_currentFileName!.startsWith('note_')) {
+        await _fileService.saveNoteContent(noteId, appEncrypted);
+      } else {
+        await _fileService.saveFile(appEncrypted, _currentFileName!);
+      }
+
+      print("Password changed for: $_currentFileName");
+      return "Password changed successfully";
+    } catch (e) {
+      print("Error changing password: $e");
+      return "Error: $e";
     } finally {
       setBusy(false);
       progressNotifier.value = null;
     }
-    return count;
   }
 
   void setSearchQuery(String query) {

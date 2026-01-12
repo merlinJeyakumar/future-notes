@@ -592,9 +592,11 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
-  Future<int> changePassword(String newPassword) async {
-    final oldPassword = _currentPassword;
-    if (oldPassword == null) return 0;
+  /// Changes the password for all locked notes.
+  /// If [oldPassword] is provided, it will be used instead of the stored password.
+  Future<int> changePassword(String newPassword, {String? oldPassword}) async {
+    final effectiveOldPassword = oldPassword ?? _currentPassword;
+    if (effectiveOldPassword == null) return 0;
 
     setBusy(true);
     int count = 0;
@@ -630,7 +632,7 @@ class ContentViewModel extends BaseViewModel {
             // Try decrypt content
             final decrypted = await _encryptionService.decrypt(
               note.content,
-              password: oldPassword,
+              password: effectiveOldPassword,
             );
             if (decrypted.startsWith("Error decrypting")) {
               print("Skipping $fileName: Decryption failed with old password");
@@ -665,7 +667,7 @@ class ContentViewModel extends BaseViewModel {
               if (oldData != null) {
                 final decryptedData = await _encryptionService.decryptBinary(
                   oldData,
-                  password: oldPassword,
+                  password: effectiveOldPassword,
                 );
                 if (decryptedData.isNotEmpty) {
                   final newData = await _encryptionService.encryptBinary(

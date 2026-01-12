@@ -792,44 +792,80 @@ class _ContentAreaState extends State<ContentArea> {
                   ? 'Change Password'
                   : 'Set Password',
               onTap: () async {
+                // Close settings menu first
                 Navigator.pop(context);
+
+                // Use State's mounted check and context for remaining operations
+                if (!mounted) return;
+                final stateContext = this.context;
+
                 if (viewModel.isPasswordSet) {
-                  final password = await _showPasswordDialog(
-                    context,
-                    mode: PasswordMode.update,
+                  // First, verify the current password
+                  final currentPassword = await _showPasswordDialog(
+                    stateContext,
+                    mode: PasswordMode.unlock,
                   );
-                  if (password != null && password.isNotEmpty) {
-                    // Show progress dialog
-                    showDialog(
-                      context: context,
-                      barrierDismissible: false,
-                      builder: (ctx) => _ProgressDialog(viewModel: viewModel),
-                    );
+                  if (currentPassword == null || currentPassword.isEmpty)
+                    return;
 
-                    final count = await viewModel.changePassword(password);
-
-                    // Close progress dialog
-                    if (context.mounted) Navigator.of(context).pop();
-
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Password updated. Re-encrypted $count notes.',
-                          ),
-                          backgroundColor: Colors.green,
+                  // Verify the current password
+                  final verified = viewModel.verifyPassword(currentPassword);
+                  if (!verified) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(stateContext).showSnackBar(
+                        const SnackBar(
+                          content: Text('Incorrect current password.'),
+                          backgroundColor: Colors.red,
                         ),
                       );
                     }
+                    return;
+                  }
+
+                  // Now ask for the new password
+                  if (!mounted) return;
+                  final newPassword = await _showPasswordDialog(
+                    stateContext,
+                    mode: PasswordMode.set,
+                  );
+                  if (newPassword == null || newPassword.isEmpty) return;
+
+                  // Show progress dialog
+                  if (!mounted) return;
+                  showDialog(
+                    context: stateContext,
+                    barrierDismissible: false,
+                    builder: (ctx) => _ProgressDialog(viewModel: viewModel),
+                  );
+
+                  final count = await viewModel.changePassword(
+                    newPassword,
+                    oldPassword: currentPassword,
+                  );
+
+                  // Close progress dialog using root navigator
+                  if (mounted) {
+                    Navigator.of(stateContext, rootNavigator: true).pop();
+                  }
+
+                  if (mounted) {
+                    ScaffoldMessenger.of(stateContext).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Password updated. Re-encrypted $count notes.',
+                        ),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
                   }
                 } else {
                   final password = await _showPasswordDialog(
-                    context,
+                    stateContext,
                     mode: PasswordMode.set,
                   );
                   if (password != null && password.isNotEmpty) {
                     viewModel.setPassword(password);
-                    _promptSave(context);
+                    if (mounted) _promptSave(stateContext);
                   }
                 }
               },
@@ -843,10 +879,16 @@ class _ContentAreaState extends State<ContentArea> {
                 textColor: Colors.orangeAccent,
                 iconColor: Colors.orangeAccent,
                 onTap: () async {
+                  // Close settings menu first
                   Navigator.pop(context);
+
+                  // Use State's mounted check and context for remaining operations
+                  if (!mounted) return;
+                  final stateContext = this.context;
+
                   // Prompt for password verification before removing
                   final password = await _showPasswordDialog(
-                    context,
+                    stateContext,
                     mode: PasswordMode.unlock,
                   );
                   if (password == null || password.isEmpty) return;
@@ -854,8 +896,8 @@ class _ContentAreaState extends State<ContentArea> {
                   // Verify the password first
                   final verified = viewModel.verifyPassword(password);
                   if (!verified) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                    if (mounted) {
+                      ScaffoldMessenger.of(stateContext).showSnackBar(
                         const SnackBar(
                           content: Text('Incorrect password.'),
                           backgroundColor: Colors.red,
@@ -864,9 +906,11 @@ class _ContentAreaState extends State<ContentArea> {
                     }
                     return;
                   }
+
                   // Show progress dialog
+                  if (!mounted) return;
                   showDialog(
-                    context: context,
+                    context: stateContext,
                     barrierDismissible: false,
                     builder: (ctx) => _ProgressDialog(viewModel: viewModel),
                   );
@@ -875,11 +919,13 @@ class _ContentAreaState extends State<ContentArea> {
                     password: password,
                   );
 
-                  // Close progress dialog
-                  if (context.mounted) Navigator.of(context).pop();
+                  // Close progress dialog using root navigator
+                  if (mounted) {
+                    Navigator.of(stateContext, rootNavigator: true).pop();
+                  }
 
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                  if (mounted) {
+                    ScaffoldMessenger.of(stateContext).showSnackBar(
                       SnackBar(
                         content: Text(
                           success

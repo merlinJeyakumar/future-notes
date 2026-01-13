@@ -21,6 +21,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   late final ContentViewModel _viewModel;
+  bool _isSidebarVisible = true;
 
   @override
   void initState() {
@@ -616,7 +617,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   children: [
                     Row(
                       children: [
-                        if (isDesktop)
+                        if (isDesktop && _isSidebarVisible)
                           Sidebar(
                             recentFiles: _viewModel.recentFiles,
                             onFileSelected: (path) => _viewModel.loadNote(path),
@@ -629,7 +630,55 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             onSearchChanged: _viewModel.setSearchQuery,
                             onExportPack: _handleExportPack,
                           ),
-                        Expanded(child: ContentArea(viewModel: _viewModel)),
+                        Expanded(
+                          child: Stack(
+                            children: [
+                              ContentArea(viewModel: _viewModel),
+                              // Sidebar toggle button (desktop only)
+                              if (isDesktop)
+                                Positioned(
+                                  left: 0,
+                                  top: 0,
+                                  bottom: 0,
+                                  child: Center(
+                                    child: MouseRegion(
+                                      cursor: SystemMouseCursors.click,
+                                      child: GestureDetector(
+                                        onTap: () => setState(
+                                          () => _isSidebarVisible =
+                                              !_isSidebarVisible,
+                                        ),
+                                        child: Container(
+                                          width: 24,
+                                          height: 48,
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF1E293B),
+                                            borderRadius:
+                                                const BorderRadius.only(
+                                                  topRight: Radius.circular(8),
+                                                  bottomRight: Radius.circular(
+                                                    8,
+                                                  ),
+                                                ),
+                                            border: Border.all(
+                                              color: const Color(0xFF334155),
+                                            ),
+                                          ),
+                                          child: Icon(
+                                            _isSidebarVisible
+                                                ? Icons.chevron_left
+                                                : Icons.chevron_right,
+                                            color: Colors.white70,
+                                            size: 20,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                     if (_viewModel.isBusy)

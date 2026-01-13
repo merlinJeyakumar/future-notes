@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/note_model.dart';
+import '../../../core/theme/app_theme.dart';
 
 class FileDetailsDialog extends StatelessWidget {
   final RecentFile file;
@@ -19,11 +20,12 @@ class FileDetailsDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return AlertDialog(
-      backgroundColor: const Color(0xFF161E2D),
+      backgroundColor: theme.appSurface,
       title: Text(
         file.title,
-        style: const TextStyle(color: Colors.white),
+        style: TextStyle(color: theme.appTextPrimary),
         overflow: TextOverflow.ellipsis,
       ),
       content: Column(
@@ -33,29 +35,33 @@ class FileDetailsDialog extends StatelessWidget {
           _buildCopiableDetailRow(context, "File Name:", file.path),
           _buildCopiableDetailRow(context, "File Path:", file.fullPath),
           _buildDetailRow(
+            context,
             "Created:",
             file.created?.toString().split('.').first ?? "Unknown",
           ),
           _buildDetailRow(
+            context,
             "Modified:",
             file.modified?.toString().split('.').first ?? "Unknown",
           ),
-          _buildDetailRow("Locked:", file.isLocked ? "Yes" : "No"),
+          _buildDetailRow(context, "Locked:", file.isLocked ? "Yes" : "No"),
           _buildDetailRow(
+            context,
             "Encrypted:",
             file.isLocked ? "User Encrypted" : "AES-256 (App Key)",
           ),
           _buildDetailRow(
+            context,
             "Size:",
             file.sizeBytes != null ? "${file.sizeBytes} B" : "Unknown",
           ),
           const SizedBox(height: 20),
-          Divider(color: Colors.grey[700]),
+          Divider(color: theme.appDivider),
           ListTile(
-            leading: const Icon(Icons.folder_open, color: Colors.blueAccent),
-            title: const Text(
+            leading: Icon(Icons.folder_open, color: theme.colorScheme.primary),
+            title: Text(
               "Show Folder",
-              style: TextStyle(color: Colors.white),
+              style: TextStyle(color: theme.appTextPrimary),
             ),
             onTap: () {
               if (Platform.isAndroid || Platform.isIOS) {
@@ -69,14 +75,14 @@ class FileDetailsDialog extends StatelessWidget {
           ),
           // Export Note Package - available on all platforms
           ListTile(
-            leading: const Icon(Icons.share, color: Colors.greenAccent),
-            title: const Text(
+            leading: Icon(Icons.share, color: theme.appAccent),
+            title: Text(
               "Export Note Package",
-              style: TextStyle(color: Colors.white),
+              style: TextStyle(color: theme.appTextPrimary),
             ),
-            subtitle: const Text(
+            subtitle: Text(
               "Export with attachments",
-              style: TextStyle(color: Colors.grey, fontSize: 11),
+              style: TextStyle(color: theme.appTextSecondary, fontSize: 11),
             ),
             onTap: () {
               Navigator.pop(context);
@@ -101,13 +107,17 @@ class FileDetailsDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text("Close"),
+          child: Text(
+            "Close",
+            style: TextStyle(color: theme.colorScheme.primary),
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildDetailRow(String label, String value) {
+  Widget _buildDetailRow(BuildContext context, String label, String value) {
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
@@ -117,14 +127,14 @@ class FileDetailsDialog extends StatelessWidget {
             width: 80,
             child: Text(
               label,
-              style: const TextStyle(
-                color: Colors.grey,
+              style: TextStyle(
+                color: theme.appSubtleGray,
                 fontWeight: FontWeight.w500,
               ),
             ),
           ),
           Expanded(
-            child: Text(value, style: const TextStyle(color: Colors.white70)),
+            child: Text(value, style: TextStyle(color: theme.appTextSecondary)),
           ),
         ],
       ),
@@ -136,6 +146,7 @@ class FileDetailsDialog extends StatelessWidget {
     String label,
     String value,
   ) {
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
@@ -145,8 +156,8 @@ class FileDetailsDialog extends StatelessWidget {
             width: 80,
             child: Text(
               label,
-              style: const TextStyle(
-                color: Colors.grey,
+              style: TextStyle(
+                color: theme.appSubtleGray,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -154,7 +165,7 @@ class FileDetailsDialog extends StatelessWidget {
           Expanded(
             child: SelectableText(
               value,
-              style: const TextStyle(color: Colors.white70),
+              style: TextStyle(color: theme.appTextSecondary),
             ),
           ),
           InkWell(
@@ -164,9 +175,9 @@ class FileDetailsDialog extends StatelessWidget {
                 const SnackBar(content: Text('Copied to clipboard!')),
               );
             },
-            child: const Padding(
-              padding: EdgeInsets.only(left: 8.0),
-              child: Icon(Icons.copy, size: 16, color: Colors.blueGrey),
+            child: Padding(
+              padding: const EdgeInsets.only(left: 8.0),
+              child: Icon(Icons.copy, size: 16, color: theme.appSubtleGray),
             ),
           ),
         ],
@@ -185,41 +196,42 @@ class FileDetailsDialog extends StatelessWidget {
     showDialog(
       context: context,
       builder: (context) {
+        final theme = Theme.of(context);
         return AlertDialog(
-          backgroundColor: const Color(0xFF161E2D),
-          title: const Text(
+          backgroundColor: theme.appSurface,
+          title: Text(
             "Folder Location",
-            style: TextStyle(color: Colors.white),
+            style: TextStyle(color: theme.appTextPrimary),
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 "File is located at:",
-                style: TextStyle(color: Colors.white70),
+                style: TextStyle(color: theme.appTextSecondary),
               ),
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1E293B),
+                  color: theme.appBackground,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF334155)),
+                  border: Border.all(color: theme.appBorder),
                 ),
                 child: Row(
                   children: [
                     Expanded(
                       child: SelectableText(
                         folderPath,
-                        style: const TextStyle(
-                          color: Colors.white,
+                        style: TextStyle(
+                          color: theme.appTextPrimary,
                           fontFamily: 'monospace',
                         ),
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.copy, color: Colors.blueAccent),
+                      icon: Icon(Icons.copy, color: theme.colorScheme.primary),
                       onPressed: () {
                         Clipboard.setData(ClipboardData(text: folderPath));
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -238,7 +250,10 @@ class FileDetailsDialog extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text("Close"),
+              child: Text(
+                "Close",
+                style: TextStyle(color: theme.colorScheme.primary),
+              ),
             ),
           ],
         );
@@ -250,19 +265,23 @@ class FileDetailsDialog extends StatelessWidget {
     showDialog(
       context: context,
       builder: (context) {
+        final theme = Theme.of(context);
         return AlertDialog(
-          backgroundColor: const Color(0xFF161E2D),
-          title: const Text(
+          backgroundColor: theme.appSurface,
+          title: Text(
             "Delete File?",
-            style: TextStyle(color: Colors.white),
+            style: TextStyle(color: theme.appTextPrimary),
           ),
           content: Text(
             "Are you sure you want to delete '${file.title}'? This cannot be undone.",
-            style: const TextStyle(color: Colors.white70),
+            style: TextStyle(color: theme.appTextSecondary),
           ),
           actions: [
             TextButton(
-              child: const Text("Cancel"),
+              child: Text(
+                "Cancel",
+                style: TextStyle(color: theme.appTextSecondary),
+              ),
               onPressed: () => Navigator.pop(context),
             ),
             TextButton(

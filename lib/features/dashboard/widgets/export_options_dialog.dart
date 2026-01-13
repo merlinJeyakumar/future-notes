@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/pack_service.dart';
+import '../../../core/theme/app_theme.dart';
 
 /// Dialog result containing export options
 class ExportOptions {
@@ -62,21 +63,22 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return AlertDialog(
-      backgroundColor: const Color(0xFF161E2D),
-      title: const Text(
+      backgroundColor: theme.appSurface,
+      title: Text(
         'Export Options',
-        style: TextStyle(color: Colors.white),
+        style: TextStyle(color: theme.appTextPrimary),
       ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Format',
               style: TextStyle(
-                color: Colors.grey,
+                color: theme.appSubtleGray,
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),
@@ -96,16 +98,16 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
               icon: Icons.folder_zip,
             ),
             const SizedBox(height: 20),
-            const Divider(color: Colors.grey),
+            Divider(color: theme.appDivider),
             const SizedBox(height: 12),
             SwitchListTile(
-              title: const Text(
+              title: Text(
                 'Password Protection',
-                style: TextStyle(color: Colors.white),
+                style: TextStyle(color: theme.appTextPrimary),
               ),
-              subtitle: const Text(
+              subtitle: Text(
                 'Encrypt the export with a password',
-                style: TextStyle(color: Colors.grey, fontSize: 12),
+                style: TextStyle(color: theme.appSubtleGray, fontSize: 12),
               ),
               value: _usePassword,
               onChanged: (value) {
@@ -114,7 +116,7 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
                   _passwordError = null;
                 });
               },
-              activeColor: Colors.blueAccent,
+              activeColor: theme.colorScheme.primary,
               contentPadding: EdgeInsets.zero,
             ),
             if (_usePassword) ...[
@@ -122,23 +124,23 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
               TextField(
                 controller: _passwordController,
                 obscureText: true,
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: theme.appTextPrimary),
                 decoration: InputDecoration(
                   labelText: 'Password',
-                  labelStyle: const TextStyle(color: Colors.grey),
+                  labelStyle: TextStyle(color: theme.appSubtleGray),
                   filled: true,
-                  fillColor: const Color(0xFF1E293B),
+                  fillColor: theme.appBackground,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFF334155)),
+                    borderSide: BorderSide(color: theme.appBorder),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFF334155)),
+                    borderSide: BorderSide(color: theme.appBorder),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Colors.blueAccent),
+                    borderSide: BorderSide(color: theme.colorScheme.primary),
                   ),
                 ),
                 onChanged: (_) => setState(() => _passwordError = null),
@@ -147,23 +149,23 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
               TextField(
                 controller: _confirmPasswordController,
                 obscureText: true,
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: theme.appTextPrimary),
                 decoration: InputDecoration(
                   labelText: 'Confirm Password',
-                  labelStyle: const TextStyle(color: Colors.grey),
+                  labelStyle: TextStyle(color: theme.appSubtleGray),
                   filled: true,
-                  fillColor: const Color(0xFF1E293B),
+                  fillColor: theme.appBackground,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFF334155)),
+                    borderSide: BorderSide(color: theme.appBorder),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFF334155)),
+                    borderSide: BorderSide(color: theme.appBorder),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Colors.blueAccent),
+                    borderSide: BorderSide(color: theme.colorScheme.primary),
                   ),
                   errorText: _passwordError,
                   errorStyle: const TextStyle(color: Colors.redAccent),
@@ -176,21 +178,24 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1E3A5F),
+                  color: theme.colorScheme.primary.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
                     Icon(
                       Icons.info_outline,
-                      color: Colors.blueAccent,
+                      color: theme.colorScheme.primary,
                       size: 20,
                     ),
-                    SizedBox(width: 8),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'This note has attachments. They will be included in the export.',
-                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                        style: TextStyle(
+                          color: theme.appTextSecondary,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                   ],
@@ -203,7 +208,10 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
+          child: Text(
+            'Cancel',
+            style: TextStyle(color: theme.appTextSecondary),
+          ),
         ),
         FilledButton(onPressed: _export, child: const Text('Export')),
       ],
@@ -216,6 +224,7 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
     required String subtitle,
     required IconData icon,
   }) {
+    final theme = Theme.of(context);
     final isSelected = _selectedFormat == format;
     return InkWell(
       onTap: () => setState(() => _selectedFormat = format),
@@ -223,10 +232,12 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF1E3A5F) : const Color(0xFF1E293B),
+          color: isSelected
+              ? theme.colorScheme.primary.withOpacity(0.15)
+              : theme.appBackground,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: isSelected ? Colors.blueAccent : const Color(0xFF334155),
+            color: isSelected ? theme.colorScheme.primary : theme.appBorder,
           ),
         ),
         child: Row(
@@ -235,9 +246,9 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
               value: format,
               groupValue: _selectedFormat,
               onChanged: (value) => setState(() => _selectedFormat = value!),
-              activeColor: Colors.blueAccent,
+              activeColor: theme.colorScheme.primary,
             ),
-            Icon(icon, color: Colors.white70, size: 24),
+            Icon(icon, color: theme.appTextSecondary, size: 24),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -245,14 +256,14 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: theme.appTextPrimary,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
                   Text(
                     subtitle,
-                    style: const TextStyle(color: Colors.grey, fontSize: 12),
+                    style: TextStyle(color: theme.appSubtleGray, fontSize: 12),
                   ),
                 ],
               ),

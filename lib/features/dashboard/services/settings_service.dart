@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 enum CompressionLevel {
@@ -22,6 +23,20 @@ class SettingsService {
   String? _customDataPath;
 
   String? get customDataPath => _customDataPath;
+
+  // Theme mode with reactive notifier
+  ThemeMode _themeMode = ThemeMode.dark;
+  final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(
+    ThemeMode.dark,
+  );
+
+  ThemeMode get themeMode => _themeMode;
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    _themeMode = mode;
+    themeModeNotifier.value = mode;
+    await _saveSettings();
+  }
 
   Future<void> init() async {
     await _loadSettings();
@@ -90,6 +105,13 @@ class SettingsService {
         if (json.containsKey('customDataPath')) {
           _customDataPath = json['customDataPath'];
         }
+        if (json.containsKey('themeMode')) {
+          final index = json['themeMode'] as int;
+          if (index >= 0 && index < ThemeMode.values.length) {
+            _themeMode = ThemeMode.values[index];
+            themeModeNotifier.value = _themeMode;
+          }
+        }
       }
     } catch (e) {
       print("Error loading settings: $e");
@@ -108,6 +130,7 @@ class SettingsService {
       final json = {
         'compressionLevel': _compressionLevel.index,
         'customDataPath': _customDataPath,
+        'themeMode': _themeMode.index,
       };
 
       await file.writeAsString(jsonEncode(json));

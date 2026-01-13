@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/note_model.dart';
 import 'file_details_dialog.dart';
+import '../../../core/theme/app_theme.dart';
 
 class Sidebar extends StatelessWidget {
   final List<RecentFile> recentFiles;
@@ -13,7 +14,7 @@ class Sidebar extends StatelessWidget {
   final VoidCallback onNewNote;
   final VoidCallback? onImportNote;
   final VoidCallback? onSettings;
-  final VoidCallback? onRefresh; // Added callback
+  final VoidCallback? onRefresh;
   final Function(String)? onSearchChanged;
   final Function(RecentFile)? onExportPack;
 
@@ -33,9 +34,11 @@ class Sidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Container(
       width: 280,
-      color: const Color(0xFF161E2D),
+      color: theme.appSidebar,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -44,12 +47,12 @@ class Sidebar extends StatelessWidget {
             padding: const EdgeInsets.all(20.0),
             child: Row(
               children: [
-                const Icon(Icons.inbox, color: Colors.blueAccent, size: 32),
+                Icon(Icons.inbox, color: theme.colorScheme.primary, size: 32),
                 const SizedBox(width: 12),
-                const Text(
+                Text(
                   'Notes',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: theme.appTextPrimary,
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                   ),
@@ -71,7 +74,7 @@ class Sidebar extends StatelessWidget {
                       icon: const Icon(Icons.add),
                       label: const Text('New Note'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueAccent,
+                        backgroundColor: theme.colorScheme.primary,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
@@ -84,13 +87,16 @@ class Sidebar extends StatelessWidget {
                     const SizedBox(width: 8),
                     Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1E293B),
+                        color: theme.appSurfaceVariant,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFF334155)),
+                        border: Border.all(color: theme.appBorder),
                       ),
                       child: IconButton(
                         onPressed: onSettings,
-                        icon: const Icon(Icons.settings, color: Colors.white70),
+                        icon: Icon(
+                          Icons.settings,
+                          color: theme.appTextSecondary,
+                        ),
                         tooltip: 'Settings',
                         splashRadius: 24,
                         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -101,7 +107,7 @@ class Sidebar extends StatelessWidget {
               ),
             ),
           ),
-          // Import Note button - available on all platforms
+          // Import Note button
           Padding(
             padding: const EdgeInsets.fromLTRB(16.0, 8.0, 16.0, 0),
             child: SizedBox(
@@ -111,8 +117,8 @@ class Sidebar extends StatelessWidget {
                 icon: const Icon(Icons.file_upload),
                 label: const Text('Import Note'),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white70,
-                  side: const BorderSide(color: Colors.white24),
+                  foregroundColor: theme.appTextSecondary,
+                  side: BorderSide(color: theme.appBorder),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -130,42 +136,45 @@ class Sidebar extends StatelessWidget {
             child: TextField(
               decoration: InputDecoration(
                 filled: true,
-                fillColor: const Color(0xFF1E293B),
+                fillColor: theme.appSurfaceVariant,
                 hintText: 'Search...',
-                hintStyle: const TextStyle(color: Colors.grey),
-                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                hintStyle: TextStyle(color: theme.appSubtleGray),
+                prefixIcon: Icon(Icons.search, color: theme.appSubtleGray),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF334155)),
+                  borderSide: BorderSide(color: theme.appBorder),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF334155)),
+                  borderSide: BorderSide(color: theme.appBorder),
                 ),
               ),
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: theme.appTextPrimary),
               onChanged: onSearchChanged,
             ),
           ),
 
           const SizedBox(height: 24),
 
-          _buildSectionHeader('FILES'),
+          _buildSectionHeader(context, 'FILES'),
           Expanded(
             child: recentFiles.isEmpty
                 ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.search_off,
-                          color: Colors.white24,
+                          color: theme.appSubtleGray.withOpacity(0.5),
                           size: 48,
                         ),
                         const SizedBox(height: 16),
-                        const Text(
+                        Text(
                           'No files found',
-                          style: TextStyle(color: Colors.white24, fontSize: 14),
+                          style: TextStyle(
+                            color: theme.appSubtleGray.withOpacity(0.5),
+                            fontSize: 14,
+                          ),
                         ),
                       ],
                     ),
@@ -175,9 +184,9 @@ class Sidebar extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final file = recentFiles[index];
                       return ListTile(
-                        leading: const Icon(
+                        leading: Icon(
                           Icons.description,
-                          color: Colors.white70,
+                          color: theme.appTextSecondary,
                           size: 20,
                         ),
                         title: Row(
@@ -185,7 +194,7 @@ class Sidebar extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 file.title,
-                                style: const TextStyle(color: Colors.white70),
+                                style: TextStyle(color: theme.appTextSecondary),
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
@@ -206,9 +215,9 @@ class Sidebar extends StatelessWidget {
                         ),
                         dense: true,
                         trailing: IconButton(
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.more_vert,
-                            color: Colors.white70,
+                            color: theme.appTextSecondary,
                             size: 20,
                           ),
                           onPressed: () => _showFileDetails(context, file),
@@ -222,7 +231,8 @@ class Sidebar extends StatelessWidget {
     );
   }
 
-  Widget _buildSectionHeader(String title) {
+  Widget _buildSectionHeader(BuildContext context, String title) {
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
       child: Row(
@@ -230,8 +240,8 @@ class Sidebar extends StatelessWidget {
         children: [
           Text(
             title,
-            style: const TextStyle(
-              color: Colors.grey,
+            style: TextStyle(
+              color: theme.appSubtleGray,
               fontSize: 12,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.2,
@@ -243,7 +253,7 @@ class Sidebar extends StatelessWidget {
               width: 24,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: const Icon(Icons.refresh, color: Colors.grey, size: 16),
+                icon: Icon(Icons.refresh, color: theme.appSubtleGray, size: 16),
                 onPressed: onRefresh,
                 tooltip: 'Refresh',
               ),

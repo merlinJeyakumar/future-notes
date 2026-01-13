@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 
 class ImportConfirmationDialog extends StatelessWidget {
   final String fileName;
@@ -14,36 +15,44 @@ class ImportConfirmationDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return AlertDialog(
-      title: const Text("Import File"),
+      backgroundColor: theme.appSurface,
+      title: Text("Import File", style: TextStyle(color: theme.appTextPrimary)),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("File: $fileName"),
+          Text(
+            "File: $fileName",
+            style: TextStyle(color: theme.appTextSecondary),
+          ),
           const SizedBox(height: 8),
           Text(
             "Type: $fileType",
-            style: const TextStyle(fontWeight: FontWeight.bold),
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: theme.appTextPrimary,
+            ),
           ),
           if (previewInfo != null) ...[
             const SizedBox(height: 12),
-            const Text(
+            Text(
               "Preview Details:",
-              style: TextStyle(color: Colors.grey),
+              style: TextStyle(color: theme.appSubtleGray),
             ),
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.grey[200],
+                color: theme.appSurfaceVariant,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
                 previewInfo!,
-                style: const TextStyle(
+                style: TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 12,
-                  color: Colors.black87,
+                  color: theme.appTextSecondary,
                 ),
                 maxLines: 5,
                 overflow: TextOverflow.ellipsis,
@@ -55,7 +64,10 @@ class ImportConfirmationDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
-          child: const Text("Cancel"),
+          child: Text(
+            "Cancel",
+            style: TextStyle(color: theme.appTextSecondary),
+          ),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(context, true),

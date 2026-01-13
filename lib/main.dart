@@ -1,28 +1,65 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'features/dashboard/views/dashboard_screen.dart';
+import 'features/dashboard/services/settings_service.dart';
+import 'core/theme/app_theme.dart';
 
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SettingsService().init();
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    // Ensure status bar icons are light (white) for the dark theme
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final _settings = SettingsService();
+
+  @override
+  void initState() {
+    super.initState();
+    _settings.themeModeNotifier.addListener(_onThemeChanged);
+  }
+
+  @override
+  void dispose() {
+    _settings.themeModeNotifier.removeListener(_onThemeChanged);
+    super.dispose();
+  }
+
+  void _onThemeChanged() {
+    setState(() {});
+    _updateSystemUI();
+  }
+
+  void _updateSystemUI() {
+    final isDark =
+        _settings.themeMode == ThemeMode.dark ||
+        (_settings.themeMode == ThemeMode.system &&
+            WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+                Brightness.dark);
+
     SystemChrome.setSystemUIOverlayStyle(
-      const SystemUiOverlayStyle(
-        statusBarColor:
-            Colors.transparent, // Transparent to let app bar/color show through
-        statusBarIconBrightness: Brightness.light, // White icons
-        statusBarBrightness: Brightness.dark, // For iOS
+      SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+        statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
       ),
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Update system UI on build
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateSystemUI());
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -34,10 +71,9 @@ class MyApp extends StatelessWidget {
         FlutterQuillLocalizations.delegate,
       ],
       supportedLocales: FlutterQuillLocalizations.supportedLocales,
-      theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF1B2535),
-        colorScheme: const ColorScheme.dark(primary: Colors.blueAccent),
-      ),
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: _settings.themeMode,
       home: const DashboardScreen(),
     );
   }

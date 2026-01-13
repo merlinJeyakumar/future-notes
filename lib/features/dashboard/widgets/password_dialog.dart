@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 
 enum PasswordMode { unlock, set, update }
 
@@ -129,16 +130,17 @@ class _PasswordDialogState extends State<PasswordDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return AlertDialog(
-      backgroundColor: const Color(0xFF1E293B),
+      backgroundColor: theme.appSurface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: Color(0xFF334155)),
+        side: BorderSide(color: theme.appBorder),
       ),
       title: Text(
         _title,
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: theme.appTextPrimary,
           fontWeight: FontWeight.bold,
         ),
       ),
@@ -148,7 +150,7 @@ class _PasswordDialogState extends State<PasswordDialog> {
           children: [
             Text(
               _description,
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
+              style: TextStyle(color: theme.appTextSecondary, fontSize: 13),
             ),
             const SizedBox(height: 16),
             if (_errorText != null)
@@ -192,12 +194,15 @@ class _PasswordDialogState extends State<PasswordDialog> {
       actions: [
         TextButton(
           onPressed: _isVerifying ? null : () => Navigator.pop(context),
-          child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          child: Text(
+            'Cancel',
+            style: TextStyle(color: theme.appTextSecondary),
+          ),
         ),
         ElevatedButton(
           onPressed: _isVerifying ? null : _submit,
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.blueAccent,
+            backgroundColor: theme.colorScheme.primary,
             foregroundColor: Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
@@ -224,6 +229,7 @@ class _PasswordDialogState extends State<PasswordDialog> {
     bool autofocus = false,
     bool isLast = false,
   }) {
+    final theme = Theme.of(context);
     return TextField(
       controller: controller,
       obscureText: _obscureText,
@@ -233,25 +239,25 @@ class _PasswordDialogState extends State<PasswordDialog> {
           ? TextInputAction.done
           : TextInputAction.next,
       onSubmitted: (_) => _submit(),
-      style: const TextStyle(color: Colors.white),
+      style: TextStyle(color: theme.appTextPrimary),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: const TextStyle(color: Colors.blueAccent),
+        labelStyle: TextStyle(color: theme.colorScheme.primary),
         filled: true,
-        fillColor: const Color(0xFF0F172A),
+        fillColor: theme.appBackground,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.blueAccent, width: 2),
+          borderSide: BorderSide(color: theme.colorScheme.primary, width: 2),
         ),
-        prefixIcon: const Icon(Icons.lock_outline, color: Colors.blueAccent),
+        prefixIcon: Icon(Icons.lock_outline, color: theme.colorScheme.primary),
         suffixIcon: IconButton(
           icon: Icon(
             _obscureText ? Icons.visibility : Icons.visibility_off,
-            color: Colors.blueAccent,
+            color: theme.colorScheme.primary,
           ),
           tooltip: _obscureText ? 'Show password' : 'Hide password',
           onPressed: () {

@@ -5,20 +5,24 @@ import 'dart:typed_data';
 import '../viewmodels/content_viewmodel.dart';
 import '../models/note_model.dart';
 import 'password_dialog.dart';
+import '../../../core/theme/app_theme.dart';
 
 import 'package:code_text_field/code_text_field.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
 
-// Anti-Gravity Design System Colors
-class _DesignColors {
-  static const background = Color(0xFF1A202C); // Deep Charcoal
-  static const toolbarIsland = Color(0xFF2D3748); // Slate
-  static const accent = Color(0xFF4299E1); // Electric Blue
-  static const saveButton = Color(0xFF48BB78); // Modern Green
-  static const subtleGray = Color(0xFF718096);
-  static const divider = Color(0xFF4A5568);
-  static const textPrimary = Color(0xFFE2E8F0);
-  static const textSecondary = Color(0xFFA0AEC0);
+// Theme-aware design colors helper
+class _ContentColors {
+  final ThemeData theme;
+  _ContentColors(this.theme);
+
+  Color get background => theme.appBackground;
+  Color get toolbarIsland => theme.appSurface;
+  Color get accent => theme.colorScheme.primary;
+  Color get saveButton => theme.appAccent;
+  Color get subtleGray => theme.appSubtleGray;
+  Color get divider => theme.appDivider;
+  Color get textPrimary => theme.appTextPrimary;
+  Color get textSecondary => theme.appTextSecondary;
 }
 
 class ContentArea extends StatefulWidget {
@@ -37,6 +41,9 @@ class _ContentAreaState extends State<ContentArea> {
   late final ScrollController _scrollController;
 
   ContentViewModel get viewModel => widget.viewModel;
+
+  // Theme-aware colors - computed from context in build
+  late _ContentColors colors;
 
   @override
   void initState() {
@@ -64,6 +71,8 @@ class _ContentAreaState extends State<ContentArea> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    colors = _ContentColors(theme);
     return LayoutBuilder(
       builder: (context, constraints) {
         // Use a higher breakpoint to trigger "Mobile/Compact" mode earlier,
@@ -71,7 +80,7 @@ class _ContentAreaState extends State<ContentArea> {
         final isMobile = constraints.maxWidth < 900;
 
         return Container(
-          color: _DesignColors.background,
+          color: colors.background,
           child: SafeArea(
             // Ensure status bar doesn't overlap
             child: Column(
@@ -155,13 +164,13 @@ class _ContentAreaState extends State<ContentArea> {
     return Row(
       // mainAxisSize.min removed to allow Expanded child to work naturally
       children: [
-        Icon(Icons.edit_note_rounded, size: 18, color: _DesignColors.accent),
+        Icon(Icons.edit_note_rounded, size: 18, color: colors.accent),
         const SizedBox(width: 8),
         if (!isMobile) ...[
-          const Text(
+          Text(
             'Editing',
             style: TextStyle(
-              color: _DesignColors.subtleGray,
+              color: colors.subtleGray,
               fontSize: 13,
               fontWeight: FontWeight.w500,
             ),
@@ -170,7 +179,7 @@ class _ContentAreaState extends State<ContentArea> {
           Icon(
             Icons.chevron_right_rounded,
             size: 16,
-            color: _DesignColors.subtleGray.withOpacity(0.6),
+            color: colors.subtleGray.withOpacity(0.6),
           ),
           const SizedBox(width: 6),
         ],
@@ -178,15 +187,15 @@ class _ContentAreaState extends State<ContentArea> {
         Expanded(
           child: TextField(
             controller: viewModel.titleController,
-            style: const TextStyle(
-              color: _DesignColors.textPrimary,
+            style: TextStyle(
+              color: colors.textPrimary,
               fontWeight: FontWeight.w600,
               fontSize: 14,
             ),
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               hintText: 'Untitled note',
               hintStyle: TextStyle(
-                color: _DesignColors.subtleGray,
+                color: colors.subtleGray,
                 fontWeight: FontWeight.w400,
               ),
               border: InputBorder.none,
@@ -246,9 +255,7 @@ class _ContentAreaState extends State<ContentArea> {
             child: Icon(
               icon,
               size: 18,
-              color:
-                  color ??
-                  (isActive ? _DesignColors.accent : _DesignColors.subtleGray),
+              color: color ?? (isActive ? colors.accent : colors.subtleGray),
             ),
           ),
         ),
@@ -261,9 +268,9 @@ class _ContentAreaState extends State<ContentArea> {
     return ElevatedButton(
       onPressed: viewModel.isBusy ? null : () => viewModel.saveNote(),
       style: ElevatedButton.styleFrom(
-        backgroundColor: _DesignColors.saveButton,
+        backgroundColor: colors.saveButton,
         foregroundColor: Colors.white,
-        disabledBackgroundColor: _DesignColors.saveButton.withOpacity(0.5),
+        disabledBackgroundColor: colors.saveButton.withOpacity(0.5),
         shape: isMobile ? const CircleBorder() : const StadiumBorder(),
         padding: isMobile
             ? const EdgeInsets.all(12)
@@ -280,8 +287,8 @@ class _ContentAreaState extends State<ContentArea> {
               ),
             )
           : (isMobile
-                ? const Icon(Icons.save_rounded, size: 18)
-                : const Text(
+                ? Icon(Icons.save_rounded, size: 18)
+                : Text(
                     'Save Note',
                     style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                   )),
@@ -293,12 +300,9 @@ class _ContentAreaState extends State<ContentArea> {
     return Container(
       margin: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 20, vertical: 8),
       decoration: BoxDecoration(
-        color: _DesignColors.toolbarIsland,
+        color: colors.toolbarIsland,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _DesignColors.divider.withOpacity(0.3),
-          width: 1,
-        ),
+        border: Border.all(color: colors.divider.withOpacity(0.3), width: 1),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.15),
@@ -330,7 +334,7 @@ class _ContentAreaState extends State<ContentArea> {
                         children: [
                           _buildToolbarRow1(),
                           Divider(
-                            color: _DesignColors.divider.withOpacity(0.3),
+                            color: colors.divider.withOpacity(0.3),
                             height: 1,
                           ),
                           _buildToolbarRow2(),
@@ -371,10 +375,7 @@ class _ContentAreaState extends State<ContentArea> {
           QuillToolbarFontSizeButton(
             controller: viewModel.quillController,
             options: QuillToolbarFontSizeButtonOptions(
-              style: TextStyle(
-                color: _DesignColors.textSecondary,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: colors.textSecondary, fontSize: 12),
             ),
           ),
           _buildVerticalDivider(),
@@ -466,7 +467,7 @@ class _ContentAreaState extends State<ContentArea> {
           QuillToolbarSelectHeaderStyleDropdownButton(
             controller: viewModel.quillController,
             options: QuillToolbarSelectHeaderStyleDropdownButtonOptions(
-              textStyle: TextStyle(color: _DesignColors.textSecondary),
+              textStyle: TextStyle(color: colors.textSecondary),
             ),
           ),
         ],
@@ -549,9 +550,9 @@ class _ContentAreaState extends State<ContentArea> {
     final isHtml = viewModel.isHtmlMode;
     return Container(
       decoration: BoxDecoration(
-        color: _DesignColors.accent.withOpacity(0.1),
+        color: colors.accent.withOpacity(0.1),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _DesignColors.accent.withOpacity(0.5)),
+        border: Border.all(color: colors.accent.withOpacity(0.5)),
       ),
       child: Material(
         color: Colors.transparent,
@@ -568,13 +569,13 @@ class _ContentAreaState extends State<ContentArea> {
                 Icon(
                   isHtml ? Icons.auto_awesome_rounded : Icons.code_rounded,
                   size: 14,
-                  color: _DesignColors.accent,
+                  color: colors.accent,
                 ),
                 const SizedBox(width: 6),
                 Text(
                   isHtml ? 'Rich Text' : 'HTML',
-                  style: const TextStyle(
-                    color: _DesignColors.accent,
+                  style: TextStyle(
+                    color: colors.accent,
                     fontWeight: FontWeight.w600,
                     fontSize: 12,
                   ),
@@ -592,7 +593,7 @@ class _ContentAreaState extends State<ContentArea> {
       height: 20,
       width: 1,
       margin: const EdgeInsets.symmetric(horizontal: 4),
-      color: _DesignColors.divider.withOpacity(0.4),
+      color: colors.divider.withOpacity(0.4),
     );
   }
 
@@ -607,15 +608,15 @@ class _ContentAreaState extends State<ContentArea> {
   QuillIconTheme _getIconTheme() {
     return QuillIconTheme(
       iconButtonUnselectedData: IconButtonData(
-        color: _DesignColors.textSecondary,
+        color: colors.textSecondary,
         iconSize: 18,
       ),
       iconButtonSelectedData: IconButtonData(
-        color: _DesignColors.accent,
+        color: colors.accent,
         iconSize: 18,
         style: ButtonStyle(
           backgroundColor: WidgetStateProperty.all(
-            _DesignColors.accent.withOpacity(0.15),
+            colors.accent.withOpacity(0.15),
           ),
         ),
       ),
@@ -676,20 +677,20 @@ class _ContentAreaState extends State<ContentArea> {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: _DesignColors.toolbarIsland.withOpacity(0.5),
+                color: colors.toolbarIsland.withOpacity(0.5),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.lock_rounded,
                 size: 48,
-                color: _DesignColors.subtleGray,
+                color: colors.subtleGray,
               ),
             ),
             const SizedBox(height: 20),
-            const Text(
+            Text(
               'This note is locked',
               style: TextStyle(
-                color: _DesignColors.textSecondary,
+                color: colors.textSecondary,
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
               ),
@@ -706,7 +707,7 @@ class _ContentAreaState extends State<ContentArea> {
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: _DesignColors.accent,
+                backgroundColor: colors.accent,
                 foregroundColor: Colors.white,
                 shape: const StadiumBorder(),
                 padding: const EdgeInsets.symmetric(
@@ -714,7 +715,7 @@ class _ContentAreaState extends State<ContentArea> {
                   vertical: 14,
                 ),
               ),
-              child: const Text(
+              child: Text(
                 'Unlock',
                 style: TextStyle(fontWeight: FontWeight.w600),
               ),
@@ -732,10 +733,7 @@ class _ContentAreaState extends State<ContentArea> {
               data: CodeThemeData(styles: atomOneDarkTheme),
               child: CodeField(
                 controller: viewModel.htmlController,
-                textStyle: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 14,
-                ),
+                textStyle: TextStyle(fontFamily: 'monospace', fontSize: 14),
                 expands: true,
                 decoration: const BoxDecoration(), // Remove default border
               ),
@@ -755,29 +753,26 @@ class _ContentAreaState extends State<ContentArea> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: _DesignColors.toolbarIsland,
+        backgroundColor: colors.toolbarIsland,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'File Settings',
-              style: TextStyle(color: _DesignColors.textPrimary, fontSize: 18),
+              style: TextStyle(color: colors.textPrimary, fontSize: 18),
             ),
             if (viewModel.currentFileName != null)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
                   viewModel.currentFileName!,
-                  style: const TextStyle(
-                    color: _DesignColors.textSecondary,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: colors.textSecondary, fontSize: 12),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-            const Divider(color: _DesignColors.divider),
+            Divider(color: colors.divider),
           ],
         ),
         content: Column(
@@ -939,7 +934,7 @@ class _ContentAreaState extends State<ContentArea> {
 
             // Spacer and Divider before Delete
             const SizedBox(height: 16),
-            const Divider(color: _DesignColors.divider),
+            Divider(color: colors.divider),
 
             // Delete File
             _buildSettingsTile(
@@ -957,10 +952,7 @@ class _ContentAreaState extends State<ContentArea> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Close',
-              style: TextStyle(color: _DesignColors.subtleGray),
-            ),
+            child: Text('Close', style: TextStyle(color: colors.subtleGray)),
           ),
         ],
       ),
@@ -975,10 +967,10 @@ class _ContentAreaState extends State<ContentArea> {
     Color? iconColor,
   }) {
     return ListTile(
-      leading: Icon(icon, color: iconColor ?? _DesignColors.textPrimary),
+      leading: Icon(icon, color: iconColor ?? colors.textPrimary),
       title: Text(
         title,
-        style: TextStyle(color: textColor ?? _DesignColors.textPrimary),
+        style: TextStyle(color: textColor ?? colors.textPrimary),
       ),
       onTap: onTap,
     );
@@ -999,29 +991,26 @@ class _ContentAreaState extends State<ContentArea> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: _DesignColors.toolbarIsland,
-        title: const Text(
+        backgroundColor: colors.toolbarIsland,
+        title: Text(
           "Delete Note?",
-          style: TextStyle(color: _DesignColors.textPrimary),
+          style: TextStyle(color: colors.textPrimary),
         ),
-        content: const Text(
+        content: Text(
           "This action cannot be undone.",
-          style: TextStyle(color: _DesignColors.textSecondary),
+          style: TextStyle(color: colors.textSecondary),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel"),
+            child: Text("Cancel"),
           ),
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
               viewModel.deleteNote(viewModel.currentFileName!);
             },
-            child: const Text(
-              "Delete",
-              style: TextStyle(color: Colors.redAccent),
-            ),
+            child: Text("Delete", style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -1037,8 +1026,9 @@ class _ProgressDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _ContentColors(Theme.of(context));
     return Dialog(
-      backgroundColor: _DesignColors.toolbarIsland,
+      backgroundColor: colors.toolbarIsland,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -1048,23 +1038,18 @@ class _ProgressDialog extends StatelessWidget {
             return Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const SizedBox(
+                SizedBox(
                   width: 40,
                   height: 40,
                   child: CircularProgressIndicator(
                     strokeWidth: 3,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      _DesignColors.accent,
-                    ),
+                    valueColor: AlwaysStoppedAnimation<Color>(colors.accent),
                   ),
                 ),
                 const SizedBox(height: 20),
                 Text(
                   progress ?? 'Processing...',
-                  style: const TextStyle(
-                    color: _DesignColors.textPrimary,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: colors.textPrimary, fontSize: 14),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -1118,20 +1103,20 @@ class AttachmentBar extends StatefulWidget {
 
 class _AttachmentBarState extends State<AttachmentBar> {
   bool _isExpanded = true;
+  late _ContentColors colors;
 
   ContentViewModel get viewModel => widget.viewModel;
 
   @override
   Widget build(BuildContext context) {
+    colors = _ContentColors(Theme.of(context));
     if (viewModel.attachments.isEmpty) return const SizedBox.shrink();
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       decoration: BoxDecoration(
-        color: _DesignColors.background,
-        border: Border(
-          top: BorderSide(color: _DesignColors.divider.withOpacity(0.3)),
-        ),
+        color: colors.background,
+        border: Border(top: BorderSide(color: colors.divider.withOpacity(0.3))),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1146,14 +1131,14 @@ class _AttachmentBarState extends State<AttachmentBar> {
                   _isExpanded
                       ? Icons.keyboard_arrow_down
                       : Icons.keyboard_arrow_right,
-                  color: _DesignColors.textSecondary,
+                  color: colors.textSecondary,
                   size: 16,
                 ),
                 const SizedBox(width: 8),
                 Text(
                   "Attachments (${viewModel.attachments.length})",
-                  style: const TextStyle(
-                    color: _DesignColors.textSecondary,
+                  style: TextStyle(
+                    color: colors.textSecondary,
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                   ),
@@ -1192,9 +1177,9 @@ class _AttachmentBarState extends State<AttachmentBar> {
       return Container(
         width: 60,
         decoration: BoxDecoration(
-          color: _DesignColors.toolbarIsland,
+          color: colors.toolbarIsland,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: _DesignColors.divider.withOpacity(0.3)),
+          border: Border.all(color: colors.divider.withOpacity(0.3)),
         ),
         child: const Center(
           child: Column(
@@ -1226,11 +1211,9 @@ class _AttachmentBarState extends State<AttachmentBar> {
             child: Container(
               width: 60,
               decoration: BoxDecoration(
-                color: _DesignColors.toolbarIsland,
+                color: colors.toolbarIsland,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _DesignColors.divider.withOpacity(0.3),
-                ),
+                border: Border.all(color: colors.divider.withOpacity(0.3)),
               ),
               child: isImg
                   ? FutureBuilder<Uint8List?>(
@@ -1252,26 +1235,26 @@ class _AttachmentBarState extends State<AttachmentBar> {
                             child: Image.memory(
                               snapshot.data!,
                               fit: BoxFit.cover,
-                              errorBuilder: (c, e, s) => const Icon(
+                              errorBuilder: (c, e, s) => Icon(
                                 Icons.broken_image,
-                                color: _DesignColors.subtleGray,
+                                color: colors.subtleGray,
                                 size: 20,
                               ),
                             ),
                           );
                         }
-                        return const Icon(
+                        return Icon(
                           Icons.broken_image,
-                          color: _DesignColors.subtleGray,
+                          color: colors.subtleGray,
                           size: 20,
                         );
                       },
                     )
-                  : const Center(
+                  : Center(
                       child: Icon(
                         Icons.insert_drive_file,
                         size: 24,
-                        color: _DesignColors.accent,
+                        color: colors.accent,
                       ),
                     ),
             ),
@@ -1281,10 +1264,7 @@ class _AttachmentBarState extends State<AttachmentBar> {
             width: 60,
             child: Text(
               attachment.fileName,
-              style: const TextStyle(
-                color: _DesignColors.textSecondary,
-                fontSize: 9,
-              ),
+              style: TextStyle(color: colors.textSecondary, fontSize: 9),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
@@ -1298,7 +1278,7 @@ class _AttachmentBarState extends State<AttachmentBar> {
   void _showAttachmentMenu(BuildContext context, AttachmentModel attachment) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: _DesignColors.toolbarIsland,
+      backgroundColor: colors.toolbarIsland,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -1306,24 +1286,18 @@ class _AttachmentBarState extends State<AttachmentBar> {
         mainAxisSize: MainAxisSize.min,
         children: [
           ListTile(
-            leading: const Icon(Icons.visibility, color: _DesignColors.accent),
-            title: const Text(
-              "View",
-              style: TextStyle(color: _DesignColors.textPrimary),
-            ),
+            leading: Icon(Icons.visibility, color: colors.accent),
+            title: Text("View", style: TextStyle(color: colors.textPrimary)),
             onTap: () {
               Navigator.pop(context);
               _viewAttachment(context, attachment);
             },
           ),
           ListTile(
-            leading: const Icon(
-              Icons.save_alt,
-              color: _DesignColors.saveButton,
-            ),
-            title: const Text(
+            leading: Icon(Icons.save_alt, color: colors.saveButton),
+            title: Text(
               "Save As...",
-              style: TextStyle(color: _DesignColors.textPrimary),
+              style: TextStyle(color: colors.textPrimary),
             ),
             onTap: () {
               Navigator.pop(context);
@@ -1331,11 +1305,8 @@ class _AttachmentBarState extends State<AttachmentBar> {
             },
           ),
           ListTile(
-            leading: const Icon(Icons.delete, color: Colors.redAccent),
-            title: const Text(
-              "Delete",
-              style: TextStyle(color: Colors.redAccent),
-            ),
+            leading: Icon(Icons.delete, color: Colors.redAccent),
+            title: Text("Delete", style: TextStyle(color: Colors.redAccent)),
             onTap: () {
               Navigator.pop(context);
               viewModel.removeAttachment(attachment.id);
@@ -1353,7 +1324,7 @@ class _AttachmentBarState extends State<AttachmentBar> {
       return Container(
         padding: EdgeInsets.zero,
         decoration: BoxDecoration(
-          color: _DesignColors.toolbarIsland,
+          color: colors.toolbarIsland,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Stack(
@@ -1367,11 +1338,7 @@ class _AttachmentBarState extends State<AttachmentBar> {
               top: 4,
               right: 4,
               child: IconButton(
-                icon: const Icon(
-                  Icons.close,
-                  color: _DesignColors.textSecondary,
-                  size: 20,
-                ),
+                icon: Icon(Icons.close, color: colors.textSecondary, size: 20),
                 onPressed: () => Navigator.of(ctx).pop(),
                 tooltip: 'Close',
                 padding: const EdgeInsets.all(4),
@@ -1399,9 +1366,9 @@ class _AttachmentBarState extends State<AttachmentBar> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
                 const SizedBox(height: 16),
-                const Text(
+                Text(
                   "Decrypting...",
-                  style: TextStyle(color: _DesignColors.textPrimary),
+                  style: TextStyle(color: colors.textPrimary),
                 ),
               ]);
             }
@@ -1418,7 +1385,7 @@ class _AttachmentBarState extends State<AttachmentBar> {
                         data,
                         fit: BoxFit.contain,
                         errorBuilder: (context, error, stackTrace) {
-                          return const Icon(
+                          return Icon(
                             Icons.broken_image,
                             color: Colors.white,
                             size: 64,
@@ -1430,7 +1397,7 @@ class _AttachmentBarState extends State<AttachmentBar> {
                       top: 0,
                       right: 0,
                       child: IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white),
+                        icon: Icon(Icons.close, color: Colors.white),
                         onPressed: () => Navigator.of(dialogContext).pop(),
                         tooltip: 'Close',
                       ),
@@ -1440,16 +1407,12 @@ class _AttachmentBarState extends State<AttachmentBar> {
               } else {
                 final sizeKb = (attachment.size / 1024).toStringAsFixed(1);
                 return buildDialogContent(dialogContext, [
-                  const Icon(
-                    Icons.insert_drive_file,
-                    size: 48,
-                    color: _DesignColors.accent,
-                  ),
+                  Icon(Icons.insert_drive_file, size: 48, color: colors.accent),
                   const SizedBox(height: 16),
                   Text(
                     attachment.fileName,
-                    style: const TextStyle(
-                      color: _DesignColors.textPrimary,
+                    style: TextStyle(
+                      color: colors.textPrimary,
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
                     ),
@@ -1458,33 +1421,23 @@ class _AttachmentBarState extends State<AttachmentBar> {
                   const SizedBox(height: 4),
                   Text(
                     "$sizeKb KB",
-                    style: const TextStyle(
-                      color: _DesignColors.textSecondary,
-                      fontSize: 12,
-                    ),
+                    style: TextStyle(color: colors.textSecondary, fontSize: 12),
                   ),
                   const SizedBox(height: 20),
-                  const Text(
+                  Text(
                     "No preview available",
-                    style: TextStyle(
-                      color: _DesignColors.subtleGray,
-                      fontSize: 12,
-                    ),
+                    style: TextStyle(color: colors.subtleGray, fontSize: 12),
                     textAlign: TextAlign.center,
                   ),
                 ]);
               }
             } else {
               return buildDialogContent(dialogContext, [
-                const Icon(
-                  Icons.error_outline,
-                  color: Colors.redAccent,
-                  size: 40,
-                ),
+                Icon(Icons.error_outline, color: Colors.redAccent, size: 40),
                 const SizedBox(height: 16),
-                const Text(
+                Text(
                   "Failed to load",
-                  style: TextStyle(color: _DesignColors.textPrimary),
+                  style: TextStyle(color: colors.textPrimary),
                 ),
               ]);
             }

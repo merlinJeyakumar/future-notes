@@ -11,6 +11,7 @@ import '../models/note_model.dart';
 import '../widgets/import_confirmation_dialog.dart';
 import '../widgets/export_options_dialog.dart';
 import '../services/settings_service.dart';
+import '../../../core/theme/app_theme.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -409,52 +410,103 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _showMasterSettings(BuildContext context) {
+    final theme = Theme.of(context);
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) {
           final settings = SettingsService();
           return AlertDialog(
-            backgroundColor: const Color(0xFF1E293B),
+            backgroundColor: theme.appSurface,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
-            title: const Text(
+            title: Text(
               'Settings',
-              style: TextStyle(color: Colors.white),
+              style: TextStyle(color: theme.appTextPrimary),
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Theme Setting
+                ListTile(
+                  leading: Icon(
+                    Icons.color_lens_outlined,
+                    color: theme.appTextSecondary,
+                  ),
+                  title: Text(
+                    'Theme',
+                    style: TextStyle(color: theme.appTextPrimary),
+                  ),
+                  subtitle: DropdownButton<ThemeMode>(
+                    value: settings.themeMode,
+                    dropdownColor: theme.appSurface,
+                    style: TextStyle(color: theme.appTextPrimary),
+                    underline: Container(
+                      height: 1,
+                      color: theme.colorScheme.primary,
+                    ),
+                    isExpanded: true,
+                    icon: Icon(
+                      Icons.arrow_drop_down,
+                      color: theme.appTextSecondary,
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: ThemeMode.light,
+                        child: Text('Light'),
+                      ),
+                      DropdownMenuItem(
+                        value: ThemeMode.dark,
+                        child: Text('Dark'),
+                      ),
+                      DropdownMenuItem(
+                        value: ThemeMode.system,
+                        child: Text('System'),
+                      ),
+                    ],
+                    onChanged: (ThemeMode? newValue) {
+                      if (newValue != null) {
+                        settings.setThemeMode(newValue).then((_) {
+                          setState(() {});
+                        });
+                      }
+                    },
+                  ),
+                ),
+                Divider(color: theme.appDivider),
                 // File Compression Setting
                 ListTile(
-                  leading: const Icon(Icons.compress, color: Colors.white70),
-                  title: const Text(
+                  leading: Icon(Icons.compress, color: theme.appTextSecondary),
+                  title: Text(
                     'File Compression',
-                    style: TextStyle(color: Colors.white),
+                    style: TextStyle(color: theme.appTextPrimary),
                   ),
                   subtitle: DropdownButton<CompressionLevel>(
                     value: settings.compressionLevel,
-                    dropdownColor: const Color(0xFF2D3748),
-                    style: const TextStyle(color: Colors.white),
-                    underline: Container(height: 1, color: Colors.blueAccent),
+                    dropdownColor: theme.appSurface,
+                    style: TextStyle(color: theme.appTextPrimary),
+                    underline: Container(
+                      height: 1,
+                      color: theme.colorScheme.primary,
+                    ),
                     isExpanded: true,
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.arrow_drop_down,
-                      color: Colors.white70,
+                      color: theme.appTextSecondary,
                     ),
                     items: const [
                       DropdownMenuItem(
                         value: CompressionLevel.high,
-                        child: Text("High (Max Compression)"),
+                        child: Text('High (Max Compression)'),
                       ),
                       DropdownMenuItem(
                         value: CompressionLevel.medium,
-                        child: Text("Medium (Half Size)"),
+                        child: Text('Medium (Half Size)'),
                       ),
                       DropdownMenuItem(
                         value: CompressionLevel.none,
-                        child: Text("None (Full Size)"),
+                        child: Text('None (Full Size)'),
                       ),
                     ],
                     onChanged: (CompressionLevel? newValue) {
@@ -467,30 +519,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
                 if (!Platform.isAndroid && !Platform.isIOS) ...[
-                  const Divider(color: Colors.grey),
+                  Divider(color: theme.appDivider),
                   ListTile(
-                    leading: const Icon(
+                    leading: Icon(
                       Icons.folder_open,
-                      color: Colors.white70,
+                      color: theme.appTextSecondary,
                     ),
-                    title: const Text(
+                    title: Text(
                       'App Data Folder',
-                      style: TextStyle(color: Colors.white),
+                      style: TextStyle(color: theme.appTextPrimary),
                     ),
                     subtitle: FutureBuilder<String>(
                       future: settings.getUserDataPath(),
                       builder: (context, snapshot) {
                         return Text(
                           snapshot.data ?? 'Loading...',
-                          style: const TextStyle(
-                            color: Colors.grey,
+                          style: TextStyle(
+                            color: theme.appSubtleGray,
                             fontSize: 12,
                           ),
                         );
                       },
                     ),
                     trailing: IconButton(
-                      icon: const Icon(Icons.edit, color: Colors.blueAccent),
+                      icon: Icon(Icons.edit, color: theme.colorScheme.primary),
                       onPressed: () async {
                         final String? selectedDirectory = await FilePicker
                             .platform
@@ -504,34 +556,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ),
                 ],
-                const Divider(color: Colors.grey),
+                Divider(color: theme.appDivider),
                 ListTile(
-                  leading: const Icon(
+                  leading: Icon(
                     Icons.info_outline,
-                    color: Colors.white70,
+                    color: theme.appTextSecondary,
                   ),
-                  title: const Text(
+                  title: Text(
                     'About',
-                    style: TextStyle(color: Colors.white),
+                    style: TextStyle(color: theme.appTextPrimary),
                   ),
-                  subtitle: const Text(
+                  subtitle: Text(
                     'AntiGravity Notes v1.0',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                  onTap: () {},
-                ),
-                ListTile(
-                  leading: const Icon(
-                    Icons.color_lens_outlined,
-                    color: Colors.white70,
-                  ),
-                  title: const Text(
-                    'Theme',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  subtitle: const Text(
-                    'Dark Mode',
-                    style: TextStyle(color: Colors.grey),
+                    style: TextStyle(color: theme.appSubtleGray),
                   ),
                   onTap: () {},
                 ),
@@ -540,9 +577,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text(
+                child: Text(
                   'Close',
-                  style: TextStyle(color: Colors.blueAccent),
+                  style: TextStyle(color: theme.colorScheme.primary),
                 ),
               ),
             ],
@@ -554,6 +591,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return ListenableBuilder(
       listenable: _viewModel,
       builder: (context, _) {
@@ -569,15 +607,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               final isDesktop = constraints.maxWidth > 800;
               return Scaffold(
                 resizeToAvoidBottomInset: true,
-                backgroundColor: const Color(0xFF1B2535),
                 appBar: isDesktop
                     ? null
                     : AppBar(
-                        backgroundColor: const Color(0xFF161E2D),
-                        title: const Text('Dashboard'),
-                        iconTheme: const IconThemeData(color: Colors.white),
-                        titleTextStyle: const TextStyle(
-                          color: Colors.white,
+                        backgroundColor: theme.appSidebar,
+                        title: Text(
+                          'Dashboard',
+                          style: TextStyle(color: theme.appTextPrimary),
+                        ),
+                        iconTheme: IconThemeData(color: theme.appTextPrimary),
+                        titleTextStyle: TextStyle(
+                          color: theme.appTextPrimary,
                           fontSize: 18,
                         ),
                         actions: [
@@ -652,7 +692,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           width: 24,
                                           height: 48,
                                           decoration: BoxDecoration(
-                                            color: const Color(0xFF1E293B),
+                                            color: theme.appSurfaceVariant,
                                             borderRadius:
                                                 const BorderRadius.only(
                                                   topRight: Radius.circular(8),
@@ -661,14 +701,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                   ),
                                                 ),
                                             border: Border.all(
-                                              color: const Color(0xFF334155),
+                                              color: theme.appBorder,
                                             ),
                                           ),
                                           child: Icon(
                                             _isSidebarVisible
                                                 ? Icons.chevron_left
                                                 : Icons.chevron_right,
-                                            color: Colors.white70,
+                                            color: theme.appTextSecondary,
                                             size: 20,
                                           ),
                                         ),
@@ -684,15 +724,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     if (_viewModel.isBusy)
                       Container(
                         color: Colors.black54,
-                        child: const Center(
+                        child: Center(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               CircularProgressIndicator(
-                                color: Colors.blueAccent,
+                                color: theme.colorScheme.primary,
                               ),
-                              SizedBox(height: 16),
-                              Text(
+                              const SizedBox(height: 16),
+                              const Text(
                                 "Processing...",
                                 style: TextStyle(
                                   color: Colors.white,

@@ -838,7 +838,7 @@ class _ContentAreaState extends State<ContentArea> {
                     builder: (ctx) => _ProgressDialog(viewModel: viewModel),
                   );
 
-                  final count = await viewModel.changePassword(
+                  final result = await viewModel.changePassword(
                     newPassword,
                     oldPassword: currentPassword,
                   );
@@ -851,9 +851,7 @@ class _ContentAreaState extends State<ContentArea> {
                   if (mounted) {
                     ScaffoldMessenger.of(stateContext).showSnackBar(
                       SnackBar(
-                        content: Text(
-                          'Password updated. Re-encrypted $count notes.',
-                        ),
+                        content: Text(result),
                         backgroundColor: Colors.green,
                       ),
                     );
@@ -938,6 +936,10 @@ class _ContentAreaState extends State<ContentArea> {
                   }
                 },
               ),
+
+            // Spacer and Divider before Delete
+            const SizedBox(height: 16),
+            const Divider(color: _DesignColors.divider),
 
             // Delete File
             _buildSettingsTile(

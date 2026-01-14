@@ -1627,10 +1627,21 @@ class _AttachmentBarState extends State<AttachmentBar>
                 case _FileType.text:
                   try {
                     final textContent = String.fromCharCodes(data);
-                    return _TextPreview(
-                      text: textContent,
-                      colors: colors,
-                      onClose: () => Navigator.of(dialogContext).pop(),
+                    return Center(
+                      child: Container(
+                        width: MediaQuery.of(context).size.width * 0.85,
+                        height: MediaQuery.of(context).size.height * 0.85,
+                        decoration: BoxDecoration(
+                          color: colors.background,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: _TextPreview(
+                          text: textContent,
+                          colors: colors,
+                          onClose: () => Navigator.of(dialogContext).pop(),
+                        ),
+                      ),
                     );
                   } catch (e) {
                     return buildFallback();

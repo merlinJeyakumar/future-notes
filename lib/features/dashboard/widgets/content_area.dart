@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
@@ -10,6 +11,10 @@ import '../../../core/theme/app_theme.dart';
 
 import 'package:code_text_field/code_text_field.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
+import 'package:pdfx/pdfx.dart';
+import 'package:video_player/video_player.dart';
+import 'package:chewie/chewie.dart';
+import 'package:path_provider/path_provider.dart';
 
 // Theme-aware design colors helper
 class _ContentColors {
@@ -1387,6 +1392,74 @@ class _AttachmentBarState extends State<AttachmentBar>
     );
   }
 
+  Future<File> _writeToTempFile(String filename, Uint8List bytes) async {
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/$filename');
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
+  }
+
+  _FileType _getFileType(String name, Uint8List? data) {
+    final ext = name.split('.').last.toLowerCase();
+
+    // Image
+    if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'heic'].contains(ext)) {
+      return _FileType.image;
+    }
+    // PDF
+    if (ext == 'pdf') {
+      return _FileType.pdf;
+    }
+    // Video
+    if (['mp4', 'mov', 'avi', 'mkv', 'webm'].contains(ext)) {
+      return _FileType.video;
+    }
+    // Text
+    if ([
+      'txt',
+      'md',
+      'json',
+      'dart',
+      'yaml',
+      'xml',
+      'csv',
+      'log',
+    ].contains(ext)) {
+      return _FileType.text;
+    }
+
+    // Magic number checks (fallback)
+    if (data != null && data.length > 12) {
+      // PDF: %PDF
+      if (data[0] == 0x25 &&
+          data[1] == 0x50 &&
+          data[2] == 0x44 &&
+          data[3] == 0x46) {
+        return _FileType.pdf;
+      }
+      // PNG
+      if (data[0] == 0x89 &&
+          data[1] == 0x50 &&
+          data[2] == 0x4E &&
+          data[3] == 0x47) {
+        return _FileType.image;
+      }
+      // JPEG
+      if (data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF) {
+        return _FileType.image;
+      }
+      // GIF
+      if (data[0] == 0x47 &&
+          data[1] == 0x49 &&
+          data[2] == 0x46 &&
+          data[3] == 0x38) {
+        return _FileType.image;
+      }
+    }
+
+    return _FileType.other;
+  }
+
   void _viewAttachment(BuildContext context, AttachmentModel attachment) {
     // Local helper to build consistent dialogs with integrated close button
     Widget buildDialogContent(BuildContext ctx, List<Widget> children) {
@@ -1445,48 +1518,10 @@ class _AttachmentBarState extends State<AttachmentBar>
 
             final data = snapshot.data;
             if (data != null && data.isNotEmpty) {
-              if (_isImage(attachment.fileName, data)) {
-                return LayoutBuilder(
-                  builder: (context, constraints) {
-                    return Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Container(
-                          width: constraints.maxWidth,
-                          height: constraints.maxHeight,
-                          child: InteractiveViewer(
-                            minScale: 0.5,
-                            maxScale: 5.0,
-                            constrained: true,
-                            child: Image.memory(
-                              data,
-                              fit: BoxFit.contain,
-                              width: constraints.maxWidth,
-                              height: constraints.maxHeight,
-                              errorBuilder: (context, error, stackTrace) {
-                                return const Icon(
-                                  Icons.broken_image,
-                                  color: Colors.white,
-                                  size: 64,
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                        Positioned(
-                          top: 0,
-                          right: 0,
-                          child: IconButton(
-                            icon: const Icon(Icons.close, color: Colors.white),
-                            onPressed: () => Navigator.of(dialogContext).pop(),
-                            tooltip: 'Close',
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                );
-              } else {
+              final type = _getFileType(attachment.fileName, data);
+
+              // Helper for unsupported or fallback view
+              Widget buildFallback() {
                 final sizeKb = (attachment.size / 1024).toStringAsFixed(1);
                 return buildDialogContent(dialogContext, [
                   Icon(Icons.insert_drive_file, size: 48, color: colors.accent),
@@ -1513,6 +1548,97 @@ class _AttachmentBarState extends State<AttachmentBar>
                   ),
                 ]);
               }
+
+              switch (type) {
+                case _FileType.image:
+                  return LayoutBuilder(
+                    builder: (context, constraints) {
+                      return Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Container(
+                            width: constraints.maxWidth,
+                            height: constraints.maxHeight,
+                            child: InteractiveViewer(
+                              minScale: 0.5,
+                              maxScale: 5.0,
+                              constrained: true,
+                              child: Image.memory(
+                                data,
+                                fit: BoxFit.contain,
+                                width: constraints.maxWidth,
+                                height: constraints.maxHeight,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return const Icon(
+                                    Icons.broken_image,
+                                    color: Colors.white,
+                                    size: 64,
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: 10,
+                            right: 10,
+                            child: IconButton(
+                              icon: const Icon(
+                                Icons.close,
+                                color: Colors.white,
+                              ),
+                              onPressed: () =>
+                                  Navigator.of(dialogContext).pop(),
+                              tooltip: 'Close',
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+
+                case _FileType.pdf:
+                  return FutureBuilder<File>(
+                    future: _writeToTempFile(attachment.fileName, data),
+                    builder: (ctx, fileSnapshot) {
+                      if (!fileSnapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      return _PdfPreview(
+                        filePath: fileSnapshot.data!.path,
+                        onClose: () => Navigator.of(dialogContext).pop(),
+                      );
+                    },
+                  );
+
+                case _FileType.video:
+                  return FutureBuilder<File>(
+                    future: _writeToTempFile(attachment.fileName, data),
+                    builder: (ctx, fileSnapshot) {
+                      if (!fileSnapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      return _VideoPreview(
+                        file: fileSnapshot.data!,
+                        onClose: () => Navigator.of(dialogContext).pop(),
+                      );
+                    },
+                  );
+
+                case _FileType.text:
+                  try {
+                    final textContent = String.fromCharCodes(data);
+                    return _TextPreview(
+                      text: textContent,
+                      colors: colors,
+                      onClose: () => Navigator.of(dialogContext).pop(),
+                    );
+                  } catch (e) {
+                    return buildFallback();
+                  }
+
+                default:
+                  return buildFallback();
+              }
             } else {
               return buildDialogContent(dialogContext, [
                 Icon(Icons.error_outline, color: Colors.redAccent, size: 40),
@@ -1528,31 +1654,233 @@ class _AttachmentBarState extends State<AttachmentBar>
       ),
     );
   }
+}
 
-  bool _isImage(String name, Uint8List? data) {
-    final ext = name.split('.').last.toLowerCase();
-    if (name.contains('.') &&
-        ['png', 'jpg', 'jpeg', 'webp', 'gif'].contains(ext)) {
-      return true;
+enum _FileType { image, pdf, video, text, other }
+
+class _PdfPreview extends StatefulWidget {
+  final String filePath;
+  final VoidCallback onClose;
+
+  const _PdfPreview({required this.filePath, required this.onClose});
+
+  @override
+  State<_PdfPreview> createState() => _PdfPreviewState();
+}
+
+class _PdfPreviewState extends State<_PdfPreview> {
+  // Use dynamic controller type to support both PdfController and PdfControllerPinch
+  late dynamic _pdfController;
+  late bool _isWindows;
+  int _currentPage = 1;
+  int _totalPages = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _isWindows = Platform.isWindows;
+    if (_isWindows) {
+      _pdfController = PdfController(
+        document: PdfDocument.openFile(widget.filePath),
+      );
+    } else {
+      _pdfController = PdfControllerPinch(
+        document: PdfDocument.openFile(widget.filePath),
+      );
     }
-    if (data != null && data.length > 12) {
-      if (data[0] == 0x89 &&
-          data[1] == 0x50 &&
-          data[2] == 0x4E &&
-          data[3] == 0x47)
-        return true;
-      if (data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF) return true;
-      if (data[0] == 0x47 &&
-          data[1] == 0x49 &&
-          data[2] == 0x46 &&
-          data[3] == 0x38)
-        return true;
-      if (data[8] == 0x57 &&
-          data[9] == 0x45 &&
-          data[10] == 0x42 &&
-          data[11] == 0x50)
-        return true;
+  }
+
+  @override
+  void dispose() {
+    _pdfController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        _isWindows
+            ? PdfView(
+                controller: _pdfController as PdfController,
+                scrollDirection: Axis.vertical,
+                onDocumentLoaded: (document) {
+                  setState(() {
+                    _totalPages = document.pagesCount;
+                  });
+                },
+                onPageChanged: (page) {
+                  setState(() {
+                    _currentPage = page;
+                  });
+                },
+              )
+            : PdfViewPinch(controller: _pdfController as PdfControllerPinch),
+        Positioned(
+          top: 10,
+          right: 10,
+          child: IconButton(
+            icon: const Icon(Icons.close, color: Colors.black),
+            onPressed: widget.onClose,
+            tooltip: 'Close',
+          ),
+        ),
+        // Page navigation for Windows
+        if (_isWindows && _totalPages > 1)
+          Positioned(
+            bottom: 20,
+            left: 0,
+            right: 0,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left, color: Colors.black),
+                  onPressed: _currentPage > 1
+                      ? () => (_pdfController as PdfController).previousPage(
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeInOut,
+                        )
+                      : null,
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    '$_currentPage / $_totalPages',
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right, color: Colors.black),
+                  onPressed: _currentPage < _totalPages
+                      ? () => (_pdfController as PdfController).nextPage(
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeInOut,
+                        )
+                      : null,
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _VideoPreview extends StatefulWidget {
+  final File file;
+  final VoidCallback onClose;
+
+  const _VideoPreview({required this.file, required this.onClose});
+
+  @override
+  State<_VideoPreview> createState() => _VideoPreviewState();
+}
+
+class _VideoPreviewState extends State<_VideoPreview> {
+  late VideoPlayerController _videoPlayerController;
+  ChewieController? _chewieController;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializePlayer();
+  }
+
+  Future<void> _initializePlayer() async {
+    _videoPlayerController = VideoPlayerController.file(widget.file);
+    await _videoPlayerController.initialize();
+    _chewieController = ChewieController(
+      videoPlayerController: _videoPlayerController,
+      autoPlay: true,
+      looping: false,
+      aspectRatio: _videoPlayerController.value.aspectRatio,
+      errorBuilder: (context, errorMessage) {
+        return Center(
+          child: Text(
+            errorMessage,
+            style: const TextStyle(color: Colors.white),
+          ),
+        );
+      },
+    );
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _videoPlayerController.dispose();
+    _chewieController?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_chewieController == null) {
+      return const Center(child: CircularProgressIndicator());
     }
-    return false;
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Chewie(controller: _chewieController!),
+        Positioned(
+          top: 10,
+          right: 10,
+          child: IconButton(
+            icon: const Icon(Icons.close, color: Colors.white),
+            onPressed: widget.onClose,
+            tooltip: 'Close',
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TextPreview extends StatelessWidget {
+  final String text;
+  final VoidCallback onClose;
+  final _ContentColors colors;
+
+  const _TextPreview({
+    required this.text,
+    required this.onClose,
+    required this.colors,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Container(
+          width: double.infinity,
+          height: double.infinity,
+          padding: const EdgeInsets.all(16),
+          color: colors.background,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              text,
+              style: TextStyle(color: colors.textPrimary),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 0,
+          right: 0,
+          child: IconButton(
+            icon: Icon(Icons.close, color: colors.textSecondary),
+            onPressed: onClose,
+            tooltip: 'Close',
+          ),
+        ),
+      ],
+    );
   }
 }

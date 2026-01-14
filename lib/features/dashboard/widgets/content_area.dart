@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import 'dart:typed_data';
@@ -1121,11 +1122,59 @@ class AttachmentBar extends StatefulWidget {
   State<AttachmentBar> createState() => _AttachmentBarState();
 }
 
-class _AttachmentBarState extends State<AttachmentBar> {
+class _AttachmentBarState extends State<AttachmentBar>
+    with WidgetsBindingObserver {
   bool _isExpanded = true;
+  bool _wasExpandedBeforeKeyboard = true;
+  bool _keyboardVisible = false;
   late _ContentColors colors;
 
   ContentViewModel get viewModel => widget.viewModel;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    // Use post-frame callback to ensure we're on the main thread
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      // Check keyboard visibility by looking at view insets
+      // Guard against empty views (can happen on desktop/web)
+      final views = WidgetsBinding.instance.platformDispatcher.views;
+      if (views.isEmpty) return;
+
+      final bottomInset = views.first.viewInsets.bottom;
+      final isKeyboardNowVisible = bottomInset > 0;
+
+      if (isKeyboardNowVisible != _keyboardVisible) {
+        _keyboardVisible = isKeyboardNowVisible;
+        if (_keyboardVisible) {
+          // Keyboard opened - remember current state and collapse
+          _wasExpandedBeforeKeyboard = _isExpanded;
+          if (_isExpanded && mounted) {
+            setState(() => _isExpanded = false);
+          }
+        } else {
+          // Keyboard closed - restore previous state
+          if (_wasExpandedBeforeKeyboard && !_isExpanded && mounted) {
+            setState(() => _isExpanded = true);
+          }
+        }
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

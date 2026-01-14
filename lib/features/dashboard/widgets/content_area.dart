@@ -1423,6 +1423,7 @@ class _AttachmentBarState extends State<AttachmentBar>
     showDialog(
       context: context,
       builder: (dialogContext) => Dialog(
+        insetPadding: EdgeInsets.zero,
         backgroundColor: Colors.transparent,
         child: FutureBuilder<Uint8List?>(
           future: viewModel.readAttachment(attachment.id),
@@ -1445,33 +1446,45 @@ class _AttachmentBarState extends State<AttachmentBar>
             final data = snapshot.data;
             if (data != null && data.isNotEmpty) {
               if (_isImage(attachment.fileName, data)) {
-                return Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    InteractiveViewer(
-                      maxScale: 5.0,
-                      child: Image.memory(
-                        data,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Icon(
-                            Icons.broken_image,
-                            color: Colors.white,
-                            size: 64,
-                          );
-                        },
-                      ),
-                    ),
-                    Positioned(
-                      top: 0,
-                      right: 0,
-                      child: IconButton(
-                        icon: Icon(Icons.close, color: Colors.white),
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                        tooltip: 'Close',
-                      ),
-                    ),
-                  ],
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    return Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          width: constraints.maxWidth,
+                          height: constraints.maxHeight,
+                          child: InteractiveViewer(
+                            minScale: 0.5,
+                            maxScale: 5.0,
+                            constrained: true,
+                            child: Image.memory(
+                              data,
+                              fit: BoxFit.contain,
+                              width: constraints.maxWidth,
+                              height: constraints.maxHeight,
+                              errorBuilder: (context, error, stackTrace) {
+                                return const Icon(
+                                  Icons.broken_image,
+                                  color: Colors.white,
+                                  size: 64,
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: IconButton(
+                            icon: const Icon(Icons.close, color: Colors.white),
+                            onPressed: () => Navigator.of(dialogContext).pop(),
+                            tooltip: 'Close',
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 );
               } else {
                 final sizeKb = (attachment.size / 1024).toStringAsFixed(1);

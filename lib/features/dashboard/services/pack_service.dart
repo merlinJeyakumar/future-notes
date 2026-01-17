@@ -14,7 +14,7 @@ class PackResult {
 }
 
 /// Export format options
-enum ExportFormat { binary, zip }
+enum ExportFormat { binary, zip, pdf }
 
 /// Service for creating and extracting note pack files
 class PackService {

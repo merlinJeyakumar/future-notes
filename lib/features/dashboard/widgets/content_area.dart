@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import '../viewmodels/content_viewmodel.dart';
 import '../models/note_model.dart';
 import 'password_dialog.dart';
+import 'share_options_dialog.dart';
 import '../../../core/theme/app_theme.dart';
 
 import 'package:code_text_field/code_text_field.dart';
@@ -225,12 +226,18 @@ class _ContentAreaState extends State<ContentArea> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (!viewModel.isLocked)
+        if (!viewModel.isLocked) ...[
+          _buildSubtleIconButton(
+            Icons.ios_share_rounded,
+            'Share Note',
+            onPressed: () => _handleShareContent(context),
+          ),
           _buildSubtleIconButton(
             Icons.attach_file_rounded,
             'Attach file',
             onPressed: viewModel.pickAttachment,
           ),
+        ],
         if (viewModel.isLocked || viewModel.isPasswordSet)
           _buildSubtleIconButton(
             viewModel.isLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
@@ -598,6 +605,26 @@ class _ContentAreaState extends State<ContentArea> {
         ),
       ),
     );
+  }
+
+  void _handleShareContent(BuildContext context) async {
+    final format = await showDialog<ShareFormat>(
+      context: context,
+      builder: (context) => const ShareOptionsDialog(),
+    );
+
+    if (format != null) {
+      // Show processing feedback
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Preparing content...'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+
+      await viewModel.shareNoteContent(format: format);
+    }
   }
 
   Widget _buildVerticalDivider() {

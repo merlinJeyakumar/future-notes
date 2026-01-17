@@ -97,6 +97,13 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
               subtitle: 'Standard format, can be opened with any ZIP tool',
               icon: Icons.folder_zip,
             ),
+            const SizedBox(height: 8),
+            _buildFormatOption(
+              format: ExportFormat.pdf,
+              title: 'PDF Document (.pdf)',
+              subtitle: 'Printable document (Attachments saved separately)',
+              icon: Icons.picture_as_pdf,
+            ),
             const SizedBox(height: 20),
             Divider(color: theme.appDivider),
             const SizedBox(height: 12),

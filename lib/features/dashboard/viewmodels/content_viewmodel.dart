@@ -23,6 +23,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/settings_service.dart';
 import '../services/pack_service.dart';
+import '../services/pdf_service.dart';
+import '../widgets/share_options_dialog.dart';
 
 class ContentViewModel extends BaseViewModel {
   final IFileService _fileService;
@@ -962,6 +964,143 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
+  Future<void> shareNoteContent({required ShareFormat format}) async {
+    if (_currentFileName == null &&
+        titleController.text.isEmpty &&
+        htmlController.text.isEmpty) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      String? filePath;
+      String? mimeType;
+      final tempDir = await getTemporaryDirectory();
+      final safeTitle = titleController.text
+          .replaceAll(RegExp(r'[^\w\s-]'), '')
+          .trim();
+      final baseName = safeTitle.isEmpty ? "note" : safeTitle;
+
+      if (format == ShareFormat.pdf) {
+        String htmlContent;
+        if (_isHtmlMode) {
+          htmlContent = htmlController.text;
+        } else {
+          final delta = quillController.document.toDelta();
+          htmlContent = await compute(_deltaToHtmlTask, delta.toJson());
+        }
+
+        final pdfService = PdfService();
+        final pdfBytes = await pdfService.exportToPdf(
+          htmlContent: htmlContent,
+          title: titleController.text,
+        );
+
+        final fileName = '$baseName.pdf';
+        if (Platform.isWindows) {
+          final outputPath = await FilePicker.platform.saveFile(
+            dialogTitle: 'Save PDF',
+            fileName: fileName,
+            type: FileType.custom,
+            allowedExtensions: ['pdf'],
+          );
+          if (outputPath != null) {
+            final file = File(outputPath);
+            await file.writeAsBytes(pdfBytes);
+          }
+        } else {
+          final file = File('${tempDir.path}/$fileName');
+          await file.writeAsBytes(pdfBytes);
+          filePath = file.path;
+          mimeType = 'application/pdf';
+        }
+      } else if (format == ShareFormat.text) {
+        String plainText;
+        if (_isHtmlMode) {
+          // Strip tags for plain text
+          plainText = htmlController.text.replaceAll(RegExp(r'<[^>]*>'), '');
+        } else {
+          plainText = quillController.document.toPlainText();
+        }
+
+        final fileName = '$baseName.txt';
+        if (Platform.isWindows) {
+          final outputPath = await FilePicker.platform.saveFile(
+            dialogTitle: 'Save Text File',
+            fileName: fileName,
+            type: FileType.custom,
+            allowedExtensions: ['txt'],
+          );
+          if (outputPath != null) {
+            final file = File(outputPath);
+            await file.writeAsString(plainText);
+          }
+        } else {
+          final file = File('${tempDir.path}/$fileName');
+          await file.writeAsString(plainText);
+          filePath = file.path;
+          mimeType = 'text/plain';
+        }
+      } else if (format == ShareFormat.html) {
+        String htmlContent;
+        if (_isHtmlMode) {
+          htmlContent = htmlController.text;
+        } else {
+          final delta = quillController.document.toDelta();
+          htmlContent = await compute(_deltaToHtmlTask, delta.toJson());
+        }
+
+        final fullHtml =
+            """
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${titleController.text}</title>
+<style>
+body { font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 800px; margin: 0 auto; }
+img { max-width: 100%; height: auto; }
+pre { background: #f4f4f4; padding: 10px; border-radius: 5px; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>${titleController.text}</h1>
+$htmlContent
+</body>
+</html>
+""";
+        final fileName = '$baseName.html';
+        if (Platform.isWindows) {
+          final outputPath = await FilePicker.platform.saveFile(
+            dialogTitle: 'Save HTML File',
+            fileName: fileName,
+            type: FileType.custom,
+            allowedExtensions: ['html'],
+          );
+          if (outputPath != null) {
+            final file = File(outputPath);
+            await file.writeAsString(fullHtml);
+          }
+        } else {
+          final file = File('${tempDir.path}/$fileName');
+          await file.writeAsString(fullHtml);
+          filePath = file.path;
+          mimeType = 'text/html';
+        }
+      }
+
+      if (filePath != null) {
+        await Share.shareXFiles([
+          XFile(filePath, mimeType: mimeType),
+        ], text: titleController.text);
+      }
+    } catch (e) {
+      print("Error sharing note: $e");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   /// Export the current note as a pack file (binary or zip) with optional archive password
   /// Note: Content is packed as-is (preserving original encryption), archive password is separate
   Future<void> exportNotePack({
@@ -1027,7 +1166,24 @@ class ContentViewModel extends BaseViewModel {
       Uint8List packData;
       String extension;
 
-      if (format == ExportFormat.zip) {
+      if (format == ExportFormat.pdf) {
+        // PDF Export: Use the decrypted content from the editor
+        // We assume the note is already unlocked and loaded (guaranteed by DashboardScreen logic)
+        String htmlContent;
+        if (_isHtmlMode) {
+          htmlContent = htmlController.text;
+        } else {
+          final delta = quillController.document.toDelta();
+          htmlContent = await compute(_deltaToHtmlTask, delta.toJson());
+        }
+
+        final pdfService = PdfService();
+        packData = await pdfService.exportToPdf(
+          htmlContent: htmlContent,
+          title: note.title,
+        );
+        extension = 'pdf';
+      } else if (format == ExportFormat.zip) {
         packData = await packService.createZipPack(
           exportNote,
           attachmentData,

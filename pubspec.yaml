@@ -46,6 +46,7 @@ dependencies:
   pdfx: ^2.6.0
   printing: ^5.11.0
   pdf: ^3.10.4
+  htmltopdfwidgets: ^2.0.0
   chewie: ^1.8.1
   flutter_quill: ^11.5.0
   vsc_quill_delta_to_html: ^1.0.5

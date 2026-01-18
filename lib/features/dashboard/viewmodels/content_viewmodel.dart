@@ -12,7 +12,6 @@ import '../models/note_model.dart';
 import 'dart:convert';
 import 'package:flutter_quill/flutter_quill.dart';
 // Removed invalid quill_delta import
-import 'package:vsc_quill_delta_to_html/vsc_quill_delta_to_html.dart';
 import 'package:flutter_quill_delta_from_html/flutter_quill_delta_from_html.dart';
 import 'package:uuid/uuid.dart';
 import 'package:code_text_field/code_text_field.dart';
@@ -24,6 +23,7 @@ import 'package:path_provider/path_provider.dart';
 import '../services/settings_service.dart';
 import '../services/pack_service.dart';
 import '../services/pdf_service.dart';
+import '../services/html_converter_service.dart';
 import '../widgets/share_options_dialog.dart';
 
 class ContentViewModel extends BaseViewModel {
@@ -236,7 +236,7 @@ class ContentViewModel extends BaseViewModel {
     required IEncryptionService encryptionService,
   }) : _fileService = fileService,
        _encryptionService = encryptionService {
-    // Initialize CodeController with syntax highlighting
+    // Added service initializer
     htmlController = CodeController(
       language: xml, // Highlighting for XML/HTML
     );
@@ -305,7 +305,7 @@ class ContentViewModel extends BaseViewModel {
       // Convert Delta to HTML string
       final delta = quillController.document.toDelta();
       // Offload to background
-      final html = await compute(_deltaToHtmlTask, delta.toJson());
+      final html = await compute(_convertDeltaToHtml, delta.toJson());
 
       htmlController.text = html;
       _isHtmlMode = true;
@@ -987,7 +987,7 @@ class ContentViewModel extends BaseViewModel {
           htmlContent = htmlController.text;
         } else {
           final delta = quillController.document.toDelta();
-          htmlContent = await compute(_deltaToHtmlTask, delta.toJson());
+          htmlContent = await compute(_convertDeltaToHtml, delta.toJson());
         }
 
         final pdfService = PdfService();
@@ -1047,7 +1047,7 @@ class ContentViewModel extends BaseViewModel {
           htmlContent = htmlController.text;
         } else {
           final delta = quillController.document.toDelta();
-          htmlContent = await compute(_deltaToHtmlTask, delta.toJson());
+          htmlContent = await compute(_convertDeltaToHtml, delta.toJson());
         }
 
         final fullHtml =
@@ -1174,7 +1174,7 @@ $htmlContent
           htmlContent = htmlController.text;
         } else {
           final delta = quillController.document.toDelta();
-          htmlContent = await compute(_deltaToHtmlTask, delta.toJson());
+          htmlContent = await compute(_convertDeltaToHtml, delta.toJson());
         }
 
         final pdfService = PdfService();
@@ -1563,14 +1563,16 @@ class ImportVerificationResult {
 }
 
 Future<List<dynamic>> _htmlToDeltaTask(String html) async {
-  final delta = HtmlToDelta().convert(html);
+  // Strip the visual checkbox inputs we added for export/display
+  // ensuring we rely on the data-checked attribute for the conversion
+  final cleanHtml = html;
+  final delta = HtmlToDelta().convert(cleanHtml);
   return delta.toJson();
 }
 
-Future<String> _deltaToHtmlTask(List<dynamic> deltaJson) async {
-  final converter = QuillDeltaToHtmlConverter(
-    deltaJson.cast<Map<String, dynamic>>(),
-    ConverterOptions.forEmail(),
-  );
-  return converter.convert();
+/// Static helper function for compute() to convert Delta to semantic HTML
+/// Must be static/top-level to avoid capturing instance variables
+Future<String> _convertDeltaToHtml(List<dynamic> deltaJson) async {
+  final service = SemanticHtmlConverterService();
+  return await service.convertDeltaToSemanticHtml(deltaJson);
 }

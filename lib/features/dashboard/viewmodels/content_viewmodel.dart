@@ -12,7 +12,7 @@ import '../models/note_model.dart';
 import 'dart:convert';
 import 'package:flutter_quill/flutter_quill.dart';
 // Removed invalid quill_delta import
-import 'package:vsc_quill_delta_to_html/vsc_quill_delta_to_html.dart';
+import '../services/semantic_html_converter_service.dart';
 import 'package:flutter_quill_delta_from_html/flutter_quill_delta_from_html.dart';
 import 'package:uuid/uuid.dart';
 import 'package:code_text_field/code_text_field.dart';
@@ -1412,9 +1412,5 @@ Future<List<dynamic>> _htmlToDeltaTask(String html) async {
 }
 
 Future<String> _deltaToHtmlTask(List<dynamic> deltaJson) async {
-  final converter = QuillDeltaToHtmlConverter(
-    deltaJson.cast<Map<String, dynamic>>(),
-    ConverterOptions.forEmail(),
-  );
-  return converter.convert();
+  return semanticDeltaToHtmlTask(deltaJson);
 }

@@ -1406,11 +1406,15 @@ class ImportVerificationResult {
   });
 }
 
-Future<List<dynamic>> _htmlToDeltaTask(String html) async {
+/// Synchronous task for compute() - converts HTML to Quill Delta JSON.
+/// Must be synchronous for compute() to work correctly.
+List<dynamic> _htmlToDeltaTask(String html) {
   final delta = HtmlToDelta().convert(html);
   return delta.toJson();
 }
 
-Future<String> _deltaToHtmlTask(List<dynamic> deltaJson) async {
-  return semanticDeltaToHtmlTask(deltaJson);
+/// Synchronous task for compute() - converts Quill Delta JSON to semantic HTML.
+/// Must be synchronous for compute() to work correctly.
+String _deltaToHtmlTask(List<dynamic> deltaJson) {
+  return SemanticHtmlConverterService().convert(deltaJson);
 }

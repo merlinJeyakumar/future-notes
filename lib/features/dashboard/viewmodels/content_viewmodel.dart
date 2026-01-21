@@ -41,6 +41,7 @@ class ContentViewModel extends BaseViewModel {
   Timer? _debounceTimer; // For file watching
   Timer? _searchDebounceTimer;
   Timer? _autoSaveDebounceTimer; // Minimal debounce for auto-save
+  Timer? _htmlSyncTimer; // For live HTML sync from Delta
   StreamSubscription? _fileWatcherSubscription;
   final BackgroundService _backgroundService = BackgroundService();
   List<RecentFile> _recentFiles = [];
@@ -250,6 +251,9 @@ class ContentViewModel extends BaseViewModel {
         _autoSaveDebounceTimer = Timer(const Duration(milliseconds: 50), () {
           onTextChanged();
         });
+
+        // Live sync to HTML with debouncing
+        _syncDeltaToHtml();
       }
     });
 
@@ -258,6 +262,24 @@ class ContentViewModel extends BaseViewModel {
         _scheduleAutoSave();
         // Optional: Title generation from HTML could go here,
         // but stripping tags might be expensive/complex to do continuously.
+      }
+    });
+  }
+
+  /// Sync Delta to HTML asynchronously with debouncing.
+  void _syncDeltaToHtml() {
+    _htmlSyncTimer?.cancel();
+    _htmlSyncTimer = Timer(const Duration(milliseconds: 300), () async {
+      try {
+        final delta = quillController.document.toDelta();
+        final html = await compute(_deltaToHtmlTask, delta.toJson());
+
+        // Only update if still in rich text mode (user didn't switch)
+        if (!_isHtmlMode) {
+          htmlController.text = html;
+        }
+      } catch (e) {
+        debugPrint('Error syncing Delta to HTML: $e');
       }
     });
   }
@@ -1246,6 +1268,7 @@ class ContentViewModel extends BaseViewModel {
     _debounceTimer?.cancel();
     _autoSaveDebounceTimer?.cancel();
     _searchDebounceTimer?.cancel();
+    _htmlSyncTimer?.cancel();
     _fileWatcherSubscription?.cancel();
     quillController.dispose();
     titleController.dispose();

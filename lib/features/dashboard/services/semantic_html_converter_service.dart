@@ -30,12 +30,13 @@ class SemanticHtmlConverterService {
         return '';
       }
 
-      // Configure converter for semantic output
+      // Configure converter to preserve inline styles (colors, backgrounds, etc.)
       final converter = QuillDeltaToHtmlConverter(
         ops,
         ConverterOptions(
           converterOptions: OpConverterOptions(
-            inlineStylesFlag: false,
+            inlineStylesFlag:
+                true, // Enable to preserve colors and inline styles
             encodeHtml: true,
           ),
         ),
@@ -119,38 +120,66 @@ class SemanticHtmlConverterService {
     return html;
   }
 
-  /// Convert inline style spans to semantic tags.
+  /// Convert inline style spans to semantic tags, but preserve color attributes.
   String _convertInlineStylesToTags(String html) {
-    // font-weight: bold -> <strong>
+    // Note: We now preserve color and background-color inline styles
+    // Only convert weight/style/decoration to semantic tags when they're the ONLY style
+
+    // font-weight: bold -> <strong> (only if no color/background)
     html = html.replaceAllMapped(
       RegExp(
         r'<span[^>]*style="[^"]*font-weight:\s*(?:bold|700)[^"]*"[^>]*>([\s\S]*?)</span>',
       ),
-      (m) => '<strong>${m.group(1)}</strong>',
+      (m) {
+        final fullMatch = m.group(0)!;
+        // Preserve if it has color or background-color
+        if (fullMatch.contains('color:')) {
+          return fullMatch;
+        }
+        return '<strong>${m.group(1)}</strong>';
+      },
     );
 
-    // font-style: italic -> <em>
+    // font-style: italic -> <em> (only if no color/background)
     html = html.replaceAllMapped(
       RegExp(
         r'<span[^>]*style="[^"]*font-style:\s*italic[^"]*"[^>]*>([\s\S]*?)</span>',
       ),
-      (m) => '<em>${m.group(1)}</em>',
+      (m) {
+        final fullMatch = m.group(0)!;
+        if (fullMatch.contains('color:')) {
+          return fullMatch;
+        }
+        return '<em>${m.group(1)}</em>';
+      },
     );
 
-    // text-decoration: underline -> <u>
+    // text-decoration: underline -> <u> (only if no color/background)
     html = html.replaceAllMapped(
       RegExp(
         r'<span[^>]*style="[^"]*text-decoration:\s*underline[^"]*"[^>]*>([\s\S]*?)</span>',
       ),
-      (m) => '<u>${m.group(1)}</u>',
+      (m) {
+        final fullMatch = m.group(0)!;
+        if (fullMatch.contains('color:')) {
+          return fullMatch;
+        }
+        return '<u>${m.group(1)}</u>';
+      },
     );
 
-    // text-decoration: line-through -> <s>
+    // text-decoration: line-through -> <s> (only if no color/background)
     html = html.replaceAllMapped(
       RegExp(
         r'<span[^>]*style="[^"]*text-decoration:\s*line-through[^"]*"[^>]*>([\s\S]*?)</span>',
       ),
-      (m) => '<s>${m.group(1)}</s>',
+      (m) {
+        final fullMatch = m.group(0)!;
+        if (fullMatch.contains('color:')) {
+          return fullMatch;
+        }
+        return '<s>${m.group(1)}</s>';
+      },
     );
 
     return html;
@@ -161,8 +190,18 @@ class SemanticHtmlConverterService {
     // Remove empty paragraphs
     html = html.replaceAll(RegExp(r'<p>\s*</p>'), '');
 
-    // Remove empty spans
-    html = html.replaceAll(RegExp(r'<span[^>]*>\s*</span>'), '');
+    // Remove only truly empty spans (no style attribute or empty style)
+    // Preserve spans with style attributes (colors, backgrounds, etc.)
+    html = html.replaceAllMapped(RegExp(r'<span([^>]*)>\s*</span>'), (match) {
+      final attributes = match.group(1) ?? '';
+      // Keep span if it has a non-empty style attribute
+      if (attributes.contains('style=') &&
+          !attributes.contains('style=""') &&
+          !attributes.contains("style=''")) {
+        return match.group(0)!; // Keep the span
+      }
+      return ''; // Remove empty span
+    });
 
     // Normalize consecutive <br> tags (max 2)
     html = html.replaceAllMapped(RegExp(r'(<br\s*/?>){3,}'), (_) => '<br><br>');

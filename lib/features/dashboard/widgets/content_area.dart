@@ -741,26 +741,21 @@ class _ContentAreaState extends State<ContentArea> {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: viewModel.isHtmlMode
-          ? SizedBox.expand(
-              child: CodeTheme(
-                data: CodeThemeData(styles: atomOneDarkTheme),
-                child: SingleChildScrollView(
-                  child: CodeField(
-                    controller: viewModel.htmlController,
-                    textStyle: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 14,
-                      color: colors.textPrimary,
-                    ),
-                    expands: false,
-                    maxLines: null,
-                    minLines: 30,
-                    background: colors.background,
-                    lineNumberStyle: LineNumberStyle(
-                      background: colors.background,
-                      textStyle: TextStyle(color: colors.subtleGray),
-                    ),
-                  ),
+          ? CodeTheme(
+              data: CodeThemeData(styles: atomOneDarkTheme),
+              child: CodeField(
+                controller: viewModel.htmlController,
+                textStyle: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 14,
+                  color: colors.textPrimary,
+                ),
+                expands: true,
+                maxLines: null,
+                background: colors.background,
+                lineNumberStyle: LineNumberStyle(
+                  background: colors.background,
+                  textStyle: TextStyle(color: colors.subtleGray),
                 ),
               ),
             )

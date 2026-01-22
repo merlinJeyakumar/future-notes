@@ -13,6 +13,7 @@ import 'dart:convert';
 import 'package:flutter_quill/flutter_quill.dart';
 // Removed invalid quill_delta import
 import '../services/semantic_html_converter_service.dart';
+import '../services/html_beautifier_service.dart';
 import 'package:flutter_quill_delta_from_html/flutter_quill_delta_from_html.dart';
 import 'package:uuid/uuid.dart';
 import 'package:code_text_field/code_text_field.dart';
@@ -42,6 +43,7 @@ class ContentViewModel extends BaseViewModel {
   Timer? _searchDebounceTimer;
   Timer? _autoSaveDebounceTimer; // Minimal debounce for auto-save
   Timer? _htmlSyncTimer; // For live HTML sync from Delta
+  Timer? _htmlBeautifyTimer; // For auto-beautification of HTML
   StreamSubscription? _fileWatcherSubscription;
   final BackgroundService _backgroundService = BackgroundService();
   List<RecentFile> _recentFiles = [];
@@ -260,8 +262,8 @@ class ContentViewModel extends BaseViewModel {
     htmlController.addListener(() {
       if (_isHtmlMode) {
         _scheduleAutoSave();
-        // Optional: Title generation from HTML could go here,
-        // but stripping tags might be expensive/complex to do continuously.
+        // Auto-beautify HTML with debouncing
+        _scheduleHtmlBeautification();
       }
     });
   }
@@ -329,9 +331,83 @@ class ContentViewModel extends BaseViewModel {
 
       htmlController.text = html;
       _isHtmlMode = true;
+
+      // Auto-beautify immediately when switching to HTML mode
+      try {
+        final beautifiedHtml = await compute(beautifyHtmlTask, html);
+        if (beautifiedHtml != html) {
+          htmlController.text = beautifiedHtml;
+        }
+      } catch (e) {
+        debugPrint('Error beautifying on mode switch: $e');
+      }
     }
     notifyListeners();
     setBusy(false);
+  }
+
+  /// Beautifies the current HTML content with proper indentation and formatting.
+  /// Only works when in HTML editor mode.
+  Future<void> beautifyHtml() async {
+    if (!_isHtmlMode) {
+      debugPrint('beautifyHtml: Not in HTML mode, skipping');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      final currentHtml = htmlController.text;
+      if (currentHtml.trim().isEmpty) {
+        setBusy(false);
+        return;
+      }
+
+      // Run beautification in isolate to avoid blocking UI
+      final beautifiedHtml = await compute(beautifyHtmlTask, currentHtml);
+
+      // Update the HTML controller
+      htmlController.text = beautifiedHtml;
+
+      // Schedule auto-save to persist the formatted HTML
+      _scheduleAutoSave();
+    } catch (e) {
+      debugPrint('Error beautifying HTML: $e');
+      // Don't crash on error, just log it
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /// Schedules HTML beautification with debouncing to avoid constant formatting while typing.
+  /// Triggers 2 seconds after user stops typing.
+  void _scheduleHtmlBeautification() {
+    _htmlBeautifyTimer?.cancel();
+    _htmlBeautifyTimer = Timer(const Duration(seconds: 2), () async {
+      if (_isHtmlMode && htmlController.text.trim().isNotEmpty) {
+        try {
+          // Store cursor position before beautification
+          final selection = htmlController.selection;
+
+          final currentHtml = htmlController.text;
+          final beautifiedHtml = await compute(beautifyHtmlTask, currentHtml);
+
+          // Only update if content actually changed
+          if (beautifiedHtml != currentHtml) {
+            htmlController.text = beautifiedHtml;
+
+            // Restore cursor position (approximate)
+            if (selection.isValid &&
+                selection.baseOffset <= beautifiedHtml.length) {
+              htmlController.selection = TextSelection.collapsed(
+                offset: selection.baseOffset.clamp(0, beautifiedHtml.length),
+              );
+            }
+          }
+        } catch (e) {
+          debugPrint('Error in auto-beautification: $e');
+        }
+      }
+    });
   }
 
   void _initFileWatcher() {

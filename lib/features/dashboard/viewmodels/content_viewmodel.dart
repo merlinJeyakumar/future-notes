@@ -713,7 +713,6 @@ class ContentViewModel extends BaseViewModel {
 
     setBusy(true);
     try {
-      // 1. Get content from editor (already decrypted in memory)
       progressNotifier.value = 'Re-encrypting content...';
       await Future.delayed(Duration.zero);
 
@@ -722,7 +721,7 @@ class ContentViewModel extends BaseViewModel {
         contentToSave = htmlController.text;
       } else {
         final delta = quillController.document.toDelta();
-        contentToSave = jsonEncode(delta.toJson());
+        contentToSave = await compute(_deltaToHtmlTask, delta.toJson());
       }
 
       // Re-encrypt content with new password
@@ -877,7 +876,7 @@ class ContentViewModel extends BaseViewModel {
       contentToSave = htmlController.text;
     } else {
       final delta = quillController.document.toDelta();
-      contentToSave = jsonEncode(delta.toJson());
+      contentToSave = await compute(_deltaToHtmlTask, delta.toJson());
     }
 
     String plainText = "";
@@ -1290,29 +1289,32 @@ class ContentViewModel extends BaseViewModel {
     try {
       content = content.trim();
 
-      // 1. Try Delta JSON
+      // 1. Legacy Delta JSON
       if (content.startsWith('[') || content.startsWith('{')) {
         try {
           final jsonContent = jsonDecode(content);
           if (jsonContent is List) {
             quillController.document = Document.fromJson(jsonContent);
+            _syncDeltaToHtml();
             quillController.moveCursorToPosition(
               quillController.document.length,
             );
             return;
           }
         } catch (e) {
-          // Not JSON or failed to parse, fall through
+          // Not valid JSON
         }
       }
 
-      // 2. Try HTML
-      if (content.startsWith('<')) {
+      // 2. HTML (Preferred)
+      if (content.startsWith('<') || content.trim().isEmpty) {
         final delta = HtmlToDelta().convert(content);
         quillController.document = Document.fromDelta(delta);
+        htmlController.text = content;
       } else {
-        // 3. Plain text
+        // 3. Plain text fallback
         quillController.document = Document()..insert(0, content);
+        _syncDeltaToHtml();
       }
     } catch (e) {
       // Fallback
@@ -1366,16 +1368,15 @@ class ContentViewModel extends BaseViewModel {
   // Background isolate for auto-saving note content
   static Future<void> _autoSaveIsolate(Map<String, dynamic> args) async {
     final fileName = args['fileName'] as String?;
-    final plainText = args['plainText'] as String?;
+    final content = args['content'] as String?;
     final isPasswordSet = args['isPasswordSet'] as bool;
     final password = args['password'] as String?;
 
-    if (fileName == null || plainText == null) return;
+    if (fileName == null || content == null) return;
     try {
-      String dataToSave = plainText;
+      String dataToSave = content;
       if (isPasswordSet && password != null) {
-        // Use async encryption within isolate
-        dataToSave = await EncryptionService().encryptApp(plainText);
+        dataToSave = await EncryptionService().encryptApp(content);
       }
       final file = File('${Directory.current.path}/$fileName');
       await file.writeAsString(dataToSave);
@@ -1416,11 +1417,19 @@ class ContentViewModel extends BaseViewModel {
     if (_currentFileName != null || isPasswordSet) {
       _autoSaveTimer?.cancel();
       _autoSaveTimer = Timer(const Duration(seconds: 2), () async {
-        // Offload save to background isolate to avoid UI thread blocking
-        final plainText = quillController.document.toPlainText();
+        String contentToSave = "";
+
+        if (_isHtmlMode) {
+          contentToSave = htmlController.text;
+        } else {
+          final delta = quillController.document.toDelta();
+          final deltaJson = delta.toJson();
+          contentToSave = SemanticHtmlConverterService().convert(deltaJson);
+        }
+
         await compute(_autoSaveIsolate, {
           'fileName': _currentFileName,
-          'plainText': plainText,
+          'content': contentToSave,
           'isPasswordSet': isPasswordSet,
           'password': _currentPassword,
         });

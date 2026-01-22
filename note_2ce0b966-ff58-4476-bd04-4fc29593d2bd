@@ -1,31 +1,56 @@
-Heading1
-Heading2
-Heading3
-Normal text
-
+<h1>Heading1</h1>
+<h2>Heading2</h2>
+<h3>Heading3</h3>
+<p>
+Normal
+  <br>
+  <br>
 label
-
-
-label
-
-
-
-
-
-
-something
-
-my menu
-
-one
-two
-three
-
-one bullet
-two bullet
-three bullet
-
-red
-green
-
-link
+  <br>
+  <br>
+</p>
+<ul>
+  <li style="list-style-type:'\2611';padding-left: 0.5em;" data-checked="true">label</li>
+</ul>
+<p>
+  <br>
+</p>
+<ul>
+  <li style="list-style-type:'\2611';padding-left: 0.5em;" data-checked="true">
+    <br>
+  </li>
+</ul>
+<p>
+  <br>
+  <br>
+</p>
+<pre>something</pre>
+<p>
+  <br>
+</p>
+<blockquote>my menu</blockquote>
+<p>
+  <br>
+</p>
+<ol>
+  <li>one</li>
+  <li>two</li>
+  <li>three</li>
+</ol>
+<p>
+  <br>
+</p>
+<ul>
+  <li>one bullet</li>
+  <li>two bullet</li>
+  <li>three bullet</li>
+</ul>
+<p>
+  <br>
+<strong>red</strong>
+  <br>
+<strong>green</strong>
+  <br>
+  <br>
+<a href="https://www.google.com" target="_blank">link</a>
+</p>

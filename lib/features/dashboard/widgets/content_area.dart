@@ -8,8 +8,6 @@ import '../models/note_model.dart';
 import 'password_dialog.dart';
 import '../../../core/theme/app_theme.dart';
 
-import 'package:code_text_field/code_text_field.dart';
-import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:pdfx/pdfx.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
@@ -131,11 +129,6 @@ class _ContentAreaState extends State<ContentArea> {
 
           // Secondary actions (right side)
           _buildSecondaryActions(context),
-
-          SizedBox(width: isMobile ? 8 : 16),
-
-          // HTML/Rich Text Toggle Button
-          if (!viewModel.isLocked) _buildModeToggleButton(),
 
           SizedBox(width: isMobile ? 8 : 12),
 
@@ -290,11 +283,6 @@ class _ContentAreaState extends State<ContentArea> {
 
   /// Floating toolbar "island" with grouped formatting tools
   Widget _buildFloatingToolbar(bool isMobile) {
-    // If in HTML mode, show nothing (or HTML toolbar if we had one)
-    if (viewModel.isHtmlMode) {
-      return const SizedBox();
-    }
-
     // Delegate to adapter
     return Container(
       margin: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 20, vertical: 8),
@@ -311,49 +299,6 @@ class _ContentAreaState extends State<ContentArea> {
         ],
       ),
       child: viewModel.richTextEditor.buildToolbar(enabled: true),
-    );
-  }
-
-  /// Toggle button for Rich Text / HTML
-  Widget _buildModeToggleButton() {
-    final isHtml = viewModel.isHtmlMode;
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.accent.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: colors.accent.withOpacity(0.5)),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            viewModel.toggleEditorMode();
-          },
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  isHtml ? Icons.auto_awesome_rounded : Icons.code_rounded,
-                  size: 14,
-                  color: colors.accent,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  isHtml ? 'Rich Text' : 'HTML',
-                  style: TextStyle(
-                    color: colors.accent,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 
@@ -462,33 +407,14 @@ class _ContentAreaState extends State<ContentArea> {
     // Spacious editor with increased padding
     return Padding(
       padding: const EdgeInsets.all(16),
-      child: viewModel.isHtmlMode
-          ? CodeTheme(
-              data: CodeThemeData(styles: atomOneDarkTheme),
-              child: CodeField(
-                controller: viewModel.htmlController,
-                textStyle: TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 14,
-                  color: colors.textPrimary,
-                ),
-                expands: true,
-                maxLines: null,
-                background: colors.background,
-                lineNumberStyle: LineNumberStyle(
-                  background: colors.background,
-                  textStyle: TextStyle(color: colors.subtleGray),
-                ),
-              ),
-            )
-          : RepaintBoundary(
-              child: viewModel.richTextEditor.buildEditor(
-                context: context,
-                readOnly: false,
-                focusNode: _focusNode,
-                scrollController: _scrollController,
-              ),
-            ),
+      child: RepaintBoundary(
+        child: viewModel.richTextEditor.buildEditor(
+          context: context,
+          readOnly: false,
+          focusNode: _focusNode,
+          scrollController: _scrollController,
+        ),
+      ),
     );
   }
 

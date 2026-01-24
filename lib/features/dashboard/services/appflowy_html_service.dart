@@ -33,17 +33,11 @@ class AppFlowyHtmlService {
     }
   }
 
-  /// Convert EditorState to HTML string.
+  /// Convert EditorState to HTML string using official AppFlowy API.
+  /// This provides organic, semantic HTML output with proper formatting.
   String editorStateToHtml(EditorState state) {
-    final buffer = StringBuffer();
-    final doc = state.document;
-
-    // Iterate over children of root (assuming root is 'page')
-    for (final node in doc.root.children) {
-      buffer.write(_nodeToHtml(node));
-    }
-
-    return buffer.toString();
+    // Use official AppFlowy documentToHTML function for organic HTML export
+    return documentToHTML(state.document);
   }
 
   List<Node> _parseNode(html_dom.Node node) {
@@ -139,8 +133,9 @@ class AppFlowyHtmlService {
       if (tag == 'b' || tag == 'strong') newAttrs['bold'] = true;
       if (tag == 'i' || tag == 'em') newAttrs['italic'] = true;
       if (tag == 'u' || tag == 'ins') newAttrs['underline'] = true;
-      if (tag == 's' || tag == 'del' || tag == 'strike')
+      if (tag == 's' || tag == 'del' || tag == 'strike') {
         newAttrs['strikethrough'] = true;
+      }
       if (tag == 'code') newAttrs['code'] = true;
       if (tag == 'a') {
         final href = node.attributes['href'];
@@ -163,68 +158,5 @@ class AppFlowyHtmlService {
         _recurseInline(child, newAttrs, delta);
       }
     }
-  }
-
-  String _nodeToHtml(Node node) {
-    final type = node.type;
-    final delta = node.delta;
-
-    switch (type) {
-      case 'paragraph':
-        return '<p>${_deltaToHtml(delta)}</p>\n';
-      case 'heading':
-        final level = node.attributes['level'] ?? 1;
-        return '<h$level>${_deltaToHtml(delta)}</h$level>\n';
-      case 'bulleted_list':
-        return '<ul><li>${_deltaToHtml(delta)}</li></ul>\n';
-      case 'numbered_list':
-        return '<ol><li>${_deltaToHtml(delta)}</li></ol>\n';
-      case 'todo_list':
-        final checked = node.attributes['checked'] == true;
-        final checkedStr = checked ? ' checked' : '';
-        return '<div><input type="checkbox"$checkedStr> ${_deltaToHtml(delta)}</div>\n';
-      case 'quote':
-        return '<blockquote>${_deltaToHtml(delta)}</blockquote>\n';
-      case 'image':
-        final src = node.attributes['url'] ?? '';
-        return '<img src="$src">\n';
-      default:
-        return '<p>${_deltaToHtml(delta)}</p>\n';
-    }
-  }
-
-  String _deltaToHtml(Delta? delta) {
-    if (delta == null) return '';
-    final buffer = StringBuffer();
-    // Use toList() to iterate
-    for (final op in delta.toList()) {
-      if ((op as dynamic).isInsert == true) {
-        final text = (op as dynamic).data;
-        if (text is String) {
-          final attrs = (op as dynamic).attributes as Map<String, dynamic>?;
-          String span = text;
-          span = span
-              .replaceAll('&', '&amp;')
-              .replaceAll('<', '&lt;')
-              .replaceAll('>', '&gt;');
-
-          if (attrs != null) {
-            if (attrs['color'] != null) {
-              span = '<span style="color: ${attrs['color']} ">$span</span>';
-            }
-            if (attrs['bold'] == true) span = '<b>$span</b>';
-            if (attrs['italic'] == true) span = '<i>$span</i>';
-            if (attrs['underline'] == true) span = '<u>$span</u>';
-            if (attrs['strikethrough'] == true) span = '<s>$span</s>';
-            if (attrs['code'] == true) span = '<code>$span</code>';
-            if (attrs['href'] != null) {
-              span = '<a href="${attrs['href']}">$span</a>';
-            }
-          }
-          buffer.write(span);
-        }
-      }
-    }
-    return buffer.toString();
   }
 }

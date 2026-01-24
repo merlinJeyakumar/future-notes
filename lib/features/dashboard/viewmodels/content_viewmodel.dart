@@ -12,11 +12,8 @@ import '../models/note_model.dart';
 import 'dart:convert';
 import '../core/i_rich_text_editor.dart';
 import '../core/appflowy_editor_adapter.dart';
-import '../services/html_beautifier_service.dart';
 import 'package:uuid/uuid.dart';
-import 'package:code_text_field/code_text_field.dart';
-import 'package:highlight/languages/xml.dart'; // XML handles HTML highlighting
-import 'dart:typed_data';
+
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
@@ -45,8 +42,7 @@ class ContentViewModel extends BaseViewModel {
   Timer? _debounceTimer; // For file watching
   Timer? _searchDebounceTimer;
   Timer? _autoSaveDebounceTimer; // Minimal debounce for auto-save
-  Timer? _htmlSyncTimer; // For live HTML sync from Delta
-  Timer? _htmlBeautifyTimer; // For auto-beautification of HTML
+
   StreamSubscription? _fileWatcherSubscription;
   final BackgroundService _backgroundService = BackgroundService();
   List<RecentFile> _recentFiles = [];
@@ -75,10 +71,6 @@ class ContentViewModel extends BaseViewModel {
   List<AttachmentModel> get attachments => _attachments;
   bool get isPasswordSet => _currentPassword != null;
   String? get currentFileName => _currentFileName;
-
-  late final CodeController htmlController;
-  bool _isHtmlMode = false;
-  bool get isHtmlMode => _isHtmlMode;
 
   Future<void> pickAttachment() async {
     final result = await _fileService.pickFile(allowedExtensions: null);
@@ -243,44 +235,14 @@ class ContentViewModel extends BaseViewModel {
     // Initialize Super Editor document model
     _initDocument();
 
-    // Initialize CodeController with syntax highlighting
-    htmlController = CodeController(
-      language: xml, // Highlighting for XML/HTML
-    );
-
     // Ensure settings are loaded before loading files
     _initAsync();
     _initFileWatcher();
-
-    htmlController.addListener(() {
-      if (_isHtmlMode) {
-        _scheduleAutoSave();
-        // Auto-beautify HTML with debouncing
-        _scheduleHtmlBeautification();
-      }
-    });
   }
 
   /// Initialize the rich text editor adapter
   void _initDocument() {
     _richTextEditor = AppFlowyEditorAdapter();
-  }
-
-  /// Sync Document to HTML asynchronously with debouncing.
-  void _syncDocumentToHtml() {
-    _htmlSyncTimer?.cancel();
-    _htmlSyncTimer = Timer(const Duration(milliseconds: 300), () async {
-      try {
-        final html = _richTextEditor.getHtml();
-
-        // Only update if still in rich text mode (user didn't switch)
-        if (!_isHtmlMode) {
-          htmlController.text = html;
-        }
-      } catch (e) {
-        debugPrint('Error syncing Document to HTML: $e');
-      }
-    });
   }
 
   Future<void> handleLinkClick(String url) async {
@@ -301,104 +263,6 @@ class ContentViewModel extends BaseViewModel {
       // For now print
       print("External Link Clicked: $url");
     }
-  }
-
-  Future<void> toggleEditorMode() async {
-    setBusy(true);
-    if (_isHtmlMode) {
-      // Switch to Rich Text
-      // Convert HTML string to Document via adapter
-      try {
-        final html = htmlController.text;
-        _richTextEditor.setHtml(html);
-      } catch (e) {
-        debugPrint("Error converting HTML to Document: $e");
-      }
-      _isHtmlMode = false;
-    } else {
-      // Switch to HTML Editor
-      // Convert Document to HTML string via adapter
-      final html = _richTextEditor.getHtml();
-
-      htmlController.text = html;
-      _isHtmlMode = true;
-
-      // Auto-beautify immediately when switching to HTML mode
-      try {
-        final beautifiedHtml = await compute(beautifyHtmlTask, html);
-        if (beautifiedHtml != html) {
-          htmlController.text = beautifiedHtml;
-        }
-      } catch (e) {
-        debugPrint('Error beautifying on mode switch: $e');
-      }
-    }
-    notifyListeners();
-    setBusy(false);
-  }
-
-  /// Beautifies the current HTML content with proper indentation and formatting.
-  /// Only works when in HTML editor mode.
-  Future<void> beautifyHtml() async {
-    if (!_isHtmlMode) {
-      debugPrint('beautifyHtml: Not in HTML mode, skipping');
-      return;
-    }
-
-    setBusy(true);
-    try {
-      final currentHtml = htmlController.text;
-      if (currentHtml.trim().isEmpty) {
-        setBusy(false);
-        return;
-      }
-
-      // Run beautification in isolate to avoid blocking UI
-      final beautifiedHtml = await compute(beautifyHtmlTask, currentHtml);
-
-      // Update the HTML controller
-      htmlController.text = beautifiedHtml;
-
-      // Schedule auto-save to persist the formatted HTML
-      _scheduleAutoSave();
-    } catch (e) {
-      debugPrint('Error beautifying HTML: $e');
-      // Don't crash on error, just log it
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  /// Schedules HTML beautification with debouncing to avoid constant formatting while typing.
-  /// Triggers 2 seconds after user stops typing.
-  void _scheduleHtmlBeautification() {
-    _htmlBeautifyTimer?.cancel();
-    _htmlBeautifyTimer = Timer(const Duration(seconds: 2), () async {
-      if (_isHtmlMode && htmlController.text.trim().isNotEmpty) {
-        try {
-          // Store cursor position before beautification
-          final selection = htmlController.selection;
-
-          final currentHtml = htmlController.text;
-          final beautifiedHtml = await compute(beautifyHtmlTask, currentHtml);
-
-          // Only update if content actually changed
-          if (beautifiedHtml != currentHtml) {
-            htmlController.text = beautifiedHtml;
-
-            // Restore cursor position (approximate)
-            if (selection.isValid &&
-                selection.baseOffset <= beautifiedHtml.length) {
-              htmlController.selection = TextSelection.collapsed(
-                offset: selection.baseOffset.clamp(0, beautifiedHtml.length),
-              );
-            }
-          }
-        } catch (e) {
-          debugPrint('Error in auto-beautification: $e');
-        }
-      }
-    });
   }
 
   void _initFileWatcher() {
@@ -437,9 +301,6 @@ class ContentViewModel extends BaseViewModel {
     setBusy(true);
     _currentFileName = fileName;
     _attachmentCache.clear();
-
-    // Reset mode to Rich Text on new load for consistency
-    _isHtmlMode = false;
 
     final content = await _fileService.readFile(fileName);
     if (content != null) {
@@ -481,7 +342,6 @@ class ContentViewModel extends BaseViewModel {
         _isLocked = true;
         isLockedNotifier.value = true;
         _initDocument();
-        htmlController.clear();
         _currentPassword = null;
         notifyListeners();
       }
@@ -676,7 +536,6 @@ class ContentViewModel extends BaseViewModel {
       _isLocked = true;
       isLockedNotifier.value = true;
       _initDocument();
-      htmlController.clear();
       _attachmentCache.clear();
       notifyListeners();
     }
@@ -708,12 +567,7 @@ class ContentViewModel extends BaseViewModel {
       progressNotifier.value = 'Re-encrypting content...';
       await Future.delayed(Duration.zero);
 
-      String contentToSave = "";
-      if (_isHtmlMode) {
-        contentToSave = htmlController.text;
-      } else {
-        contentToSave = _richTextEditor.getHtml();
-      }
+      String contentToSave = _richTextEditor.getHtml();
 
       // Re-encrypt content with new password
       final newEncryptedContent = await _encryptionService.encrypt(
@@ -860,23 +714,11 @@ class ContentViewModel extends BaseViewModel {
       noteId = const Uuid().v4();
     }
 
-    String contentToSave = "";
+    String contentToSave = _richTextEditor.getHtml();
     bool locked = false;
 
-    if (_isHtmlMode) {
-      contentToSave = htmlController.text;
-    } else {
-      contentToSave = _richTextEditor.getHtml();
-    }
-
-    String plainText = "";
-    if (_isHtmlMode) {
-      plainText = htmlController.text.replaceAll(RegExp(r'<[^>]*>'), '').trim();
-    } else {
-      // Extract plain text from HTML content
-      final html = _richTextEditor.getHtml();
-      plainText = html.replaceAll(RegExp(r'<[^>]*>'), '').trim();
-    }
+    // Extract plain text from HTML content
+    String plainText = contentToSave.replaceAll(RegExp(r'<[^>]*>'), '').trim();
 
     if (_currentFileName == null &&
         plainText.isEmpty &&
@@ -900,9 +742,7 @@ class ContentViewModel extends BaseViewModel {
     final note = NoteModel(
       id: noteId,
       title: (titleController.text.trim().length < 40)
-          ? (_isHtmlMode
-                ? titleController.text
-                : _generateTitleFromContent(plainText))
+          ? _generateTitleFromContent(plainText)
           : titleController.text,
       content: encryptedContent,
       isLocked: locked,
@@ -1303,7 +1143,6 @@ class ContentViewModel extends BaseViewModel {
             }
             final plainText = buffer.toString().trim();
             _setDocumentText(plainText);
-            _syncDocumentToHtml();
             return;
           }
         } catch (e) {
@@ -1314,11 +1153,9 @@ class ContentViewModel extends BaseViewModel {
       // 2. HTML (Preferred)
       if (content.startsWith('<') || content.trim().isEmpty) {
         _richTextEditor.setHtml(content);
-        htmlController.text = content;
       } else {
         // 3. Plain text fallback
         _setDocumentText(content);
-        _syncDocumentToHtml();
       }
     } catch (e) {
       // Fallback
@@ -1331,10 +1168,8 @@ class ContentViewModel extends BaseViewModel {
     _currentFileName = null;
     _currentPassword = null;
     _isLocked = false;
-    _isHtmlMode = false;
     _attachments = [];
     _initDocument();
-    htmlController.clear();
     titleController.text = "New Note";
     _attachmentCache.clear();
     notifyListeners();
@@ -1347,10 +1182,8 @@ class ContentViewModel extends BaseViewModel {
     _debounceTimer?.cancel();
     _autoSaveDebounceTimer?.cancel();
     _searchDebounceTimer?.cancel();
-    _htmlSyncTimer?.cancel();
     _fileWatcherSubscription?.cancel();
     titleController.dispose();
-    htmlController.dispose();
     focusNode.dispose();
     scrollController.dispose();
     _backgroundService.dispose();
@@ -1417,13 +1250,7 @@ class ContentViewModel extends BaseViewModel {
     if (_currentFileName != null || isPasswordSet) {
       _autoSaveTimer?.cancel();
       _autoSaveTimer = Timer(const Duration(seconds: 2), () async {
-        String contentToSave = "";
-
-        if (_isHtmlMode) {
-          contentToSave = htmlController.text;
-        } else {
-          contentToSave = _richTextEditor.getHtml();
-        }
+        String contentToSave = _richTextEditor.getHtml();
 
         await compute(_autoSaveIsolate, {
           'fileName': _currentFileName,
@@ -1471,8 +1298,9 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<Uint8List?> readAttachment(String attachmentId) async {
-    if (_currentFileName == null || !_currentFileName!.startsWith('note_'))
+    if (_currentFileName == null || !_currentFileName!.startsWith('note_')) {
       return null;
+    }
     final noteId = _currentFileName!.replaceFirst('note_', '');
 
     if (_attachmentCache.containsKey(attachmentId)) {

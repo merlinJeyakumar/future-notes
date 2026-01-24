@@ -1,1 +1,7 @@
-<p><strong>R</strong>ED</p>
+<div>
+  <input type="checkbox" checked="">
+</div>
+<p>RED</p>
+<div>
+  <input type="checkbox">
+</div>

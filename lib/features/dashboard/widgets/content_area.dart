@@ -2,8 +2,9 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_quill/flutter_quill.dart';
+import 'package:super_editor/super_editor.dart';
 import 'dart:typed_data';
+import '../core/super_editor_adapter.dart';
 import '../viewmodels/content_viewmodel.dart';
 import '../models/note_model.dart';
 import 'password_dialog.dart';
@@ -41,8 +42,6 @@ class ContentArea extends StatefulWidget {
 }
 
 class _ContentAreaState extends State<ContentArea> {
-  late final AttachmentEmbedBuilder _embedBuilder;
-  late final QuillEditorConfig _editorConfig;
   late final FocusNode _focusNode;
   late final ScrollController _scrollController;
 
@@ -54,25 +53,9 @@ class _ContentAreaState extends State<ContentArea> {
   @override
   void initState() {
     super.initState();
-    _embedBuilder = AttachmentEmbedBuilder(viewModel);
     // Cache local references to avoid property access in build/config
     _focusNode = viewModel.focusNode;
     _scrollController = viewModel.scrollController;
-
-    _editorConfig = QuillEditorConfig(
-      autoFocus: false,
-      scrollable: true,
-      expands: true,
-      padding: const EdgeInsets.all(16), // Increased padding here directly
-      keyboardAppearance: Brightness.dark,
-      embedBuilders: [_embedBuilder],
-      onLaunchUrl: (url) {
-        viewModel.handleLinkClick(url);
-      },
-      // Optimization: Disable some heavy features if not needed
-      enableInteractiveSelection: true,
-      enableSelectionToolbar: true,
-    );
   }
 
   @override
@@ -366,123 +349,85 @@ class _ContentAreaState extends State<ContentArea> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Undo/Redo
-          QuillToolbarHistoryButton(
-            controller: viewModel.quillController,
-            isUndo: true,
-            options: QuillToolbarHistoryButtonOptions(
-              iconTheme: _getIconTheme(),
-            ),
-          ),
-          QuillToolbarHistoryButton(
-            controller: viewModel.quillController,
-            isUndo: false,
-            options: QuillToolbarHistoryButtonOptions(
-              iconTheme: _getIconTheme(),
-            ),
-          ),
+          // Basic text formatting
+          _buildToolbarButton(Icons.format_bold, 'Bold', () {
+            _toggleAttribution(boldAttribution);
+          }),
+          _buildToolbarButton(Icons.format_italic, 'Italic', () {
+            _toggleAttribution(italicsAttribution);
+          }),
+          _buildToolbarButton(Icons.format_underlined, 'Underline', () {
+            _toggleAttribution(underlineAttribution);
+          }),
+          _buildToolbarButton(Icons.strikethrough_s, 'Strikethrough', () {
+            _toggleAttribution(strikethroughAttribution);
+          }),
           _buildVerticalDivider(),
 
-          // Font Size dropdown
-          QuillToolbarFontSizeButton(
-            controller: viewModel.quillController,
-            options: QuillToolbarFontSizeButtonOptions(
-              style: TextStyle(color: colors.textSecondary, fontSize: 12),
-            ),
-          ),
+          // Headers
+          _buildToolbarButton(Icons.title, 'Header 1', () {
+            _toggleBlockType(header1Attribution);
+          }),
+          _buildToolbarButton(Icons.text_fields, 'Header 2', () {
+            _toggleBlockType(header2Attribution);
+          }),
           _buildVerticalDivider(),
 
-          // Text Styling: Bold, Italic, Underline, Strike, Inline Code
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.bold,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.italic,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.underline,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.strikeThrough,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.inlineCode,
-            options: _getButtonOptions(),
-          ),
+          // Lists
+          _buildToolbarButton(Icons.format_list_bulleted, 'Bullet List', () {
+            _toggleListType(ListItemType.unordered);
+          }),
+          _buildToolbarButton(Icons.format_list_numbered, 'Numbered List', () {
+            _toggleListType(ListItemType.ordered);
+          }),
           _buildVerticalDivider(),
 
-          // Subscript, Superscript
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.subscript,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.superscript,
-            options: _getButtonOptions(),
-          ),
-          _buildVerticalDivider(),
-
-          // Color buttons
-          QuillToolbarColorButton(
-            controller: viewModel.quillController,
-            isBackground: false,
-            options: _getColorButtonOptions(),
-          ),
-          QuillToolbarColorButton(
-            controller: viewModel.quillController,
-            isBackground: true,
-            options: _getColorButtonOptions(),
-          ),
-          QuillToolbarClearFormatButton(
-            controller: viewModel.quillController,
-            options: QuillToolbarClearFormatButtonOptions(
-              iconTheme: _getIconTheme(),
-            ),
-          ),
-          _buildVerticalDivider(),
-
-          // Alignment
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.leftAlignment,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.centerAlignment,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.rightAlignment,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.justifyAlignment,
-            options: _getButtonOptions(),
-          ),
-          _buildVerticalDivider(),
-
-          // Header dropdown
-          QuillToolbarSelectHeaderStyleDropdownButton(
-            controller: viewModel.quillController,
-            options: QuillToolbarSelectHeaderStyleDropdownButtonOptions(
-              textStyle: TextStyle(color: colors.textSecondary),
-            ),
-          ),
+          // Block formatting
+          _buildToolbarButton(Icons.format_quote, 'Quote', () {
+            _toggleBlockType(blockquoteAttribution);
+          }),
+          _buildToolbarButton(Icons.code, 'Code Block', () {
+            _toggleBlockType(codeAttribution);
+          }),
         ],
+      ),
+    );
+  }
+
+  void _toggleAttribution(Attribution attribution) {
+    final editor = viewModel.richTextEditor;
+    if (editor is SuperEditorAdapter) {
+      editor.toggleAttribution(attribution);
+    }
+  }
+
+  void _toggleBlockType(Attribution blockType) {
+    final editor = viewModel.richTextEditor;
+    if (editor is SuperEditorAdapter) {
+      editor.toggleBlockType(blockType);
+    }
+  }
+
+  void _toggleListType(ListItemType type) {
+    final editor = viewModel.richTextEditor;
+    if (editor is SuperEditorAdapter) {
+      editor.toggleListType(type);
+    }
+  }
+
+  Widget _buildToolbarButton(
+    IconData icon,
+    String tooltip,
+    VoidCallback onPressed,
+  ) {
+    return Tooltip(
+      message: tooltip,
+      child: IconButton(
+        icon: Icon(icon, size: 20, color: colors.textSecondary),
+        onPressed: onPressed,
+        padding: const EdgeInsets.all(8),
+        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+        splashRadius: 18,
       ),
     );
   }
@@ -493,68 +438,49 @@ class _ContentAreaState extends State<ContentArea> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Ordered list, Bullet list, Checkbox
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.ol,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.ul,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleCheckListButton(
-            controller: viewModel.quillController,
-            options: QuillToolbarToggleCheckListButtonOptions(
-              iconTheme: _getIconTheme(),
-            ),
-          ),
-          _buildVerticalDivider(),
-
-          // Code Block
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.codeBlock,
-            options: _getButtonOptions(),
-          ),
-          _buildVerticalDivider(),
-
-          // Quote
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.blockQuote,
-            options: _getButtonOptions(),
-          ),
-          _buildVerticalDivider(),
-
-          // Indent buttons
-          QuillToolbarIndentButton(
-            controller: viewModel.quillController,
-            isIncrease: true,
-            options: QuillToolbarIndentButtonOptions(
-              iconTheme: _getIconTheme(),
-            ),
-          ),
-          QuillToolbarIndentButton(
-            controller: viewModel.quillController,
-            isIncrease: false,
-            options: QuillToolbarIndentButtonOptions(
-              iconTheme: _getIconTheme(),
-            ),
-          ),
+          // Additional formatting options
+          _buildToolbarButton(Icons.format_indent_increase, 'Indent', () {
+            // Indent functionality - simplified for now
+          }),
+          _buildToolbarButton(Icons.format_indent_decrease, 'Outdent', () {
+            // Outdent functionality - simplified for now
+          }),
           _buildVerticalDivider(),
 
           // Link
-          QuillToolbarLinkStyleButton(
-            controller: viewModel.quillController,
-            options: QuillToolbarLinkStyleButtonOptions(
-              iconTheme: _getIconTheme(),
-            ),
-          ),
+          _buildToolbarButton(Icons.link, 'Add Link', () {
+            _showLinkDialog();
+          }),
+          _buildVerticalDivider(),
+
+          // Clear formatting
+          _buildToolbarButton(Icons.format_clear, 'Clear Format', () {
+            _clearFormatting();
+          }),
         ],
       ),
     );
+  }
+
+  void _showLinkDialog() {
+    // Simple link dialog implementation
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Add Link'),
+        content: Text('Link functionality coming soon'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('OK')),
+        ],
+      ),
+    );
+  }
+
+  void _clearFormatting() {
+    final editor = viewModel.richTextEditor;
+    if (editor is SuperEditorAdapter) {
+      editor.clearFormatting();
+    }
   }
 
   /// Toggle button for Rich Text / HTML
@@ -606,32 +532,6 @@ class _ContentAreaState extends State<ContentArea> {
       width: 1,
       margin: const EdgeInsets.symmetric(horizontal: 4),
       color: colors.divider.withOpacity(0.4),
-    );
-  }
-
-  QuillToolbarToggleStyleButtonOptions _getButtonOptions() {
-    return QuillToolbarToggleStyleButtonOptions(iconTheme: _getIconTheme());
-  }
-
-  QuillToolbarColorButtonOptions _getColorButtonOptions() {
-    return QuillToolbarColorButtonOptions(iconTheme: _getIconTheme());
-  }
-
-  QuillIconTheme _getIconTheme() {
-    return QuillIconTheme(
-      iconButtonUnselectedData: IconButtonData(
-        color: colors.textSecondary,
-        iconSize: 18,
-      ),
-      iconButtonSelectedData: IconButtonData(
-        color: colors.accent,
-        iconSize: 18,
-        style: ButtonStyle(
-          backgroundColor: WidgetStateProperty.all(
-            colors.accent.withOpacity(0.15),
-          ),
-        ),
-      ),
     );
   }
 
@@ -760,11 +660,22 @@ class _ContentAreaState extends State<ContentArea> {
               ),
             )
           : RepaintBoundary(
-              child: QuillEditor.basic(
-                controller: viewModel.quillController,
-                config: _editorConfig,
+              child: SuperEditor(
+                document: viewModel.document,
+                composer: viewModel.composer,
+                editor: viewModel.editor,
                 focusNode: _focusNode,
                 scrollController: _scrollController,
+                stylesheet: defaultStylesheet.copyWith(
+                  addRulesAfter: [
+                    StyleRule(
+                      BlockSelector.all,
+                      (doc, docNode) => {
+                        Styles.padding: const CascadingPadding.all(16),
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
     );
@@ -1079,38 +990,6 @@ class _ProgressDialog extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class AttachmentEmbedBuilder extends EmbedBuilder {
-  final ContentViewModel viewModel;
-
-  AttachmentEmbedBuilder(this.viewModel);
-
-  @override
-  String get key => BlockEmbed.imageType;
-
-  @override
-  bool get expanded => false;
-
-  @override
-  Widget build(BuildContext context, EmbedContext embedContext) {
-    final node = embedContext.node;
-    final String? imageUrl = node.value.data;
-
-    if (imageUrl != null && imageUrl.startsWith('attach://')) {
-      // Inline attachments are now displayed in the Attachment Bar.
-      // We hide them from the editor viewport to avoid duplication and potential crashes.
-      return const SizedBox.shrink();
-    }
-
-    if (imageUrl != null &&
-        (imageUrl.startsWith('http') || imageUrl.startsWith('file'))) {
-      return Image.network(imageUrl);
-    }
-
-    // Fallback for base64 or other formats if needed, or return nothing
-    return const SizedBox();
   }
 }
 

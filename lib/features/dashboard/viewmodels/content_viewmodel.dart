@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-// import 'dart:io'; // duplicate removed
+
 import 'package:file_picker/file_picker.dart';
 import '../../../core/viewmodels/base_viewmodel.dart';
 import '../services/file_service.dart';
@@ -10,11 +10,10 @@ import '../services/background_service.dart';
 import '../services/encryption_service.dart';
 import '../models/note_model.dart';
 import 'dart:convert';
-import 'package:flutter_quill/flutter_quill.dart';
-// Removed invalid quill_delta import
-import '../services/semantic_html_converter_service.dart';
+import '../core/i_rich_text_editor.dart';
+import '../core/super_editor_adapter.dart';
+// Super Editor document model replaces Quill
 import '../services/html_beautifier_service.dart';
-import 'package:flutter_quill_delta_from_html/flutter_quill_delta_from_html.dart';
 import 'package:uuid/uuid.dart';
 import 'package:code_text_field/code_text_field.dart';
 import 'package:highlight/languages/xml.dart'; // XML handles HTML highlighting
@@ -29,7 +28,19 @@ class ContentViewModel extends BaseViewModel {
   final IFileService _fileService;
   final IEncryptionService _encryptionService;
 
-  final QuillController quillController = QuillController.basic();
+  // Rich text editor adapter - decoupled from specific implementation
+  late IRichTextEditor _richTextEditor;
+
+  // Public getter for UI to access editor interface
+  IRichTextEditor get richTextEditor => _richTextEditor;
+
+  // Convenience getters for UI - exposes Super Editor internals for toolbar
+  // These cast to SuperEditorAdapter for direct access needed by toolbar widgets
+  SuperEditorAdapter get _adapter => _richTextEditor as SuperEditorAdapter;
+  dynamic get document => _adapter.document;
+  dynamic get composer => _adapter.composer;
+  dynamic get editor => _adapter.editor;
+
   final TextEditingController titleController = TextEditingController(
     text: "New Note",
   );
@@ -237,6 +248,9 @@ class ContentViewModel extends BaseViewModel {
     required IEncryptionService encryptionService,
   }) : _fileService = fileService,
        _encryptionService = encryptionService {
+    // Initialize Super Editor document model
+    _initDocument();
+
     // Initialize CodeController with syntax highlighting
     htmlController = CodeController(
       language: xml, // Highlighting for XML/HTML
@@ -245,19 +259,6 @@ class ContentViewModel extends BaseViewModel {
     // Ensure settings are loaded before loading files
     _initAsync();
     _initFileWatcher();
-
-    // Listen to changes for auto-save (minimal debounce to reduce timer churn)
-    quillController.document.changes.listen((change) {
-      if (!_isHtmlMode) {
-        _autoSaveDebounceTimer?.cancel();
-        _autoSaveDebounceTimer = Timer(const Duration(milliseconds: 50), () {
-          onTextChanged();
-        });
-
-        // Live sync to HTML with debouncing
-        _syncDeltaToHtml();
-      }
-    });
 
     htmlController.addListener(() {
       if (_isHtmlMode) {
@@ -268,20 +269,24 @@ class ContentViewModel extends BaseViewModel {
     });
   }
 
-  /// Sync Delta to HTML asynchronously with debouncing.
-  void _syncDeltaToHtml() {
+  /// Initialize the rich text editor adapter
+  void _initDocument() {
+    _richTextEditor = SuperEditorAdapter();
+  }
+
+  /// Sync Document to HTML asynchronously with debouncing.
+  void _syncDocumentToHtml() {
     _htmlSyncTimer?.cancel();
     _htmlSyncTimer = Timer(const Duration(milliseconds: 300), () async {
       try {
-        final delta = quillController.document.toDelta();
-        final html = await compute(_deltaToHtmlTask, delta.toJson());
+        final html = _richTextEditor.getHtml();
 
         // Only update if still in rich text mode (user didn't switch)
         if (!_isHtmlMode) {
           htmlController.text = html;
         }
       } catch (e) {
-        debugPrint('Error syncing Delta to HTML: $e');
+        debugPrint('Error syncing Document to HTML: $e');
       }
     });
   }
@@ -310,24 +315,18 @@ class ContentViewModel extends BaseViewModel {
     setBusy(true);
     if (_isHtmlMode) {
       // Switch to Rich Text
-      // Convert HTML string to Delta
+      // Convert HTML string to Document via adapter
       try {
         final html = htmlController.text;
-        // Offload to background
-        final deltaList = await compute(_htmlToDeltaTask, html);
-        quillController.document = Document.fromJson(deltaList);
-        // Move cursor to end to avoid issues
-        quillController.moveCursorToPosition(quillController.document.length);
+        _richTextEditor.setHtml(html);
       } catch (e) {
-        print("Error converting HTML to Delta: $e");
+        debugPrint("Error converting HTML to Document: $e");
       }
       _isHtmlMode = false;
     } else {
       // Switch to HTML Editor
-      // Convert Delta to HTML string
-      final delta = quillController.document.toDelta();
-      // Offload to background
-      final html = await compute(_deltaToHtmlTask, delta.toJson());
+      // Convert Document to HTML string via adapter
+      final html = _richTextEditor.getHtml();
 
       htmlController.text = html;
       _isHtmlMode = true;
@@ -460,7 +459,7 @@ class ContentViewModel extends BaseViewModel {
       } else {
         // 3. Fallback to Plain Text
         print("Loading as plain text");
-        _loadContentToQuill(content);
+        _loadContentToEditor(content);
         titleController.text = _generateTitleFromContent(content);
         _isLocked = false;
         isLockedNotifier.value = false;
@@ -489,14 +488,14 @@ class ContentViewModel extends BaseViewModel {
         // Locked state - clear editor
         _isLocked = true;
         isLockedNotifier.value = true;
-        quillController.document = Document();
+        _initDocument();
         htmlController.clear();
         _currentPassword = null;
         notifyListeners();
       }
     } else {
       // Not locked
-      _loadContentToQuill(note.content);
+      _loadContentToEditor(note.content);
       _currentPassword = null;
     }
 
@@ -645,7 +644,7 @@ class ContentViewModel extends BaseViewModel {
       // Success
       _currentPassword = password;
       _sessionPasswords[_currentFileName!] = password;
-      _loadContentToQuill(decryptedContent);
+      _loadContentToEditor(decryptedContent);
       _isLocked = false;
       isLockedNotifier.value = false;
       notifyListeners(); // Keep for unlock transition
@@ -662,12 +661,13 @@ class ContentViewModel extends BaseViewModel {
       password: password,
     );
     if (decrypted.startsWith("Error decrypting:")) {
-      quillController.document = Document()..insert(0, "Incorrect Password");
+      _initDocument();
+      _setDocumentText("Incorrect Password");
       _sessionPasswords.remove(_currentFileName); // Invalid pass
       _isLocked = true;
       isLockedNotifier.value = true;
     } else {
-      _loadContentToQuill(decrypted);
+      _loadContentToEditor(decrypted);
       _isLocked = false;
       isLockedNotifier.value = false;
     }
@@ -683,7 +683,7 @@ class ContentViewModel extends BaseViewModel {
       _currentPassword = null;
       _isLocked = true;
       isLockedNotifier.value = true;
-      quillController.document = Document();
+      _initDocument();
       htmlController.clear();
       _attachmentCache.clear();
       notifyListeners();
@@ -720,8 +720,7 @@ class ContentViewModel extends BaseViewModel {
       if (_isHtmlMode) {
         contentToSave = htmlController.text;
       } else {
-        final delta = quillController.document.toDelta();
-        contentToSave = await compute(_deltaToHtmlTask, delta.toJson());
+        contentToSave = _richTextEditor.getHtml();
       }
 
       // Re-encrypt content with new password
@@ -875,15 +874,16 @@ class ContentViewModel extends BaseViewModel {
     if (_isHtmlMode) {
       contentToSave = htmlController.text;
     } else {
-      final delta = quillController.document.toDelta();
-      contentToSave = await compute(_deltaToHtmlTask, delta.toJson());
+      contentToSave = _richTextEditor.getHtml();
     }
 
     String plainText = "";
     if (_isHtmlMode) {
       plainText = htmlController.text.replaceAll(RegExp(r'<[^>]*>'), '').trim();
     } else {
-      plainText = quillController.document.toPlainText().trim();
+      // Extract plain text from HTML content
+      final html = _richTextEditor.getHtml();
+      plainText = html.replaceAll(RegExp(r'<[^>]*>'), '').trim();
     }
 
     if (_currentFileName == null &&
@@ -1285,20 +1285,34 @@ class ContentViewModel extends BaseViewModel {
   // endregion
 
   // region Helpers
-  void _loadContentToQuill(String content) {
+
+  /// Set simple text content in the document
+  void _setDocumentText(String text) {
+    // Create a simple HTML document with the text
+    final html = '<p>$text</p>';
+    _richTextEditor.setHtml(html);
+  }
+
+  /// Load content into the Super Editor document
+  void _loadContentToEditor(String content) {
     try {
       content = content.trim();
 
-      // 1. Legacy Delta JSON
+      // 1. Legacy Delta JSON - convert to plain text (backwards compatibility)
       if (content.startsWith('[') || content.startsWith('{')) {
         try {
           final jsonContent = jsonDecode(content);
           if (jsonContent is List) {
-            quillController.document = Document.fromJson(jsonContent);
-            _syncDeltaToHtml();
-            quillController.moveCursorToPosition(
-              quillController.document.length,
-            );
+            // Extract plain text from Delta JSON for backwards compatibility
+            final buffer = StringBuffer();
+            for (final op in jsonContent) {
+              if (op is Map && op['insert'] is String) {
+                buffer.write(op['insert']);
+              }
+            }
+            final plainText = buffer.toString().trim();
+            _setDocumentText(plainText);
+            _syncDocumentToHtml();
             return;
           }
         } catch (e) {
@@ -1308,22 +1322,18 @@ class ContentViewModel extends BaseViewModel {
 
       // 2. HTML (Preferred)
       if (content.startsWith('<') || content.trim().isEmpty) {
-        final delta = HtmlToDelta().convert(content);
-        quillController.document = Document.fromDelta(delta);
+        _richTextEditor.setHtml(content);
         htmlController.text = content;
       } else {
         // 3. Plain text fallback
-        quillController.document = Document()..insert(0, content);
-        _syncDeltaToHtml();
+        _setDocumentText(content);
+        _syncDocumentToHtml();
       }
     } catch (e) {
       // Fallback
-      print("Error loading content: $e");
-      quillController.document = Document()..insert(0, content);
+      debugPrint("Error loading content: $e");
+      _setDocumentText(content);
     }
-
-    // Move cursor to end
-    quillController.moveCursorToPosition(quillController.document.length);
   }
 
   void reset() {
@@ -1332,7 +1342,7 @@ class ContentViewModel extends BaseViewModel {
     _isLocked = false;
     _isHtmlMode = false;
     _attachments = [];
-    quillController.document = Document();
+    _initDocument();
     htmlController.clear();
     titleController.text = "New Note";
     _attachmentCache.clear();
@@ -1348,7 +1358,6 @@ class ContentViewModel extends BaseViewModel {
     _searchDebounceTimer?.cancel();
     _htmlSyncTimer?.cancel();
     _fileWatcherSubscription?.cancel();
-    quillController.dispose();
     titleController.dispose();
     htmlController.dispose();
     focusNode.dispose();
@@ -1422,9 +1431,7 @@ class ContentViewModel extends BaseViewModel {
         if (_isHtmlMode) {
           contentToSave = htmlController.text;
         } else {
-          final delta = quillController.document.toDelta();
-          final deltaJson = delta.toJson();
-          contentToSave = SemanticHtmlConverterService().convert(deltaJson);
+          contentToSave = _richTextEditor.getHtml();
         }
 
         await compute(_autoSaveIsolate, {
@@ -1512,17 +1519,4 @@ class ImportVerificationResult {
     this.isPack = false,
     this.isPackEncrypted = false,
   });
-}
-
-/// Synchronous task for compute() - converts HTML to Quill Delta JSON.
-/// Must be synchronous for compute() to work correctly.
-List<dynamic> _htmlToDeltaTask(String html) {
-  final delta = HtmlToDelta().convert(html);
-  return delta.toJson();
-}
-
-/// Synchronous task for compute() - converts Quill Delta JSON to semantic HTML.
-/// Must be synchronous for compute() to work correctly.
-String _deltaToHtmlTask(List<dynamic> deltaJson) {
-  return SemanticHtmlConverterService().convert(deltaJson);
 }

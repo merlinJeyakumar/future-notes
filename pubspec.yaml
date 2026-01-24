@@ -45,9 +45,7 @@ dependencies:
   video_player_win: ^2.0.0
   pdfx: ^2.6.0
   chewie: ^1.8.1
-  flutter_quill: ^11.5.0
-  vsc_quill_delta_to_html: ^1.0.5
-  flutter_quill_delta_from_html: ^1.5.3
+  super_editor: ^0.3.0-dev.48
   flutter_localizations:
     sdk: flutter
   code_text_field: ^1.1.0

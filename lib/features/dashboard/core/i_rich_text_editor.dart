@@ -19,6 +19,7 @@ abstract class IRichTextEditor {
   ///
   /// [readOnly] - If true, the editor should be in read-only mode.
   Widget buildEditor({
+    required BuildContext context,
     required bool readOnly,
     FocusNode? focusNode,
     ScrollController? scrollController,

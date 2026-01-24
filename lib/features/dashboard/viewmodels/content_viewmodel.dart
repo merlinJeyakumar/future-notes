@@ -11,8 +11,7 @@ import '../services/encryption_service.dart';
 import '../models/note_model.dart';
 import 'dart:convert';
 import '../core/i_rich_text_editor.dart';
-import '../core/super_editor_adapter.dart';
-// Super Editor document model replaces Quill
+import '../core/appflowy_editor_adapter.dart';
 import '../services/html_beautifier_service.dart';
 import 'package:uuid/uuid.dart';
 import 'package:code_text_field/code_text_field.dart';
@@ -33,13 +32,6 @@ class ContentViewModel extends BaseViewModel {
 
   // Public getter for UI to access editor interface
   IRichTextEditor get richTextEditor => _richTextEditor;
-
-  // Convenience getters for UI - exposes Super Editor internals for toolbar
-  // These cast to SuperEditorAdapter for direct access needed by toolbar widgets
-  SuperEditorAdapter get _adapter => _richTextEditor as SuperEditorAdapter;
-  dynamic get document => _adapter.document;
-  dynamic get composer => _adapter.composer;
-  dynamic get editor => _adapter.editor;
 
   final TextEditingController titleController = TextEditingController(
     text: "New Note",
@@ -271,7 +263,7 @@ class ContentViewModel extends BaseViewModel {
 
   /// Initialize the rich text editor adapter
   void _initDocument() {
-    _richTextEditor = SuperEditorAdapter();
+    _richTextEditor = AppFlowyEditorAdapter();
   }
 
   /// Sync Document to HTML asynchronously with debouncing.
@@ -1288,9 +1280,8 @@ class ContentViewModel extends BaseViewModel {
 
   /// Set simple text content in the document
   void _setDocumentText(String text) {
-    // Create a simple HTML document with the text
-    final html = '<p>$text</p>';
-    _richTextEditor.setHtml(html);
+    // Basic implementation for AppFlowy using setHtml (stub)
+    _richTextEditor.setHtml(text);
   }
 
   /// Load content into the Super Editor document

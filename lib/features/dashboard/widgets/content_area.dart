@@ -2,9 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/material.dart';
-import 'package:super_editor/super_editor.dart';
 import 'dart:typed_data';
-import '../core/super_editor_adapter.dart';
 import '../viewmodels/content_viewmodel.dart';
 import '../models/note_model.dart';
 import 'password_dialog.dart';
@@ -292,6 +290,12 @@ class _ContentAreaState extends State<ContentArea> {
 
   /// Floating toolbar "island" with grouped formatting tools
   Widget _buildFloatingToolbar(bool isMobile) {
+    // If in HTML mode, show nothing (or HTML toolbar if we had one)
+    if (viewModel.isHtmlMode) {
+      return const SizedBox();
+    }
+
+    // Delegate to adapter
     return Container(
       margin: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 20, vertical: 8),
       decoration: BoxDecoration(
@@ -306,181 +310,8 @@ class _ContentAreaState extends State<ContentArea> {
           ),
         ],
       ),
-      // Always allow horizontal scroll to prevent overflow, even on larger screens if constrained
-      child: Row(
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: isMobile
-                    ? Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _buildToolbarRow1(),
-                          _buildVerticalDivider(),
-                          _buildToolbarRow2(),
-                        ],
-                      )
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _buildToolbarRow1(),
-                          Divider(
-                            color: colors.divider.withOpacity(0.3),
-                            height: 1,
-                          ),
-                          _buildToolbarRow2(),
-                        ],
-                      ),
-              ),
-            ),
-          ),
-        ],
-      ),
+      child: viewModel.richTextEditor.buildToolbar(enabled: true),
     );
-  }
-
-  Widget _buildToolbarRow1() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Basic text formatting
-          _buildToolbarButton(Icons.format_bold, 'Bold', () {
-            _toggleAttribution(boldAttribution);
-          }),
-          _buildToolbarButton(Icons.format_italic, 'Italic', () {
-            _toggleAttribution(italicsAttribution);
-          }),
-          _buildToolbarButton(Icons.format_underlined, 'Underline', () {
-            _toggleAttribution(underlineAttribution);
-          }),
-          _buildToolbarButton(Icons.strikethrough_s, 'Strikethrough', () {
-            _toggleAttribution(strikethroughAttribution);
-          }),
-          _buildVerticalDivider(),
-
-          // Headers
-          _buildToolbarButton(Icons.title, 'Header 1', () {
-            _toggleBlockType(header1Attribution);
-          }),
-          _buildToolbarButton(Icons.text_fields, 'Header 2', () {
-            _toggleBlockType(header2Attribution);
-          }),
-          _buildVerticalDivider(),
-
-          // Lists
-          _buildToolbarButton(Icons.format_list_bulleted, 'Bullet List', () {
-            _toggleListType(ListItemType.unordered);
-          }),
-          _buildToolbarButton(Icons.format_list_numbered, 'Numbered List', () {
-            _toggleListType(ListItemType.ordered);
-          }),
-          _buildVerticalDivider(),
-
-          // Block formatting
-          _buildToolbarButton(Icons.format_quote, 'Quote', () {
-            _toggleBlockType(blockquoteAttribution);
-          }),
-          _buildToolbarButton(Icons.code, 'Code Block', () {
-            _toggleBlockType(codeAttribution);
-          }),
-        ],
-      ),
-    );
-  }
-
-  void _toggleAttribution(Attribution attribution) {
-    final editor = viewModel.richTextEditor;
-    if (editor is SuperEditorAdapter) {
-      editor.toggleAttribution(attribution);
-    }
-  }
-
-  void _toggleBlockType(Attribution blockType) {
-    final editor = viewModel.richTextEditor;
-    if (editor is SuperEditorAdapter) {
-      editor.toggleBlockType(blockType);
-    }
-  }
-
-  void _toggleListType(ListItemType type) {
-    final editor = viewModel.richTextEditor;
-    if (editor is SuperEditorAdapter) {
-      editor.toggleListType(type);
-    }
-  }
-
-  Widget _buildToolbarButton(
-    IconData icon,
-    String tooltip,
-    VoidCallback onPressed,
-  ) {
-    return Tooltip(
-      message: tooltip,
-      child: IconButton(
-        icon: Icon(icon, size: 20, color: colors.textSecondary),
-        onPressed: onPressed,
-        padding: const EdgeInsets.all(8),
-        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-        splashRadius: 18,
-      ),
-    );
-  }
-
-  Widget _buildToolbarRow2() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Additional formatting options
-          _buildToolbarButton(Icons.format_indent_increase, 'Indent', () {
-            // Indent functionality - simplified for now
-          }),
-          _buildToolbarButton(Icons.format_indent_decrease, 'Outdent', () {
-            // Outdent functionality - simplified for now
-          }),
-          _buildVerticalDivider(),
-
-          // Link
-          _buildToolbarButton(Icons.link, 'Add Link', () {
-            _showLinkDialog();
-          }),
-          _buildVerticalDivider(),
-
-          // Clear formatting
-          _buildToolbarButton(Icons.format_clear, 'Clear Format', () {
-            _clearFormatting();
-          }),
-        ],
-      ),
-    );
-  }
-
-  void _showLinkDialog() {
-    // Simple link dialog implementation
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Add Link'),
-        content: Text('Link functionality coming soon'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('OK')),
-        ],
-      ),
-    );
-  }
-
-  void _clearFormatting() {
-    final editor = viewModel.richTextEditor;
-    if (editor is SuperEditorAdapter) {
-      editor.clearFormatting();
-    }
   }
 
   /// Toggle button for Rich Text / HTML
@@ -523,15 +354,6 @@ class _ContentAreaState extends State<ContentArea> {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildVerticalDivider() {
-    return Container(
-      height: 20,
-      width: 1,
-      margin: const EdgeInsets.symmetric(horizontal: 4),
-      color: colors.divider.withOpacity(0.4),
     );
   }
 
@@ -660,22 +482,11 @@ class _ContentAreaState extends State<ContentArea> {
               ),
             )
           : RepaintBoundary(
-              child: SuperEditor(
-                document: viewModel.document,
-                composer: viewModel.composer,
-                editor: viewModel.editor,
+              child: viewModel.richTextEditor.buildEditor(
+                context: context,
+                readOnly: false,
                 focusNode: _focusNode,
                 scrollController: _scrollController,
-                stylesheet: defaultStylesheet.copyWith(
-                  addRulesAfter: [
-                    StyleRule(
-                      BlockSelector.all,
-                      (doc, docNode) => {
-                        Styles.padding: const CascadingPadding.all(16),
-                      },
-                    ),
-                  ],
-                ),
               ),
             ),
     );

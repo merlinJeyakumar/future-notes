@@ -28,6 +28,7 @@ class QuillEditorAdapter implements IRichTextEditor {
 
   @override
   Widget buildEditor({
+    required BuildContext context,
     required bool readOnly,
     FocusNode? focusNode,
     ScrollController? scrollController,

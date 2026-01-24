@@ -45,7 +45,7 @@ dependencies:
   video_player_win: ^2.0.0
   pdfx: ^2.6.0
   chewie: ^1.8.1
-  super_editor: ^0.3.0-dev.48
+  appflowy_editor: ^6.2.0
   flutter_localizations:
     sdk: flutter
   code_text_field: ^1.1.0

@@ -147,9 +147,10 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
         },
       );
 
-      // Delete the old node and insert the new one at the same path
+      // Insert the new node first at path+1, then delete the old node at path
+      // This prevents path shift issues when deleting first
+      transaction.insertNode(path.next, newNode);
       transaction.deleteNode(node);
-      transaction.insertNode(path, newNode);
     }
 
     // Preserve selection after block formatting

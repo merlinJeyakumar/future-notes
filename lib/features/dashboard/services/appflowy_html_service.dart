@@ -1,4 +1,5 @@
 import 'package:appflowy_editor/appflowy_editor.dart';
+import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as html_dom;
 
@@ -11,6 +12,10 @@ class AppFlowyHtmlService {
     }
 
     try {
+      debugPrint('--- [DEBUG HTML IMPORT] ---');
+      debugPrint(html);
+      debugPrint('--- [DEBUG HTML IMPORT END] ---');
+
       final document = html_parser.parse(html);
       final body = document.body;
       if (body == null) return EditorState.blank();
@@ -29,6 +34,7 @@ class AppFlowyHtmlService {
         ),
       );
     } catch (e) {
+      debugPrint('Error parsing HTML: $e');
       return EditorState.blank();
     }
   }
@@ -37,7 +43,11 @@ class AppFlowyHtmlService {
   /// This provides organic, semantic HTML output with proper formatting.
   String editorStateToHtml(EditorState state) {
     // Use official AppFlowy documentToHTML function for organic HTML export
-    return documentToHTML(state.document);
+    final html = documentToHTML(state.document);
+    debugPrint('--- [DEBUG HTML START] ---');
+    debugPrint(html);
+    debugPrint('--- [DEBUG HTML END] ---');
+    return html;
   }
 
   List<Node> _parseNode(html_dom.Node node) {
@@ -77,6 +87,39 @@ class AppFlowyHtmlService {
           }
           return listNodes;
         case 'div':
+          // Special handling: AppFlowy exports todo as <div><input type="checkbox"/>label text</div>
+          // Check if this div contains a checkbox
+          html_dom.Element? checkboxElement;
+          for (final child in node.children) {
+            if (child.localName == 'input' &&
+                child.attributes['type'] == 'checkbox') {
+              checkboxElement = child;
+              break;
+            }
+          }
+
+          if (checkboxElement != null) {
+            // This is a todo list item - extract checkbox state and remaining text
+            final checked = checkboxElement.attributes.containsKey('checked');
+            // Parse remaining nodes (excluding the checkbox) for the label
+            final delta = Delta();
+            for (final child in node.nodes) {
+              if (child == checkboxElement)
+                continue; // Skip the checkbox element
+              if (child is html_dom.Text) {
+                final text = child.text;
+                if (text.isNotEmpty) {
+                  delta.insert(text);
+                }
+              } else if (child is html_dom.Element) {
+                // Handle formatted inline elements within the label
+                _recurseInline(child, {}, delta);
+              }
+            }
+            return [todoListNode(delta: delta, checked: checked)];
+          }
+
+          // Regular div - flatten children
           final divNodes = <Node>[];
           for (final child in node.nodes) {
             divNodes.addAll(_parseNode(child));
@@ -95,6 +138,10 @@ class AppFlowyHtmlService {
           if (node.text.trim().isNotEmpty) {
             return [paragraphNode(delta: _parseInlineContent(node))];
           }
+          // Attempt to parse children even if tag is unknown (like span at block level?)
+          // But usually top-level unknown tags with text are paragraphs.
+          // If it has children elements, we might want to recurs.
+          // For safety matching previous logic: return empty if no text.
           return [];
       }
     } else if (node is html_dom.Text) {
@@ -142,15 +189,63 @@ class AppFlowyHtmlService {
         if (href != null) newAttrs['href'] = href;
       }
 
-      // Basic color parsing from style
+      // Parse CSS styles from style attribute
       if (tag == 'span' || node.attributes.containsKey('style')) {
         final style = node.attributes['style'] ?? '';
-        // Simple regex for hex color
-        final colorMatch = RegExp(
-          r'color:\s*(#[0-9a-fA-F]{3,6})',
+
+        // Parse font-weight: bold
+        if (RegExp(r'font-weight:\s*bold').hasMatch(style) ||
+            RegExp(r'font-weight:\s*[5-9]\d{2}').hasMatch(style)) {
+          newAttrs[AppFlowyRichTextKeys.bold] = true;
+        }
+
+        // Parse text-decoration (underline and/or line-through)
+        final textDecorationMatch = RegExp(
+          r'text-decoration:\s*([^;]+)',
         ).firstMatch(style);
-        if (colorMatch != null) {
-          newAttrs['color'] = colorMatch.group(1);
+        if (textDecorationMatch != null) {
+          final decorations = textDecorationMatch.group(1)!.toLowerCase();
+          if (decorations.contains('underline')) {
+            newAttrs[AppFlowyRichTextKeys.underline] = true;
+          }
+          if (decorations.contains('line-through')) {
+            newAttrs[AppFlowyRichTextKeys.strikethrough] = true;
+          }
+        }
+
+        // Parse font-style: italic
+        if (RegExp(r'font-style:\s*italic').hasMatch(style)) {
+          newAttrs[AppFlowyRichTextKeys.italic] = true;
+        }
+
+        // Parse color
+        String? hexColor;
+
+        // Try Hex
+        final hexMatch = RegExp(
+          r'color:\s*(#[0-9a-fA-F]{3,8})',
+        ).firstMatch(style);
+        if (hexMatch != null) {
+          hexColor = hexMatch.group(1);
+        } else {
+          // Try RGB/RGBA
+          // Matches: color: rgb(255, 0, 0) or color: rgba(255, 0, 0, 1)
+          final rgbMatch = RegExp(
+            r'color:\s*rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:,\s*([\d\.]+))?\s*\)',
+          ).firstMatch(style);
+          if (rgbMatch != null) {
+            final r = int.parse(rgbMatch.group(1)!);
+            final g = int.parse(rgbMatch.group(2)!);
+            final b = int.parse(rgbMatch.group(3)!);
+            // Ignore alpha for now as editor seems to use #RRGGBB
+            hexColor =
+                '#${r.toRadixString(16).padLeft(2, '0')}${g.toRadixString(16).padLeft(2, '0')}${b.toRadixString(16).padLeft(2, '0')}';
+          }
+        }
+
+        if (hexColor != null) {
+          // Use the correct key from the library
+          newAttrs[AppFlowyRichTextKeys.textColor] = hexColor;
         }
       }
 

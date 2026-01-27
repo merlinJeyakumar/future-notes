@@ -1538,30 +1538,40 @@ class _TextPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Container(
-          width: double.infinity,
-          height: double.infinity,
-          padding: const EdgeInsets.all(16),
-          color: colors.background,
-          child: SingleChildScrollView(
-            child: SelectableText(
-              text,
-              style: TextStyle(color: colors.textPrimary),
-            ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Container(
+          margin: const EdgeInsets.all(24),
+          width: constraints.maxWidth - 48,
+          height: constraints.maxHeight - 48,
+          decoration: BoxDecoration(
+            color: colors.background,
+            borderRadius: BorderRadius.circular(12),
           ),
-        ),
-        Positioned(
-          top: 0,
-          right: 0,
-          child: IconButton(
-            icon: Icon(Icons.close, color: colors.textSecondary),
-            onPressed: onClose,
-            tooltip: 'Close',
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    text,
+                    style: TextStyle(color: colors.textPrimary),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 4,
+                right: 4,
+                child: IconButton(
+                  icon: Icon(Icons.close, color: colors.textSecondary),
+                  onPressed: onClose,
+                  tooltip: 'Close',
+                ),
+              ),
+            ],
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 }

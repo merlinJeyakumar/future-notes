@@ -24,6 +24,15 @@ class SettingsService {
 
   String? get customDataPath => _customDataPath;
 
+  // Auto-collapse attachments when editing starts
+  bool _autoCollapseAttachments = true;
+  bool get autoCollapseAttachments => _autoCollapseAttachments;
+
+  Future<void> setAutoCollapseAttachments(bool value) async {
+    _autoCollapseAttachments = value;
+    await _saveSettings();
+  }
+
   // Theme mode with reactive notifier
   ThemeMode _themeMode = ThemeMode.dark;
   final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(
@@ -112,6 +121,9 @@ class SettingsService {
             themeModeNotifier.value = _themeMode;
           }
         }
+        if (json.containsKey('autoCollapseAttachments')) {
+          _autoCollapseAttachments = json['autoCollapseAttachments'] as bool;
+        }
       }
     } catch (e) {
       print("Error loading settings: $e");
@@ -131,6 +143,7 @@ class SettingsService {
         'compressionLevel': _compressionLevel.index,
         'customDataPath': _customDataPath,
         'themeMode': _themeMode.index,
+        'autoCollapseAttachments': _autoCollapseAttachments,
       };
 
       await file.writeAsString(jsonEncode(json));

@@ -7,6 +7,7 @@ import '../viewmodels/content_viewmodel.dart';
 import '../models/note_model.dart';
 import 'password_dialog.dart';
 import '../../../core/theme/app_theme.dart';
+import '../services/settings_service.dart';
 
 import 'package:pdfx/pdfx.dart';
 import 'package:video_player/video_player.dart';
@@ -620,6 +621,33 @@ class _ContentAreaState extends State<ContentArea> {
                 },
               ),
 
+            // Auto-collapse attachments toggle
+            StatefulBuilder(
+              builder: (context, setDialogState) {
+                final settings = SettingsService();
+                return SwitchListTile(
+                  secondary: Icon(
+                    Icons.vertical_align_bottom_rounded,
+                    color: colors.textPrimary,
+                  ),
+                  title: Text(
+                    'Collapse on Edit',
+                    style: TextStyle(color: colors.textPrimary),
+                  ),
+                  subtitle: Text(
+                    'Collapse attachments when editing',
+                    style: TextStyle(color: colors.textSecondary, fontSize: 12),
+                  ),
+                  value: settings.autoCollapseAttachments,
+                  onChanged: (value) async {
+                    await settings.setAutoCollapseAttachments(value);
+                    setDialogState(() {});
+                  },
+                  activeColor: colors.accent,
+                );
+              },
+            ),
+
             // Spacer and Divider before Delete
             const SizedBox(height: 16),
             Divider(color: colors.divider),
@@ -761,6 +789,7 @@ class _AttachmentBarState extends State<AttachmentBar>
     with WidgetsBindingObserver {
   bool _isExpanded = true;
   bool _wasExpandedBeforeKeyboard = true;
+  bool _wasExpandedBeforeFocus = true;
   bool _keyboardVisible = false;
   late _ContentColors colors;
 
@@ -770,12 +799,34 @@ class _AttachmentBarState extends State<AttachmentBar>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Listen for focus changes to auto-collapse
+    viewModel.focusNode.addListener(_onFocusChange);
   }
 
   @override
   void dispose() {
+    viewModel.focusNode.removeListener(_onFocusChange);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _onFocusChange() {
+    if (!mounted) return;
+    final settings = SettingsService();
+    if (!settings.autoCollapseAttachments) return;
+
+    if (viewModel.focusNode.hasFocus) {
+      // Editor gained focus - collapse if setting enabled
+      _wasExpandedBeforeFocus = _isExpanded;
+      if (_isExpanded) {
+        setState(() => _isExpanded = false);
+      }
+    } else {
+      // Editor lost focus - restore previous state
+      if (_wasExpandedBeforeFocus && !_isExpanded) {
+        setState(() => _isExpanded = true);
+      }
+    }
   }
 
   @override

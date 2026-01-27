@@ -74,7 +74,7 @@ class _ContentAreaState extends State<ContentArea> {
                 ValueListenableBuilder<bool>(
                   valueListenable: viewModel.isLockedNotifier,
                   builder: (context, isLocked, child) {
-                    return _buildTopStrip(context, isMobile);
+                    return _buildTopStrip(context, isMobile, isLocked);
                   },
                 ),
 
@@ -113,7 +113,7 @@ class _ContentAreaState extends State<ContentArea> {
   }
 
   /// Clean, minimal top strip with breadcrumb and secondary actions
-  Widget _buildTopStrip(BuildContext context, bool isMobile) {
+  Widget _buildTopStrip(BuildContext context, bool isMobile, bool isLocked) {
     return Container(
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? 12 : 20,
@@ -125,30 +125,35 @@ class _ContentAreaState extends State<ContentArea> {
       child: Row(
         children: [
           // Breadcrumb-style indicator
-          Expanded(child: _buildBreadcrumb(isMobile)),
+          Expanded(child: _buildBreadcrumb(isMobile, isLocked)),
 
           // Secondary actions (right side)
-          _buildSecondaryActions(context),
+          _buildSecondaryActions(context, isLocked),
 
-          SizedBox(width: isMobile ? 8 : 12),
-
-          // Save Button - Prominent pill style
-          _buildSaveButton(isMobile),
+          // Save Button - Prominent pill style (hidden when locked)
+          if (!isLocked) ...[
+            SizedBox(width: isMobile ? 8 : 12),
+            _buildSaveButton(isMobile),
+          ],
         ],
       ),
     );
   }
 
-  /// Breadcrumb indicator: "Editing > [title]"
-  Widget _buildBreadcrumb(bool isMobile) {
+  /// Breadcrumb indicator: "Editing > [title]" or "Locked > [title]"
+  Widget _buildBreadcrumb(bool isMobile, bool isLocked) {
     return Row(
       // mainAxisSize.min removed to allow Expanded child to work naturally
       children: [
-        Icon(Icons.edit_note_rounded, size: 18, color: colors.accent),
+        Icon(
+          isLocked ? Icons.lock_rounded : Icons.edit_note_rounded,
+          size: 18,
+          color: isLocked ? colors.subtleGray : colors.accent,
+        ),
         const SizedBox(width: 8),
         if (!isMobile) ...[
           Text(
-            'Editing',
+            isLocked ? 'Locked' : 'Editing',
             style: TextStyle(
               color: colors.subtleGray,
               fontSize: 13,
@@ -163,60 +168,74 @@ class _ContentAreaState extends State<ContentArea> {
           ),
           const SizedBox(width: 6),
         ],
-        // Editable title
+        // Title - read-only when locked, editable otherwise
         Expanded(
-          child: TextField(
-            controller: viewModel.titleController,
-            style: TextStyle(
-              color: colors.textPrimary,
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-            ),
-            decoration: InputDecoration(
-              hintText: 'Untitled note',
-              hintStyle: TextStyle(
-                color: colors.subtleGray,
-                fontWeight: FontWeight.w400,
-              ),
-              filled: false,
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              disabledBorder: InputBorder.none,
-              errorBorder: InputBorder.none,
-              focusedErrorBorder: InputBorder.none,
-              isDense: true,
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
+          child: isLocked
+              ? Text(
+                  viewModel.titleController.text.isEmpty
+                      ? 'Untitled note'
+                      : viewModel.titleController.text,
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                )
+              : TextField(
+                  controller: viewModel.titleController,
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'Untitled note',
+                    hintStyle: TextStyle(
+                      color: colors.subtleGray,
+                      fontWeight: FontWeight.w400,
+                    ),
+                    filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                    errorBorder: InputBorder.none,
+                    focusedErrorBorder: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
         ),
       ],
     );
   }
 
   /// Secondary action icons (link, lock, settings)
-  Widget _buildSecondaryActions(BuildContext context) {
+  Widget _buildSecondaryActions(BuildContext context, bool isLocked) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (!viewModel.isLocked)
+        if (!isLocked)
           _buildSubtleIconButton(
             Icons.attach_file_rounded,
             'Attach file',
             onPressed: viewModel.pickAttachment,
           ),
-        if (viewModel.isLocked || viewModel.isPasswordSet)
+        if (isLocked || viewModel.isPasswordSet)
           _buildSubtleIconButton(
-            viewModel.isLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
-            viewModel.isLocked ? 'Unlock' : 'Lock File',
+            isLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
+            isLocked ? 'Unlock' : 'Lock File',
             onPressed: () => _handleLockAction(context),
             isActive: true,
           ),
-        _buildSubtleIconButton(
-          Icons.settings_outlined,
-          'Settings',
-          onPressed: () => _showSettingsMenu(context),
-        ),
+        // Hide settings when file is locked
+        if (!isLocked)
+          _buildSubtleIconButton(
+            Icons.settings_outlined,
+            'Settings',
+            onPressed: () => _showSettingsMenu(context),
+          ),
       ],
     );
   }

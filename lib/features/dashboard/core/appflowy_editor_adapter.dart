@@ -205,6 +205,29 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
     _editorState.apply(transaction);
   }
 
+  void _applyHighlightColor(Color? color) {
+    final selection = _editorState.selection;
+    if (selection == null || selection.isCollapsed) return;
+
+    final nodes = _editorState.getNodesInSelection(selection);
+    if (nodes.isEmpty) return;
+
+    // Convert color to hex string
+    final hex = color == null
+        ? null
+        : '#${color.toARGB32().toRadixString(16).substring(2)}';
+
+    final transaction = _editorState.transaction;
+    transaction.formatText(
+      nodes.first,
+      selection.startIndex,
+      selection.length,
+      {AppFlowyRichTextKeys.backgroundColor: hex},
+    );
+    transaction.afterSelection = selection; // Preserve selection
+    _editorState.apply(transaction);
+  }
+
   void _applyFontSize(int? fontSize) {
     final selection = _editorState.selection;
     if (selection == null || selection.isCollapsed) return;
@@ -336,6 +359,17 @@ class _EditorToolbar extends StatelessWidget {
               Icons.format_color_reset,
               () => adapter._applyTextColor(null),
               tooltip: 'Reset Color',
+            ),
+
+            // Divider
+            _buildDivider(),
+
+            // Highlighter
+            _buildHighlighterButton(context),
+            _buildBarButton(
+              Icons.highlight_remove,
+              () => adapter._applyHighlightColor(null),
+              tooltip: 'Remove Highlight',
             ),
 
             // Divider
@@ -631,6 +665,90 @@ class _EditorToolbar extends StatelessWidget {
                               : Colors.white24,
                           width: 1,
                         ),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildHighlighterButton(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (_) => _showHighlightPicker(context),
+        child: Tooltip(
+          message: 'Highlight',
+          child: Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            child: const Icon(
+              Icons.format_color_fill,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showHighlightPicker(BuildContext context) {
+    // Store selection before showing dialog
+    final selection = adapter._editorState.selection;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF2D2D2D),
+          title: const Text(
+            'Highlight Color',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SizedBox(
+            width: 280,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _colors.map((color) {
+                return MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.of(dialogContext).pop();
+                      // Restore selection before applying color
+                      if (selection != null) {
+                        adapter._editorState.updateSelectionWithReason(
+                          selection,
+                          reason: SelectionUpdateReason.uiEvent,
+                        );
+                      }
+                      // Apply highlight color after a micro task
+                      Future.microtask(
+                        () => adapter._applyHighlightColor(color),
+                      );
+                    },
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: color,
+                        border: Border.all(color: Colors.white24, width: 1),
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),

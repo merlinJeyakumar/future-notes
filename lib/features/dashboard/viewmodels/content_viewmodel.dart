@@ -125,7 +125,7 @@ class ContentViewModel extends BaseViewModel {
           if (size > 10 * 1024 * 1024 * 1024) {
             _attachments.removeWhere((a) => a.id == tempId);
             attachmentsNotifier.value = List.from(_attachments);
-            print("File too large > 10GB: $fileName");
+            snackbarNotifier.value = 'File too large: $fileName';
             continue;
           }
 
@@ -163,8 +163,7 @@ class ContentViewModel extends BaseViewModel {
                 bytes = await originalFile.readAsBytes();
               }
             } catch (e) {
-              // Compression failed, use original
-              print("Compression failed for $fileName: $e");
+              // Compression failed, use original file
               bytes = await originalFile.readAsBytes();
             }
           } else {

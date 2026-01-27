@@ -31,6 +31,7 @@ class FileService implements IFileService {
     return await FilePicker.platform.pickFiles(
       type: allowedExtensions != null ? FileType.custom : FileType.any,
       allowedExtensions: allowedExtensions,
+      allowMultiple: true,
     );
   }
 

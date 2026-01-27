@@ -58,6 +58,9 @@ class ContentViewModel extends BaseViewModel {
   /// Format: "status message" or null when not in progress
   final ValueNotifier<String?> progressNotifier = ValueNotifier(null);
 
+  /// Snackbar notifier for showing quick feedback messages
+  final ValueNotifier<String?> snackbarNotifier = ValueNotifier(null);
+
   final Map<String, String> _sessionPasswords = {};
   final Map<String, Uint8List> _attachmentCache = {};
   bool _isLocked = false;
@@ -75,120 +78,135 @@ class ContentViewModel extends BaseViewModel {
   Future<void> pickAttachment() async {
     final result = await _fileService.pickFile(allowedExtensions: null);
 
-    if (result != null && result.files.single.path != null) {
-      // Don't block UI with setBusy
+    if (result != null && result.files.isNotEmpty) {
+      // Immediate feedback to user
+      final count = result.files.length;
+      snackbarNotifier.value =
+          'Processing $count file${count > 1 ? 's' : ''}...';
 
-      final path = result.files.single.path!;
-      final originalFile = File(path);
-      final fileName = result.files.single.name;
-      final tempId = const Uuid().v4();
-      final ext = fileName.split('.').last.toLowerCase();
+      // Process all selected files
+      for (final platformFile in result.files) {
+        if (platformFile.path == null) continue;
 
-      // 1. Add Placeholder
-      final placeholder = AttachmentModel(
-        id: tempId,
-        fileName: fileName,
-        size: 0,
-        mimeType: 'application/octet-stream', // Unknown pending
-        isLoading: true,
-      );
-      _attachments.add(placeholder);
-      attachmentsNotifier.value = List.from(_attachments);
-      // notifyListeners(); // Removed to reduce rebuilds
+        final path = platformFile.path!;
+        final originalFile = File(path);
+        final fileName = platformFile.name;
+        final tempId = const Uuid().v4();
+        final ext = fileName.split('.').last.toLowerCase();
 
-      // Prepare Note ID
-      String noteId;
-      if (_currentFileName != null) {
-        if (_currentFileName!.startsWith('note_')) {
-          noteId = _currentFileName!.replaceFirst('note_', '');
+        // 1. Add Placeholder
+        final placeholder = AttachmentModel(
+          id: tempId,
+          fileName: fileName,
+          size: 0,
+          mimeType: 'application/octet-stream', // Unknown pending
+          isLoading: true,
+        );
+        _attachments.add(placeholder);
+        attachmentsNotifier.value = List.from(_attachments);
+
+        // Prepare Note ID
+        String noteId;
+        if (_currentFileName != null) {
+          if (_currentFileName!.startsWith('note_')) {
+            noteId = _currentFileName!.replaceFirst('note_', '');
+          } else {
+            noteId = const Uuid().v4();
+            _currentFileName = "note_$noteId";
+          }
         } else {
           noteId = const Uuid().v4();
           _currentFileName = "note_$noteId";
         }
-      } else {
-        noteId = const Uuid().v4();
-        _currentFileName = "note_$noteId";
-      }
 
-      try {
-        // 2. Check Size
-        int size = await originalFile.length();
-        if (size > 10 * 1024 * 1024 * 1024) {
-          _attachments.removeWhere((a) => a.id == tempId);
-          attachmentsNotifier.value = List.from(_attachments);
-          // notifyListeners();
-          print("File too large > 10GB");
-          return;
-        }
-
-        // 3. Compress
-        Uint8List bytes;
-        final settings = SettingsService();
-        final isImage = ['jpg', 'jpeg', 'png', 'webp', 'heic'].contains(ext);
-
-        if (isImage && settings.compressionLevel != CompressionLevel.none) {
-          int quality = 85;
-          int minWidth = 1920;
-          int minHeight = 1080;
-          if (settings.compressionLevel == CompressionLevel.high) {
-            quality = 50;
-            minWidth = 1024;
-            minHeight = 768;
-          } else if (settings.compressionLevel == CompressionLevel.medium) {
-            quality = 70;
-            minWidth = 1280;
-            minHeight = 720;
+        try {
+          // 2. Check Size
+          int size = await originalFile.length();
+          if (size > 10 * 1024 * 1024 * 1024) {
+            _attachments.removeWhere((a) => a.id == tempId);
+            attachmentsNotifier.value = List.from(_attachments);
+            print("File too large > 10GB: $fileName");
+            continue;
           }
-          final compressed = await FlutterImageCompress.compressWithFile(
-            path,
-            quality: quality,
-            minWidth: minWidth,
-            minHeight: minHeight,
-          );
-          if (compressed != null) {
-            bytes = compressed;
-            size = bytes.length;
+
+          // 3. Compress
+          Uint8List bytes;
+          final settings = SettingsService();
+          // PNG excluded from compression (lossless format, compression not effective)
+          final isCompressible = ['jpg', 'jpeg', 'webp', 'heic'].contains(ext);
+
+          if (isCompressible &&
+              settings.compressionLevel != CompressionLevel.none) {
+            int quality = 85;
+            int minWidth = 1920;
+            int minHeight = 1080;
+            if (settings.compressionLevel == CompressionLevel.high) {
+              quality = 50;
+              minWidth = 1024;
+              minHeight = 768;
+            } else if (settings.compressionLevel == CompressionLevel.medium) {
+              quality = 70;
+              minWidth = 1280;
+              minHeight = 720;
+            }
+            try {
+              final compressed = await FlutterImageCompress.compressWithFile(
+                path,
+                quality: quality,
+                minWidth: minWidth,
+                minHeight: minHeight,
+              );
+              if (compressed != null) {
+                bytes = compressed;
+                size = bytes.length;
+              } else {
+                bytes = await originalFile.readAsBytes();
+              }
+            } catch (e) {
+              // Compression failed, use original
+              print("Compression failed for $fileName: $e");
+              bytes = await originalFile.readAsBytes();
+            }
           } else {
             bytes = await originalFile.readAsBytes();
           }
-        } else {
-          bytes = await originalFile.readAsBytes();
-        }
 
-        // 4. Encrypt (Background via Service)
-        final encryptedBytes = await _encryptionService.encryptBinary(
-          bytes,
-          password: _currentPassword,
-        );
-
-        // 5. Save
-        final attachmentId = await _fileService.saveAttachment(
-          encryptedBytes,
-          noteId,
-        );
-
-        // 6. Update List (Replace placeholder)
-        final index = _attachments.indexWhere((a) => a.id == tempId);
-        if (index != -1) {
-          _attachments[index] = AttachmentModel(
-            id: attachmentId,
-            fileName: fileName,
-            size: size,
-            mimeType: isImage ? 'image/$ext' : 'application/octet-stream',
-            isLoading: false,
+          // 4. Encrypt (Background via Service)
+          final encryptedBytes = await _encryptionService.encryptBinary(
+            bytes,
+            password: _currentPassword,
           );
-          attachmentsNotifier.value = List.from(_attachments);
-          // notifyListeners();
-        }
 
-        _scheduleAutoSave();
-      } catch (e) {
-        print("Error adding attachment: $e");
-        // Remove placeholder on error
-        _attachments.removeWhere((a) => a.id == tempId);
-        attachmentsNotifier.value = List.from(_attachments);
-        // notifyListeners();
+          // 5. Save
+          final attachmentId = await _fileService.saveAttachment(
+            encryptedBytes,
+            noteId,
+          );
+
+          // 6. Update List (Replace placeholder)
+          final index = _attachments.indexWhere((a) => a.id == tempId);
+          if (index != -1) {
+            _attachments[index] = AttachmentModel(
+              id: attachmentId,
+              fileName: fileName,
+              size: size,
+              mimeType:
+                  ['jpg', 'jpeg', 'png', 'webp', 'heic', 'gif'].contains(ext)
+                  ? 'image/$ext'
+                  : 'application/octet-stream',
+              isLoading: false,
+            );
+            attachmentsNotifier.value = List.from(_attachments);
+          }
+        } catch (e) {
+          print("Error adding attachment: $e");
+          // Remove placeholder on error
+          _attachments.removeWhere((a) => a.id == tempId);
+          attachmentsNotifier.value = List.from(_attachments);
+        }
       }
+
+      _scheduleAutoSave();
     }
   }
 

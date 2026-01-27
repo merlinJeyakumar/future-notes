@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'dart:typed_data';
 import '../viewmodels/content_viewmodel.dart';
 import '../models/note_model.dart';
@@ -53,6 +54,30 @@ class _ContentAreaState extends State<ContentArea> {
     // Cache local references to avoid property access in build/config
     _focusNode = viewModel.focusNode;
     _scrollController = viewModel.scrollController;
+
+    // Listen for snackbar notifications
+    viewModel.snackbarNotifier.addListener(_showSnackbar);
+  }
+
+  @override
+  void dispose() {
+    viewModel.snackbarNotifier.removeListener(_showSnackbar);
+    super.dispose();
+  }
+
+  void _showSnackbar() {
+    final message = viewModel.snackbarNotifier.value;
+    if (message != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      // Clear after showing
+      viewModel.snackbarNotifier.value = null;
+    }
   }
 
   @override
@@ -905,16 +930,26 @@ class _AttachmentBarState extends State<AttachmentBar>
             const SizedBox(height: 8),
             SizedBox(
               height: 90,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: viewModel.attachments.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
-                itemBuilder: (context, index) {
-                  return _buildAttachmentItem(
-                    context,
-                    viewModel.attachments[index],
-                  );
-                },
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(context).copyWith(
+                  dragDevices: {
+                    PointerDeviceKind.touch,
+                    PointerDeviceKind.mouse,
+                  },
+                  scrollbars: true,
+                ),
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  itemCount: viewModel.attachments.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 12),
+                  itemBuilder: (context, index) {
+                    return _buildAttachmentItem(
+                      context,
+                      viewModel.attachments[index],
+                    );
+                  },
+                ),
               ),
             ),
           ],

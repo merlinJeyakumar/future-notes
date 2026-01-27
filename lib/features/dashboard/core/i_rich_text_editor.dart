@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// Abstract interface for rich text editors.
@@ -6,11 +5,15 @@ import 'package:flutter/material.dart';
 /// This abstraction allows swapping between different editor implementations
 /// (Super Editor, Flutter Quill, etc.) without changing ViewModel or UI code.
 abstract class IRichTextEditor {
-  /// Get current content as HTML string.
-  String getHtml();
+  /// Get current content as JSON string (native editor format).
+  String getDocumentJson();
 
-  /// Set content from HTML string.
-  void setHtml(String html);
+  /// Set content from JSON string (native editor format).
+  /// Returns true if successful, false if content couldn't be parsed.
+  bool setDocumentJson(String json);
+
+  /// Get plain text content (for backwards compatibility and search).
+  String getPlainText();
 
   /// Check if the editor has any content.
   bool get hasContent;

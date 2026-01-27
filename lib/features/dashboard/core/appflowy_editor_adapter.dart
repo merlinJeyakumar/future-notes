@@ -1,13 +1,12 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'i_rich_text_editor.dart';
-import '../services/appflowy_html_service.dart';
 
 /// AppFlowy Editor implementation of [IRichTextEditor].
 class AppFlowyEditorAdapter implements IRichTextEditor {
   late EditorState _editorState;
   final List<VoidCallback> _listeners = [];
-  final AppFlowyHtmlService _htmlService = AppFlowyHtmlService();
 
   AppFlowyEditorAdapter() {
     _editorState = EditorState.blank();
@@ -17,12 +16,37 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
   EditorState get editorState => _editorState;
 
   @override
-  String getHtml() => _htmlService.editorStateToHtml(_editorState);
+  String getDocumentJson() {
+    final json = _editorState.document.toJson();
+    return jsonEncode(json);
+  }
 
   @override
-  void setHtml(String html) {
-    if (html.isEmpty) return;
-    _editorState = _htmlService.htmlToEditorState(html);
+  bool setDocumentJson(String jsonStr) {
+    if (jsonStr.trim().isEmpty) return false;
+    try {
+      final json = jsonDecode(jsonStr);
+      if (json is Map<String, dynamic>) {
+        final document = Document.fromJson(json);
+        _editorState = EditorState(document: document);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Error parsing document JSON: $e');
+    }
+    return false;
+  }
+
+  @override
+  String getPlainText() {
+    final buffer = StringBuffer();
+    for (final node in _editorState.document.root.children) {
+      final delta = node.delta;
+      if (delta != null) {
+        buffer.writeln(delta.toPlainText());
+      }
+    }
+    return buffer.toString().trim();
   }
 
   @override

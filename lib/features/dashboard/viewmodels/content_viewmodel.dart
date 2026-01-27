@@ -514,7 +514,7 @@ class ContentViewModel extends BaseViewModel {
     );
     if (decrypted.startsWith("Error decrypting:")) {
       _initDocument();
-      _setDocumentText("Incorrect Password");
+      _createSimpleDocument("Incorrect Password");
       _sessionPasswords.remove(_currentFileName); // Invalid pass
       _isLocked = true;
       isLockedNotifier.value = true;
@@ -567,7 +567,7 @@ class ContentViewModel extends BaseViewModel {
       progressNotifier.value = 'Re-encrypting content...';
       await Future.delayed(Duration.zero);
 
-      String contentToSave = _richTextEditor.getHtml();
+      String contentToSave = _richTextEditor.getDocumentJson();
 
       // Re-encrypt content with new password
       final newEncryptedContent = await _encryptionService.encrypt(
@@ -714,11 +714,11 @@ class ContentViewModel extends BaseViewModel {
       noteId = const Uuid().v4();
     }
 
-    String contentToSave = _richTextEditor.getHtml();
+    String contentToSave = _richTextEditor.getDocumentJson();
     bool locked = false;
 
-    // Extract plain text from HTML content
-    String plainText = contentToSave.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+    // Extract plain text from document
+    String plainText = _richTextEditor.getPlainText();
 
     if (_currentFileName == null &&
         plainText.isEmpty &&
@@ -1118,23 +1118,24 @@ class ContentViewModel extends BaseViewModel {
 
   // region Helpers
 
-  /// Set simple text content in the document
-  void _setDocumentText(String text) {
-    // Basic implementation for AppFlowy using setHtml (stub)
-    _richTextEditor.setHtml(text);
-  }
-
-  /// Load content into the Super Editor document
+  /// Load content into the editor document
   void _loadContentToEditor(String content) {
+    if (content.trim().isEmpty) return;
+
     try {
       content = content.trim();
 
-      // 1. Legacy Delta JSON - convert to plain text (backwards compatibility)
-      if (content.startsWith('[') || content.startsWith('{')) {
+      // 1. Try native AppFlowy JSON format (preferred)
+      if (content.startsWith('{')) {
+        final loaded = _richTextEditor.setDocumentJson(content);
+        if (loaded) return;
+      }
+
+      // 2. Legacy Delta JSON - convert to plain text (backwards compatibility)
+      if (content.startsWith('[')) {
         try {
           final jsonContent = jsonDecode(content);
           if (jsonContent is List) {
-            // Extract plain text from Delta JSON for backwards compatibility
             final buffer = StringBuffer();
             for (final op in jsonContent) {
               if (op is Map && op['insert'] is String) {
@@ -1142,26 +1143,52 @@ class ContentViewModel extends BaseViewModel {
               }
             }
             final plainText = buffer.toString().trim();
-            _setDocumentText(plainText);
+            _createSimpleDocument(plainText);
             return;
           }
         } catch (e) {
-          // Not valid JSON
+          // Not valid Delta JSON
         }
       }
 
-      // 2. HTML (Preferred)
-      if (content.startsWith('<') || content.trim().isEmpty) {
-        _richTextEditor.setHtml(content);
-      } else {
-        // 3. Plain text fallback
-        _setDocumentText(content);
+      // 3. Legacy HTML - convert to plain text (backwards compatibility)
+      if (content.startsWith('<')) {
+        final plainText = content.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+        _createSimpleDocument(plainText);
+        return;
       }
+
+      // 4. Plain text fallback
+      _createSimpleDocument(content);
     } catch (e) {
-      // Fallback
       debugPrint("Error loading content: $e");
-      _setDocumentText(content);
+      _createSimpleDocument(content);
     }
+  }
+
+  /// Create a simple document with plain text content
+  void _createSimpleDocument(String text) {
+    if (text.trim().isEmpty) return;
+    // Create a minimal AppFlowy document structure
+    final documentJson = {
+      'document': {
+        'type': 'page',
+        'children': text
+            .split('\n')
+            .map(
+              (line) => {
+                'type': 'paragraph',
+                'data': {
+                  'delta': [
+                    {'insert': line},
+                  ],
+                },
+              },
+            )
+            .toList(),
+      },
+    };
+    _richTextEditor.setDocumentJson(jsonEncode(documentJson));
   }
 
   void reset() {
@@ -1250,7 +1277,7 @@ class ContentViewModel extends BaseViewModel {
     if (_currentFileName != null || isPasswordSet) {
       _autoSaveTimer?.cancel();
       _autoSaveTimer = Timer(const Duration(seconds: 2), () async {
-        String contentToSave = _richTextEditor.getHtml();
+        String contentToSave = _richTextEditor.getDocumentJson();
 
         await compute(_autoSaveIsolate, {
           'fileName': _currentFileName,

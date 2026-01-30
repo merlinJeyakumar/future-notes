@@ -29,11 +29,37 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
   }
 
   /// Custom HTML encoder that preserves all formatting including font sizes.
+  /// Groups consecutive list items together properly.
   String _documentToHtmlWithFontSize(Document document) {
     final buffer = StringBuffer();
+    final nodes = document.root.children.toList();
 
-    for (final node in document.root.children) {
-      buffer.writeln(_nodeToHtml(node));
+    int i = 0;
+    while (i < nodes.length) {
+      final node = nodes[i];
+      final type = node.type;
+
+      // Group consecutive list items
+      if (type == 'bulleted_list' || type == 'numbered_list') {
+        final listTag = type == 'bulleted_list' ? 'ul' : 'ol';
+        buffer.write('<$listTag>');
+
+        // Collect all consecutive items of the same type
+        while (i < nodes.length && nodes[i].type == type) {
+          final listNode = nodes[i];
+          final content = listNode.delta != null
+              ? _deltaToHtml(listNode.delta!)
+              : '';
+          final children = listNode.children.map(_nodeToHtml).join();
+          buffer.write('<li>$content$children</li>');
+          i++;
+        }
+
+        buffer.writeln('</$listTag>');
+      } else {
+        buffer.writeln(_nodeToHtml(node));
+        i++;
+      }
     }
 
     return buffer.toString();
@@ -50,14 +76,11 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
         return '<h$level>$content</h$level>';
 
       case 'bulleted_list':
-        final content = delta != null ? _deltaToHtml(delta) : '';
-        final children = node.children.map(_nodeToHtml).join();
-        return '<ul><li>$content$children</li></ul>';
-
       case 'numbered_list':
+        // For nested lists or when called recursively
         final content = delta != null ? _deltaToHtml(delta) : '';
         final children = node.children.map(_nodeToHtml).join();
-        return '<ol><li>$content$children</li></ol>';
+        return '<li>$content$children</li>';
 
       case 'todo_list':
         final checked = node.attributes['checked'] as bool? ?? false;

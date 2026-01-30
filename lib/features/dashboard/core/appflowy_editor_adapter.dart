@@ -99,10 +99,10 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
       final styles = <String>[];
       final tags = <String>[];
 
-      // Font size (the key fix)
-      if (attrs['fontSize'] != null) {
-        final size = attrs['fontSize'];
-        styles.add('font-size: ${size}px');
+      // Font size (use AppFlowyRichTextKeys constant)
+      final fontSize = attrs[AppFlowyRichTextKeys.fontSize];
+      if (fontSize != null) {
+        styles.add('font-size: ${fontSize}px');
       }
 
       // Bold

@@ -22,6 +22,11 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
   }
 
   @override
+  String getDocumentHtml() {
+    return documentToHTML(_editorState.document);
+  }
+
+  @override
   bool setDocumentJson(String jsonStr) {
     if (jsonStr.trim().isEmpty) return false;
     try {

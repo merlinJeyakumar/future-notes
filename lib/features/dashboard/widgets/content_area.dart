@@ -673,6 +673,16 @@ class _ContentAreaState extends State<ContentArea> {
               },
             ),
 
+            // Export as HTML
+            _buildSettingsTile(
+              icon: Icons.code_rounded,
+              title: 'Export as HTML',
+              onTap: () {
+                Navigator.pop(context);
+                viewModel.exportAsHtml();
+              },
+            ),
+
             // Spacer and Divider before Delete
             const SizedBox(height: 16),
             Divider(color: colors.divider),

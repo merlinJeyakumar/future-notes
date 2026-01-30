@@ -209,6 +209,61 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
+  /// Export the current note content as an HTML file.
+  Future<void> exportAsHtml() async {
+    final title = titleController.text.trim();
+    final suggestedName = title.isEmpty
+        ? 'note'
+        : title.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+
+    final String? outputFile = await FilePicker.platform.saveFile(
+      dialogTitle: 'Export as HTML',
+      fileName: '$suggestedName.html',
+      lockParentWindow: true,
+      type: FileType.custom,
+      allowedExtensions: ['html'],
+    );
+
+    if (outputFile == null) return;
+
+    setBusy(true);
+    try {
+      // Get HTML from editor's built-in conversion
+      final htmlContent = _richTextEditor.getDocumentHtml();
+
+      // Wrap in a complete HTML document with styling
+      final fullHtml =
+          '''<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>$title</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }
+    h1, h2, h3 { margin-top: 1.5em; margin-bottom: 0.5em; }
+    ul, ol { padding-left: 2em; }
+    blockquote { border-left: 4px solid #ccc; margin: 1em 0; padding-left: 1em; color: #666; }
+    code { background: #f4f4f4; padding: 0.2em 0.4em; border-radius: 3px; }
+    pre { background: #f4f4f4; padding: 1em; overflow-x: auto; border-radius: 6px; }
+    img { max-width: 100%; height: auto; }
+  </style>
+</head>
+<body>
+$htmlContent
+</body>
+</html>''';
+
+      final file = File(outputFile);
+      await file.writeAsString(fullHtml);
+      snackbarNotifier.value = 'Exported to HTML';
+    } catch (e) {
+      snackbarNotifier.value = 'Export failed: $e';
+    } finally {
+      setBusy(false);
+    }
+  }
+
   Future<void> exportAttachment(AttachmentModel attachment) async {
     // 1. Pick location first
     final String? outputFile = await FilePicker.platform.saveFile(

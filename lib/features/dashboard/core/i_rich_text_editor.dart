@@ -8,6 +8,9 @@ abstract class IRichTextEditor {
   /// Get current content as JSON string (native editor format).
   String getDocumentJson();
 
+  /// Get current content as HTML string for export.
+  String getDocumentHtml();
+
   /// Set content from JSON string (native editor format).
   /// Returns true if successful, false if content couldn't be parsed.
   bool setDocumentJson(String json);

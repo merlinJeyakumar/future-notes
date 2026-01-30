@@ -255,12 +255,12 @@ class _ContentAreaState extends State<ContentArea> {
             onPressed: () => _handleLockAction(context),
             isActive: true,
           ),
-        // Export HTML button
+        // Share/Export button
         if (!isLocked)
           _buildSubtleIconButton(
             Icons.share_rounded,
-            'Export as HTML',
-            onPressed: viewModel.exportAsHtml,
+            'Share / Export',
+            onPressed: () => _showShareDialog(context),
           ),
         // Hide settings when file is locked
         if (!isLocked)
@@ -376,6 +376,55 @@ class _ContentAreaState extends State<ContentArea> {
         _promptSave(context);
       }
     }
+  }
+
+  void _showShareDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: colors.toolbarIsland,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Share / Export',
+              style: TextStyle(color: colors.textPrimary, fontSize: 18),
+            ),
+            Divider(color: colors.divider),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Export as HTML
+            _buildSettingsTile(
+              icon: Icons.html_rounded,
+              title: 'Export as HTML',
+              onTap: () {
+                Navigator.pop(context);
+                viewModel.exportAsHtml();
+              },
+            ),
+            // Export as PDF
+            _buildSettingsTile(
+              icon: Icons.picture_as_pdf_rounded,
+              title: 'Export as PDF',
+              onTap: () {
+                Navigator.pop(context);
+                viewModel.exportAsPdf();
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: TextStyle(color: colors.subtleGray)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<String?> _showPasswordDialog(

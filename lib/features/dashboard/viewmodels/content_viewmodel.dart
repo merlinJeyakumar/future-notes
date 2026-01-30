@@ -19,6 +19,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/settings_service.dart';
 import '../services/pack_service.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 
 class ContentViewModel extends BaseViewModel {
   final IFileService _fileService;
@@ -257,6 +259,76 @@ $htmlContent
       final file = File(outputFile);
       await file.writeAsString(fullHtml);
       snackbarNotifier.value = 'Exported to HTML';
+    } catch (e) {
+      snackbarNotifier.value = 'Export failed: $e';
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /// Export the current note content as a PDF file.
+  Future<void> exportAsPdf() async {
+    final title = titleController.text.trim();
+    final suggestedName = title.isEmpty
+        ? 'note'
+        : title.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+
+    final String? outputFile = await FilePicker.platform.saveFile(
+      dialogTitle: 'Export as PDF',
+      fileName: '$suggestedName.pdf',
+      lockParentWindow: true,
+      type: FileType.custom,
+      allowedExtensions: ['pdf'],
+    );
+
+    if (outputFile == null) return;
+
+    setBusy(true);
+    try {
+      final pdf = pw.Document();
+
+      // Get plain text from editor
+      final plainText = _richTextEditor.getPlainText();
+      final lines = plainText.split('\n');
+
+      // Build PDF content
+      final content = <pw.Widget>[];
+
+      // Add title
+      if (title.isNotEmpty) {
+        content.add(
+          pw.Header(
+            level: 0,
+            child: pw.Text(
+              title,
+              style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
+            ),
+          ),
+        );
+        content.add(pw.SizedBox(height: 10));
+      }
+
+      // Add content lines
+      for (final line in lines) {
+        if (line.trim().isEmpty) {
+          content.add(pw.SizedBox(height: 8));
+        } else {
+          content.add(pw.Paragraph(text: line));
+        }
+      }
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(40),
+          build: (context) => content,
+        ),
+      );
+
+      final bytes = await pdf.save();
+      final file = File(outputFile);
+      await file.writeAsBytes(bytes);
+      snackbarNotifier.value = 'Exported to PDF';
     } catch (e) {
       snackbarNotifier.value = 'Export failed: $e';
     } finally {

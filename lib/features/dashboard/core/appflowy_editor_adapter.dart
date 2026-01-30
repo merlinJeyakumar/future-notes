@@ -23,7 +23,183 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
 
   @override
   String getDocumentHtml() {
-    return documentToHTML(_editorState.document);
+    // Custom HTML export that preserves font sizes
+    // (built-in documentToHTML doesn't include font-size)
+    return _documentToHtmlWithFontSize(_editorState.document);
+  }
+
+  /// Custom HTML encoder that preserves all formatting including font sizes.
+  String _documentToHtmlWithFontSize(Document document) {
+    final buffer = StringBuffer();
+
+    for (final node in document.root.children) {
+      buffer.writeln(_nodeToHtml(node));
+    }
+
+    return buffer.toString();
+  }
+
+  String _nodeToHtml(Node node) {
+    final type = node.type;
+    final delta = node.delta;
+
+    switch (type) {
+      case 'heading':
+        final level = node.attributes['level'] as int? ?? 1;
+        final content = delta != null ? _deltaToHtml(delta) : '';
+        return '<h$level>$content</h$level>';
+
+      case 'bulleted_list':
+        final content = delta != null ? _deltaToHtml(delta) : '';
+        final children = node.children.map(_nodeToHtml).join();
+        return '<ul><li>$content$children</li></ul>';
+
+      case 'numbered_list':
+        final content = delta != null ? _deltaToHtml(delta) : '';
+        final children = node.children.map(_nodeToHtml).join();
+        return '<ol><li>$content$children</li></ol>';
+
+      case 'todo_list':
+        final checked = node.attributes['checked'] as bool? ?? false;
+        final content = delta != null ? _deltaToHtml(delta) : '';
+        final checkbox = checked
+            ? '<input type="checkbox" checked disabled>'
+            : '<input type="checkbox" disabled>';
+        return '<div class="todo-item">$checkbox<span${checked ? ' style="text-decoration: line-through;"' : ''}>$content</span></div>';
+
+      case 'quote':
+        final content = delta != null ? _deltaToHtml(delta) : '';
+        return '<blockquote>$content</blockquote>';
+
+      case 'code':
+        final content = delta != null ? _escapeHtml(delta.toPlainText()) : '';
+        return '<pre><code>$content</code></pre>';
+
+      case 'divider':
+        return '<hr>';
+
+      case 'paragraph':
+      default:
+        if (delta == null || delta.isEmpty) {
+          return '<p><br></p>';
+        }
+        final content = _deltaToHtml(delta);
+        return '<p>$content</p>';
+    }
+  }
+
+  String _deltaToHtml(Delta delta) {
+    final buffer = StringBuffer();
+
+    for (final op in delta.toList()) {
+      final text = op.data;
+      if (text is! String) continue;
+
+      final attrs = op.attributes ?? {};
+      final styles = <String>[];
+      final tags = <String>[];
+
+      // Font size (the key fix)
+      if (attrs['fontSize'] != null) {
+        final size = attrs['fontSize'];
+        styles.add('font-size: ${size}px');
+      }
+
+      // Bold
+      if (attrs[AppFlowyRichTextKeys.bold] == true) {
+        tags.add('strong');
+      }
+
+      // Italic
+      if (attrs[AppFlowyRichTextKeys.italic] == true) {
+        tags.add('em');
+      }
+
+      // Underline & Strikethrough
+      final decorations = <String>[];
+      if (attrs[AppFlowyRichTextKeys.underline] == true) {
+        decorations.add('underline');
+      }
+      if (attrs[AppFlowyRichTextKeys.strikethrough] == true) {
+        decorations.add('line-through');
+      }
+      if (decorations.isNotEmpty) {
+        styles.add('text-decoration: ${decorations.join(' ')}');
+      }
+
+      // Text color
+      final textColor = attrs[AppFlowyRichTextKeys.textColor];
+      if (textColor != null && textColor is String) {
+        styles.add('color: ${_formatColor(textColor)}');
+      }
+
+      // Background color / highlight
+      final bgColor = attrs[AppFlowyRichTextKeys.backgroundColor];
+      if (bgColor != null && bgColor is String) {
+        styles.add('background-color: ${_formatColor(bgColor)}');
+      }
+
+      // Code
+      if (attrs[AppFlowyRichTextKeys.code] == true) {
+        tags.add('code');
+      }
+
+      // Link
+      final href = attrs[AppFlowyRichTextKeys.href];
+
+      // Build the HTML
+      String html = _escapeHtml(text);
+
+      // Wrap with tags (innermost first)
+      for (final tag in tags.reversed) {
+        html = '<$tag>$html</$tag>';
+      }
+
+      // Wrap with styles span or link
+      if (href != null && href is String) {
+        final styleAttr = styles.isNotEmpty
+            ? ' style="${styles.join('; ')}"'
+            : '';
+        html = '<a href="$href"$styleAttr>$html</a>';
+      } else if (styles.isNotEmpty) {
+        html = '<span style="${styles.join('; ')}">$html</span>';
+      }
+
+      buffer.write(html);
+    }
+
+    return buffer.toString();
+  }
+
+  String _formatColor(String color) {
+    // Handle different color formats
+    if (color.startsWith('#')) {
+      return color;
+    } else if (color.startsWith('0x')) {
+      // Convert 0xAARRGGBB to #RRGGBB or rgba
+      final value = int.tryParse(color);
+      if (value != null) {
+        final a = (value >> 24) & 0xFF;
+        final r = (value >> 16) & 0xFF;
+        final g = (value >> 8) & 0xFF;
+        final b = value & 0xFF;
+        if (a == 255) {
+          return '#${r.toRadixString(16).padLeft(2, '0')}${g.toRadixString(16).padLeft(2, '0')}${b.toRadixString(16).padLeft(2, '0')}';
+        } else {
+          return 'rgba($r, $g, $b, ${(a / 255).toStringAsFixed(2)})';
+        }
+      }
+    }
+    return color;
+  }
+
+  String _escapeHtml(String text) {
+    return text
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
   }
 
   @override

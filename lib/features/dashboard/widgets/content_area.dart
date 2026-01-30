@@ -255,6 +255,13 @@ class _ContentAreaState extends State<ContentArea> {
             onPressed: () => _handleLockAction(context),
             isActive: true,
           ),
+        // Export HTML button
+        if (!isLocked)
+          _buildSubtleIconButton(
+            Icons.share_rounded,
+            'Export as HTML',
+            onPressed: viewModel.exportAsHtml,
+          ),
         // Hide settings when file is locked
         if (!isLocked)
           _buildSubtleIconButton(
@@ -670,16 +677,6 @@ class _ContentAreaState extends State<ContentArea> {
                   },
                   activeColor: colors.accent,
                 );
-              },
-            ),
-
-            // Export as HTML
-            _buildSettingsTile(
-              icon: Icons.code_rounded,
-              title: 'Export as HTML',
-              onTap: () {
-                Navigator.pop(context);
-                viewModel.exportAsHtml();
               },
             ),
 

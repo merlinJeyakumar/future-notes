@@ -53,12 +53,6 @@ dependencies:
   flutter_image_compress: ^2.4.0
   archive: ^4.0.4
   html: ^0.15.4
-  htmltopdf_syncfusion: ^0.1.0
-  flutter_html_to_pdf_v2: ^1.0.1
-  flutter_native_html_to_pdf: ^2.0.0
-  html_to_pdf: ^0.8.1
-  flutter_html_to_pdf_plus: ^0.4.0
-  htmltopdfwidgets: ^2.0.1
 
 dev_dependencies:
   flutter_test:

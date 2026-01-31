@@ -21,7 +21,6 @@ import '../services/settings_service.dart';
 import '../services/pack_service.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:htmltopdfwidgets/htmltopdfwidgets.dart';
 
 class ContentViewModel extends BaseViewModel {
   final IFileService _fileService;
@@ -268,7 +267,7 @@ $htmlContent
   }
 
   /// Export the current note content as a PDF file.
-  /// Uses HTML content and converts it to PDF with htmltopdfwidgets.
+  /// Uses plain text from editor and converts to PDF.
   Future<void> exportAsPdf() async {
     final title = titleController.text.trim();
     final suggestedName = title.isEmpty
@@ -287,40 +286,43 @@ $htmlContent
 
     setBusy(true);
     try {
-      // Get HTML content from editor (same as HTML export)
-      final htmlContent = _richTextEditor.getDocumentHtml();
-
-      // Wrap in full HTML document with styling
-      final fullHtml =
-          '''<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: sans-serif; line-height: 1.6; }
-    h1, h2, h3 { margin-top: 1em; margin-bottom: 0.5em; }
-    ul, ol { padding-left: 2em; }
-    blockquote { border-left: 4px solid #ccc; margin: 1em 0; padding-left: 1em; color: #666; }
-    code { background: #f4f4f4; padding: 0.2em 0.4em; }
-    pre { background: #f4f4f4; padding: 1em; }
-  </style>
-</head>
-<body>
-${title.isNotEmpty ? '<h1>$title</h1>' : ''}
-$htmlContent
-</body>
-</html>''';
-
-      // Convert HTML to PDF widgets
-      final widgets = await HTMLToPdf().convert(fullHtml);
-
-      // Create PDF document
       final pdf = pw.Document();
+
+      // Get plain text from editor
+      final plainText = _richTextEditor.getPlainText();
+      final lines = plainText.split('\n');
+
+      // Build PDF content
+      final content = <pw.Widget>[];
+
+      // Add title
+      if (title.isNotEmpty) {
+        content.add(
+          pw.Header(
+            level: 0,
+            child: pw.Text(
+              title,
+              style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
+            ),
+          ),
+        );
+        content.add(pw.SizedBox(height: 10));
+      }
+
+      // Add content lines
+      for (final line in lines) {
+        if (line.trim().isEmpty) {
+          content.add(pw.SizedBox(height: 8));
+        } else {
+          content.add(pw.Paragraph(text: line));
+        }
+      }
+
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(40),
-          build: (context) => widgets,
+          build: (context) => content,
         ),
       );
 

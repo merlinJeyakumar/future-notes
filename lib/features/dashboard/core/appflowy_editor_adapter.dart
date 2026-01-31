@@ -792,13 +792,22 @@ class _EditorToolbar extends StatelessWidget {
   }
 
   void _applyFontSizeWithSelection(int? fontSize, Selection? selection) {
-    if (selection != null) {
-      adapter._editorState.updateSelectionWithReason(
-        selection,
-        reason: SelectionUpdateReason.uiEvent,
-      );
-    }
-    Future.microtask(() => adapter._applyFontSize(fontSize));
+    if (selection == null || selection.isCollapsed) return;
+
+    // Apply font size directly using the stored selection
+    // This fixes mobile where editor loses focus when dialog opens
+    final nodes = adapter._editorState.getNodesInSelection(selection);
+    if (nodes.isEmpty) return;
+
+    final transaction = adapter._editorState.transaction;
+    transaction.formatText(
+      nodes.first,
+      selection.startIndex,
+      selection.length,
+      {AppFlowyRichTextKeys.fontSize: fontSize?.toDouble()},
+    );
+    transaction.afterSelection = selection; // Restore selection after format
+    adapter._editorState.apply(transaction);
   }
 
   Widget _buildColorPickerButton(BuildContext context) {

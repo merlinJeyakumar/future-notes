@@ -242,12 +242,21 @@ class _ContentAreaState extends State<ContentArea> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        // 1. Attach file (add content)
         if (!isLocked)
           _buildSubtleIconButton(
             Icons.attach_file_rounded,
             'Attach file',
             onPressed: viewModel.pickAttachment,
           ),
+        // 2. Share/Export (export content)
+        if (!isLocked)
+          _buildSubtleIconButton(
+            Icons.share_rounded,
+            'Share / Export',
+            onPressed: () => _showShareDialog(context),
+          ),
+        // 3. Lock/Unlock (security)
         if (isLocked || viewModel.isPasswordSet)
           _buildSubtleIconButton(
             isLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
@@ -255,14 +264,7 @@ class _ContentAreaState extends State<ContentArea> {
             onPressed: () => _handleLockAction(context),
             isActive: true,
           ),
-        // Share/Export button
-        if (!isLocked)
-          _buildSubtleIconButton(
-            Icons.share_rounded,
-            'Share / Export',
-            onPressed: () => _showShareDialog(context),
-          ),
-        // Hide settings when file is locked
+        // 4. Settings (configuration - last)
         if (!isLocked)
           _buildSubtleIconButton(
             Icons.settings_outlined,

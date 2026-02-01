@@ -1,6 +1,5 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+
 import '../models/note_model.dart';
 import 'file_details_dialog.dart';
 import '../../../core/theme/app_theme.dart';

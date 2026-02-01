@@ -468,7 +468,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     onChanged: (ThemeMode? newValue) {
                       if (newValue != null) {
                         settings.setThemeMode(newValue).then((_) {
-                          setState(() {});
+                          Navigator.pop(context);
                         });
                       }
                     },

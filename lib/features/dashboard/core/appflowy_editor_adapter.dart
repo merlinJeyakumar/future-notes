@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:appflowy_editor/appflowy_editor.dart';
@@ -10,6 +11,7 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
 
   AppFlowyEditorAdapter() {
     _editorState = EditorState.blank();
+    _resubscribe();
   }
 
   // Helper for ViewModel/UI to access state directly if needed
@@ -227,6 +229,8 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
         .replaceAll("'", '&#39;');
   }
 
+  StreamSubscription? _subscription;
+
   @override
   bool setDocumentJson(String jsonStr) {
     if (jsonStr.trim().isEmpty) return false;
@@ -235,12 +239,20 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
       if (json is Map<String, dynamic>) {
         final document = Document.fromJson(json);
         _editorState = EditorState(document: document);
+        _resubscribe();
         return true;
       }
     } catch (e) {
       debugPrint('Error parsing document JSON: $e');
     }
     return false;
+  }
+
+  void _resubscribe() {
+    _subscription?.cancel();
+    _subscription = _editorState.transactionStream.listen(
+      (_) => _notifyListeners(),
+    );
   }
 
   @override
@@ -454,13 +466,13 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
 
   @override
   void dispose() {
+    _subscription?.cancel();
     _listeners.clear();
   }
 
   @override
   void addChangeListener(VoidCallback listener) {
     _listeners.add(listener);
-    _editorState.transactionStream.listen((_) => _notifyListeners());
   }
 
   @override

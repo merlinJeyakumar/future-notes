@@ -24,6 +24,15 @@ class SettingsService {
 
   String? get customDataPath => _customDataPath;
 
+  // Auto-save preference
+  bool _autoSave = true;
+  bool get autoSave => _autoSave;
+
+  Future<void> setAutoSave(bool value) async {
+    _autoSave = value;
+    await _saveSettings();
+  }
+
   // Auto-collapse attachments when editing starts
   bool _autoCollapseAttachments = true;
   bool get autoCollapseAttachments => _autoCollapseAttachments;
@@ -124,6 +133,9 @@ class SettingsService {
         if (json.containsKey('autoCollapseAttachments')) {
           _autoCollapseAttachments = json['autoCollapseAttachments'] as bool;
         }
+        if (json.containsKey('autoSave')) {
+          _autoSave = json['autoSave'] as bool;
+        }
       }
     } catch (e) {
       print("Error loading settings: $e");
@@ -144,6 +156,7 @@ class SettingsService {
         'customDataPath': _customDataPath,
         'themeMode': _themeMode.index,
         'autoCollapseAttachments': _autoCollapseAttachments,
+        'autoSave': _autoSave,
       };
 
       await file.writeAsString(jsonEncode(json));

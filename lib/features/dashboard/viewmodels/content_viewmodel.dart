@@ -23,7 +23,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:htmltopdfwidgets/htmltopdfwidgets.dart' as htpdf;
 
-class ContentViewModel extends BaseViewModel {
+class ContentViewModel extends BaseViewModel with WidgetsBindingObserver {
   final IFileService _fileService;
   final IEncryptionService _encryptionService;
 
@@ -41,7 +41,7 @@ class ContentViewModel extends BaseViewModel {
 
   String? _currentPassword;
   String? _currentFileName;
-  Timer? _autoSaveTimer;
+
   Timer? _debounceTimer; // For file watching
   Timer? _searchDebounceTimer;
   Timer? _autoSaveDebounceTimer; // Minimal debounce for auto-save
@@ -208,7 +208,7 @@ class ContentViewModel extends BaseViewModel {
         }
       }
 
-      _scheduleAutoSave();
+      _onTextChanged();
     }
   }
 
@@ -602,7 +602,7 @@ $htmlContent
     attachmentsNotifier.value = List.from(_attachments);
     _attachmentCache.remove(attachmentId);
     // notifyListeners();
-    _scheduleAutoSave();
+    _onTextChanged();
     // TODO: Physically delete the attachment file to clean up storage
   }
 
@@ -618,11 +618,23 @@ $htmlContent
     // Ensure settings are loaded before loading files
     _initAsync();
     _initFileWatcher();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      if (_isDirty && SettingsService().autoSave) {
+        saveNote(isAutoSave: true);
+      }
+    }
   }
 
   /// Initialize the rich text editor adapter
   void _initDocument() {
     _richTextEditor = AppFlowyEditorAdapter();
+    _richTextEditor.addChangeListener(_onTextChanged);
   }
 
   Future<void> handleLinkClick(String url) async {
@@ -678,6 +690,12 @@ $htmlContent
   }
 
   Future<void> loadNote(String fileName) async {
+    // 1. Force save if there are pending changes from the previous file
+    if (_isDirty && SettingsService().autoSave) {
+      // Ensure we save the CURRENT file before switching
+      await saveNote(isAutoSave: true);
+    }
+
     setBusy(true);
     _currentFileName = fileName;
     _attachmentCache.clear();
@@ -739,13 +757,13 @@ $htmlContent
   void setPassword(String password) {
     _currentPassword = password;
     notifyListeners();
-    _scheduleAutoSave();
+    _onTextChanged();
   }
 
   void clearPassword() {
     _currentPassword = null;
     notifyListeners();
-    _scheduleAutoSave();
+    _onTextChanged();
   }
 
   /// Removes password protection from the current note.
@@ -1585,7 +1603,8 @@ $htmlContent
   // region Lifecycle
   @override
   void dispose() {
-    _autoSaveTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _richTextEditor.removeChangeListener(_onTextChanged);
     _debounceTimer?.cancel();
     _autoSaveDebounceTimer?.cancel();
     _searchDebounceTimer?.cancel();
@@ -1604,26 +1623,6 @@ $htmlContent
 
   // Title generation removed - was causing performance issues
   // Title now updates only on save
-
-  // Background isolate for auto-saving note content
-  static Future<void> _autoSaveIsolate(Map<String, dynamic> args) async {
-    final fileName = args['fileName'] as String?;
-    final content = args['content'] as String?;
-    final isPasswordSet = args['isPasswordSet'] as bool;
-    final password = args['password'] as String?;
-
-    if (fileName == null || content == null) return;
-    try {
-      String dataToSave = content;
-      if (isPasswordSet && password != null) {
-        dataToSave = await EncryptionService().encryptApp(content);
-      }
-      final file = File('${Directory.current.path}/$fileName');
-      await file.writeAsString(dataToSave);
-    } catch (e) {
-      // Silently ignore errors in background save
-    }
-  }
 
   static Future<NoteModel?> _parseNoteIsolate(String content) async {
     // 1. Try App Decryption
@@ -1653,20 +1652,16 @@ $htmlContent
     return null;
   }
 
-  void _scheduleAutoSave() {
-    if (_currentFileName != null || isPasswordSet) {
-      _autoSaveTimer?.cancel();
-      _autoSaveTimer = Timer(const Duration(seconds: 2), () async {
-        String contentToSave = _richTextEditor.getDocumentJson();
+  bool _isDirty = false;
 
-        await compute(_autoSaveIsolate, {
-          'fileName': _currentFileName,
-          'content': contentToSave,
-          'isPasswordSet': isPasswordSet,
-          'password': _currentPassword,
-        });
-      });
-    }
+  void _onTextChanged() {
+    _isDirty = true;
+    notifyListeners();
+  }
+
+  // Legacy method kept for interface compatibility if needed, but unused for internal logic now
+  void _scheduleAutoSave() {
+    _onTextChanged();
   }
 
   String _generateTitleFromContent(String content) {

@@ -160,6 +160,8 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
       final bgColor = attrs[AppFlowyRichTextKeys.backgroundColor];
       if (bgColor != null && bgColor is String) {
         styles.add('background-color: ${_formatColor(bgColor)}');
+        // Also add mark tag for better PDF renderer support
+        tags.add('mark');
       }
 
       // Code

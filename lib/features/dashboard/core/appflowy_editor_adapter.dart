@@ -242,9 +242,7 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
         _resubscribe();
         return true;
       }
-    } catch (e) {
-      debugPrint('Error parsing document JSON: $e');
-    }
+    } catch (e) {}
     return false;
   }
 
@@ -441,24 +439,6 @@ class AppFlowyEditorAdapter implements IRichTextEditor {
       selection.startIndex,
       selection.length,
       {AppFlowyRichTextKeys.backgroundColor: hex},
-    );
-    transaction.afterSelection = selection; // Preserve selection
-    _editorState.apply(transaction);
-  }
-
-  void _applyFontSize(int? fontSize) {
-    final selection = _editorState.selection;
-    if (selection == null || selection.isCollapsed) return;
-
-    final nodes = _editorState.getNodesInSelection(selection);
-    if (nodes.isEmpty) return;
-
-    final transaction = _editorState.transaction;
-    transaction.formatText(
-      nodes.first,
-      selection.startIndex,
-      selection.length,
-      {AppFlowyRichTextKeys.fontSize: fontSize?.toDouble()},
     );
     transaction.afterSelection = selection; // Preserve selection
     _editorState.apply(transaction);

@@ -49,7 +49,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       await Process.run('explorer.exe', ['/select,', normalizedPath]);
     } else {
       // Fallback or other platforms
-      print("Show in folder not implemented for this platform");
+      // Show in folder not implemented for this platform
     }
   }
 

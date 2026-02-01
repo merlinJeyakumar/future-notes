@@ -204,7 +204,6 @@ class ContentViewModel extends BaseViewModel with WidgetsBindingObserver {
             attachmentsNotifier.value = List.from(_attachments);
           }
         } catch (e) {
-          print("Error adding attachment: $e");
           // Remove placeholder on error
           _attachments.removeWhere((a) => a.id == tempId);
           attachmentsNotifier.value = List.from(_attachments);
@@ -390,190 +389,10 @@ $htmlContent
 
   /// Build PDF content from document JSON structure.
   /// Parses the AppFlowy document format and creates styled PDF widgets.
-  List<pw.Widget> _buildPdfContent() {
-    final widgets = <pw.Widget>[];
-
-    try {
-      final jsonStr = _richTextEditor.getDocumentJson();
-      final docData = jsonDecode(jsonStr) as Map<String, dynamic>;
-      final document = docData['document'] as Map<String, dynamic>?;
-      if (document == null) return widgets;
-
-      final children = document['children'] as List<dynamic>? ?? [];
-
-      for (final child in children) {
-        final node = child as Map<String, dynamic>;
-        final widget = _nodeToPdfWidget(node);
-        if (widget != null) {
-          widgets.add(widget);
-        }
-      }
-    } catch (e) {
-      // Fall back to plain text if JSON parsing fails
-      final plainText = _richTextEditor.getPlainText();
-      for (final line in plainText.split('\n')) {
-        if (line.trim().isEmpty) {
-          widgets.add(pw.SizedBox(height: 8));
-        } else {
-          widgets.add(pw.Paragraph(text: line));
-        }
-      }
-    }
-
-    return widgets;
-  }
 
   /// Convert a document node to a PDF widget.
-  pw.Widget? _nodeToPdfWidget(Map<String, dynamic> node) {
-    final type = node['type'] as String?;
-    final delta = node['delta'] as List<dynamic>?;
-    final attrs = node['attributes'] as Map<String, dynamic>? ?? {};
-
-    switch (type) {
-      case 'heading':
-        final level = attrs['level'] as int? ?? 1;
-        final fontSize =
-            {1: 28.0, 2: 24.0, 3: 20.0, 4: 18.0, 5: 16.0, 6: 14.0}[level] ??
-            16.0;
-        return pw.Container(
-          margin: const pw.EdgeInsets.only(top: 16, bottom: 8),
-          child: pw.RichText(
-            text: _deltaToTextSpan(delta, baseFontSize: fontSize, bold: true),
-          ),
-        );
-
-      case 'paragraph':
-        if (delta == null || delta.isEmpty) {
-          return pw.SizedBox(height: 8);
-        }
-        return pw.Container(
-          margin: const pw.EdgeInsets.only(bottom: 8),
-          child: pw.RichText(text: _deltaToTextSpan(delta)),
-        );
-
-      case 'bulleted_list':
-        return pw.Container(
-          margin: const pw.EdgeInsets.only(left: 20, bottom: 4),
-          child: pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text('• ', style: const pw.TextStyle(fontSize: 14)),
-              pw.Expanded(child: pw.RichText(text: _deltaToTextSpan(delta))),
-            ],
-          ),
-        );
-
-      case 'numbered_list':
-        return pw.Container(
-          margin: const pw.EdgeInsets.only(left: 20, bottom: 4),
-          child: pw.RichText(text: _deltaToTextSpan(delta)),
-        );
-
-      case 'quote':
-        return pw.Container(
-          margin: const pw.EdgeInsets.symmetric(vertical: 8),
-          padding: const pw.EdgeInsets.only(left: 12),
-          decoration: const pw.BoxDecoration(
-            border: pw.Border(
-              left: pw.BorderSide(width: 3, color: PdfColors.grey400),
-            ),
-          ),
-          child: pw.RichText(
-            text: _deltaToTextSpan(
-              delta,
-              italic: true,
-              color: PdfColors.grey700,
-            ),
-          ),
-        );
-
-      case 'code':
-        final text =
-            delta?.map((op) => op['insert'] as String? ?? '').join() ?? '';
-        return pw.Container(
-          margin: const pw.EdgeInsets.symmetric(vertical: 8),
-          padding: const pw.EdgeInsets.all(12),
-          decoration: pw.BoxDecoration(
-            color: PdfColors.grey200,
-            borderRadius: pw.BorderRadius.circular(4),
-          ),
-          child: pw.Text(
-            text,
-            style: pw.TextStyle(font: pw.Font.courier(), fontSize: 12),
-          ),
-        );
-
-      case 'divider':
-        return pw.Container(
-          margin: const pw.EdgeInsets.symmetric(vertical: 12),
-          child: pw.Divider(thickness: 1, color: PdfColors.grey400),
-        );
-
-      default:
-        // Unknown type - try to extract text
-        if (delta != null && delta.isNotEmpty) {
-          return pw.Container(
-            margin: const pw.EdgeInsets.only(bottom: 8),
-            child: pw.RichText(text: _deltaToTextSpan(delta)),
-          );
-        }
-        return null;
-    }
-  }
 
   /// Convert delta operations to PDF TextSpan with formatting.
-  pw.TextSpan _deltaToTextSpan(
-    List<dynamic>? delta, {
-    double baseFontSize = 14,
-    bool bold = false,
-    bool italic = false,
-    PdfColor color = PdfColors.black,
-  }) {
-    if (delta == null || delta.isEmpty) {
-      return const pw.TextSpan(text: '');
-    }
-
-    final spans = <pw.TextSpan>[];
-
-    for (final op in delta) {
-      final insert = op['insert'] as String? ?? '';
-      final attrs = op['attributes'] as Map<String, dynamic>? ?? {};
-
-      // Build text style from attributes
-      final isBold = bold || attrs['bold'] == true;
-      final isItalic = italic || attrs['italic'] == true;
-      final isUnderline = attrs['underline'] == true;
-      final isStrikethrough = attrs['strikethrough'] == true;
-      final fontSize = (attrs['fontSize'] as num?)?.toDouble() ?? baseFontSize;
-
-      pw.TextDecoration? decoration;
-      if (isUnderline && isStrikethrough) {
-        decoration = pw.TextDecoration.combine([
-          pw.TextDecoration.underline,
-          pw.TextDecoration.lineThrough,
-        ]);
-      } else if (isUnderline) {
-        decoration = pw.TextDecoration.underline;
-      } else if (isStrikethrough) {
-        decoration = pw.TextDecoration.lineThrough;
-      }
-
-      spans.add(
-        pw.TextSpan(
-          text: insert,
-          style: pw.TextStyle(
-            fontSize: fontSize,
-            fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal,
-            fontStyle: isItalic ? pw.FontStyle.italic : pw.FontStyle.normal,
-            decoration: decoration,
-            color: color,
-          ),
-        ),
-      );
-    }
-
-    return pw.TextSpan(children: spans);
-  }
 
   Future<void> exportAttachment(AttachmentModel attachment) async {
     // 1. Pick location first
@@ -594,7 +413,6 @@ $htmlContent
         await file.writeAsBytes(data);
       }
     } catch (e) {
-      print("Error saving attachment: $e");
     } finally {
       setBusy(false);
     }
@@ -656,7 +474,6 @@ $htmlContent
       // We can use launchUrl from url_launcher
       // But user needs to import it?
       // For now print
-      print("External Link Clicked: $url");
     }
   }
 
@@ -712,7 +529,7 @@ $htmlContent
         await _applyNoteModel(note, fileName);
       } else {
         // 3. Fallback to Plain Text
-        print("Loading as plain text");
+
         _loadContentToEditor(content);
         titleController.text = _generateTitleFromContent(content);
         _isLocked = false;

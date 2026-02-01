@@ -983,7 +983,7 @@ class _AttachmentBarState extends State<AttachmentBar>
                   scrollDirection: Axis.horizontal,
                   physics: const BouncingScrollPhysics(),
                   itemCount: viewModel.attachments.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 12),
+                  separatorBuilder: (_, _) => const SizedBox(width: 12),
                   itemBuilder: (context, index) {
                     return _buildAttachmentItem(
                       context,

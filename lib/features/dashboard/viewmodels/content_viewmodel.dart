@@ -21,6 +21,7 @@ import '../services/settings_service.dart';
 import '../services/pack_service.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:htmltopdfwidgets/htmltopdfwidgets.dart' as htpdf;
 
 class ContentViewModel extends BaseViewModel {
   final IFileService _fileService;
@@ -212,21 +213,12 @@ class ContentViewModel extends BaseViewModel {
   }
 
   /// Export the current note content as an HTML file.
+  /// On mobile, opens system share sheet. On desktop, uses save dialog.
   Future<void> exportAsHtml() async {
     final title = titleController.text.trim();
     final suggestedName = title.isEmpty
         ? 'note'
         : title.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
-
-    final String? outputFile = await FilePicker.platform.saveFile(
-      dialogTitle: 'Export as HTML',
-      fileName: '$suggestedName.html',
-      lockParentWindow: true,
-      type: FileType.custom,
-      allowedExtensions: ['html'],
-    );
-
-    if (outputFile == null) return;
 
     setBusy(true);
     try {
@@ -256,9 +248,40 @@ $htmlContent
 </body>
 </html>''';
 
-      final file = File(outputFile);
-      await file.writeAsString(fullHtml);
-      snackbarNotifier.value = 'Exported to HTML';
+      // Check if we're on mobile (Android/iOS)
+      final isMobile =
+          defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS;
+
+      if (isMobile) {
+        // Use system share sheet on mobile
+        final tempDir = await getTemporaryDirectory();
+        final tempFile = File('${tempDir.path}/$suggestedName.html');
+        await tempFile.writeAsString(fullHtml);
+
+        await Share.shareXFiles([
+          XFile(tempFile.path),
+        ], subject: title.isNotEmpty ? title : 'Note Export');
+        snackbarNotifier.value = 'Shared HTML';
+      } else {
+        // Use file save dialog on desktop
+        final String? outputFile = await FilePicker.platform.saveFile(
+          dialogTitle: 'Export as HTML',
+          fileName: '$suggestedName.html',
+          lockParentWindow: true,
+          type: FileType.custom,
+          allowedExtensions: ['html'],
+        );
+
+        if (outputFile == null) {
+          setBusy(false);
+          return;
+        }
+
+        final file = File(outputFile);
+        await file.writeAsString(fullHtml);
+        snackbarNotifier.value = 'Exported to HTML';
+      }
     } catch (e) {
       snackbarNotifier.value = 'Export failed: $e';
     } finally {
@@ -267,74 +290,286 @@ $htmlContent
   }
 
   /// Export the current note content as a PDF file.
-  /// Uses plain text from editor and converts to PDF.
+  /// On mobile, opens system share sheet. On desktop, uses save dialog.
   Future<void> exportAsPdf() async {
     final title = titleController.text.trim();
     final suggestedName = title.isEmpty
         ? 'note'
         : title.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
 
-    final String? outputFile = await FilePicker.platform.saveFile(
-      dialogTitle: 'Export as PDF',
-      fileName: '$suggestedName.pdf',
-      lockParentWindow: true,
-      type: FileType.custom,
-      allowedExtensions: ['pdf'],
-    );
-
-    if (outputFile == null) return;
-
     setBusy(true);
     try {
+      // Get HTML from editor for conversion
+      final htmlContent = _richTextEditor.getDocumentHtml();
+
+      // Wrap in a complete HTML document for better styling
+      final fullHtml =
+          '''
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; }
+    h1 { font-size: 24px; font-weight: bold; margin-top: 16px; margin-bottom: 8px; }
+    h2 { font-size: 20px; font-weight: bold; margin-top: 14px; margin-bottom: 6px; }
+    h3 { font-size: 18px; font-weight: bold; margin-top: 12px; margin-bottom: 4px; }
+    p { margin: 8px 0; }
+    ul, ol { padding-left: 20px; }
+    blockquote { border-left: 3px solid #ccc; margin: 10px 0; padding-left: 15px; color: #666; }
+    code { background: #f4f4f4; padding: 2px 4px; }
+  </style>
+</head>
+<body>
+${title.isNotEmpty ? '<h1>$title</h1>' : ''}
+$htmlContent
+</body>
+</html>
+''';
+
+      // Convert HTML to PDF widgets using htmltopdfwidgets
+      final pdfWidgets = await htpdf.HTMLToPdf().convert(
+        fullHtml,
+        useNewEngine:
+            true, // Use new browser rendering engine for better CSS support
+      );
+
       final pdf = pw.Document();
-
-      // Get plain text from editor
-      final plainText = _richTextEditor.getPlainText();
-      final lines = plainText.split('\n');
-
-      // Build PDF content
-      final content = <pw.Widget>[];
-
-      // Add title
-      if (title.isNotEmpty) {
-        content.add(
-          pw.Header(
-            level: 0,
-            child: pw.Text(
-              title,
-              style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
-            ),
-          ),
-        );
-        content.add(pw.SizedBox(height: 10));
-      }
-
-      // Add content lines
-      for (final line in lines) {
-        if (line.trim().isEmpty) {
-          content.add(pw.SizedBox(height: 8));
-        } else {
-          content.add(pw.Paragraph(text: line));
-        }
-      }
-
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(40),
-          build: (context) => content,
+          maxPages: 100,
+          build: (context) => pdfWidgets,
         ),
       );
 
       final bytes = await pdf.save();
-      final file = File(outputFile);
-      await file.writeAsBytes(bytes);
-      snackbarNotifier.value = 'Exported to PDF';
+
+      // Check if we're on mobile (Android/iOS)
+      final isMobile =
+          defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS;
+
+      if (isMobile) {
+        // Use system share sheet on mobile
+        final tempDir = await getTemporaryDirectory();
+        final tempFile = File('${tempDir.path}/$suggestedName.pdf');
+        await tempFile.writeAsBytes(bytes);
+
+        await Share.shareXFiles([
+          XFile(tempFile.path),
+        ], subject: title.isNotEmpty ? title : 'Note Export');
+        snackbarNotifier.value = 'Shared PDF';
+      } else {
+        // Use file save dialog on desktop
+        final String? outputFile = await FilePicker.platform.saveFile(
+          dialogTitle: 'Export as PDF',
+          fileName: '$suggestedName.pdf',
+          lockParentWindow: true,
+          type: FileType.custom,
+          allowedExtensions: ['pdf'],
+        );
+
+        if (outputFile == null) {
+          setBusy(false);
+          return;
+        }
+
+        final file = File(outputFile);
+        await file.writeAsBytes(bytes);
+        snackbarNotifier.value = 'Exported to PDF';
+      }
     } catch (e) {
       snackbarNotifier.value = 'Export failed: $e';
     } finally {
       setBusy(false);
     }
+  }
+
+  /// Build PDF content from document JSON structure.
+  /// Parses the AppFlowy document format and creates styled PDF widgets.
+  List<pw.Widget> _buildPdfContent() {
+    final widgets = <pw.Widget>[];
+
+    try {
+      final jsonStr = _richTextEditor.getDocumentJson();
+      final docData = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final document = docData['document'] as Map<String, dynamic>?;
+      if (document == null) return widgets;
+
+      final children = document['children'] as List<dynamic>? ?? [];
+
+      for (final child in children) {
+        final node = child as Map<String, dynamic>;
+        final widget = _nodeToPdfWidget(node);
+        if (widget != null) {
+          widgets.add(widget);
+        }
+      }
+    } catch (e) {
+      // Fall back to plain text if JSON parsing fails
+      final plainText = _richTextEditor.getPlainText();
+      for (final line in plainText.split('\n')) {
+        if (line.trim().isEmpty) {
+          widgets.add(pw.SizedBox(height: 8));
+        } else {
+          widgets.add(pw.Paragraph(text: line));
+        }
+      }
+    }
+
+    return widgets;
+  }
+
+  /// Convert a document node to a PDF widget.
+  pw.Widget? _nodeToPdfWidget(Map<String, dynamic> node) {
+    final type = node['type'] as String?;
+    final delta = node['delta'] as List<dynamic>?;
+    final attrs = node['attributes'] as Map<String, dynamic>? ?? {};
+
+    switch (type) {
+      case 'heading':
+        final level = attrs['level'] as int? ?? 1;
+        final fontSize =
+            {1: 28.0, 2: 24.0, 3: 20.0, 4: 18.0, 5: 16.0, 6: 14.0}[level] ??
+            16.0;
+        return pw.Container(
+          margin: const pw.EdgeInsets.only(top: 16, bottom: 8),
+          child: pw.RichText(
+            text: _deltaToTextSpan(delta, baseFontSize: fontSize, bold: true),
+          ),
+        );
+
+      case 'paragraph':
+        if (delta == null || delta.isEmpty) {
+          return pw.SizedBox(height: 8);
+        }
+        return pw.Container(
+          margin: const pw.EdgeInsets.only(bottom: 8),
+          child: pw.RichText(text: _deltaToTextSpan(delta)),
+        );
+
+      case 'bulleted_list':
+        return pw.Container(
+          margin: const pw.EdgeInsets.only(left: 20, bottom: 4),
+          child: pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text('• ', style: const pw.TextStyle(fontSize: 14)),
+              pw.Expanded(child: pw.RichText(text: _deltaToTextSpan(delta))),
+            ],
+          ),
+        );
+
+      case 'numbered_list':
+        return pw.Container(
+          margin: const pw.EdgeInsets.only(left: 20, bottom: 4),
+          child: pw.RichText(text: _deltaToTextSpan(delta)),
+        );
+
+      case 'quote':
+        return pw.Container(
+          margin: const pw.EdgeInsets.symmetric(vertical: 8),
+          padding: const pw.EdgeInsets.only(left: 12),
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(
+              left: pw.BorderSide(width: 3, color: PdfColors.grey400),
+            ),
+          ),
+          child: pw.RichText(
+            text: _deltaToTextSpan(
+              delta,
+              italic: true,
+              color: PdfColors.grey700,
+            ),
+          ),
+        );
+
+      case 'code':
+        final text =
+            delta?.map((op) => op['insert'] as String? ?? '').join() ?? '';
+        return pw.Container(
+          margin: const pw.EdgeInsets.symmetric(vertical: 8),
+          padding: const pw.EdgeInsets.all(12),
+          decoration: pw.BoxDecoration(
+            color: PdfColors.grey200,
+            borderRadius: pw.BorderRadius.circular(4),
+          ),
+          child: pw.Text(
+            text,
+            style: pw.TextStyle(font: pw.Font.courier(), fontSize: 12),
+          ),
+        );
+
+      case 'divider':
+        return pw.Container(
+          margin: const pw.EdgeInsets.symmetric(vertical: 12),
+          child: pw.Divider(thickness: 1, color: PdfColors.grey400),
+        );
+
+      default:
+        // Unknown type - try to extract text
+        if (delta != null && delta.isNotEmpty) {
+          return pw.Container(
+            margin: const pw.EdgeInsets.only(bottom: 8),
+            child: pw.RichText(text: _deltaToTextSpan(delta)),
+          );
+        }
+        return null;
+    }
+  }
+
+  /// Convert delta operations to PDF TextSpan with formatting.
+  pw.TextSpan _deltaToTextSpan(
+    List<dynamic>? delta, {
+    double baseFontSize = 14,
+    bool bold = false,
+    bool italic = false,
+    PdfColor color = PdfColors.black,
+  }) {
+    if (delta == null || delta.isEmpty) {
+      return const pw.TextSpan(text: '');
+    }
+
+    final spans = <pw.TextSpan>[];
+
+    for (final op in delta) {
+      final insert = op['insert'] as String? ?? '';
+      final attrs = op['attributes'] as Map<String, dynamic>? ?? {};
+
+      // Build text style from attributes
+      final isBold = bold || attrs['bold'] == true;
+      final isItalic = italic || attrs['italic'] == true;
+      final isUnderline = attrs['underline'] == true;
+      final isStrikethrough = attrs['strikethrough'] == true;
+      final fontSize = (attrs['fontSize'] as num?)?.toDouble() ?? baseFontSize;
+
+      pw.TextDecoration? decoration;
+      if (isUnderline && isStrikethrough) {
+        decoration = pw.TextDecoration.combine([
+          pw.TextDecoration.underline,
+          pw.TextDecoration.lineThrough,
+        ]);
+      } else if (isUnderline) {
+        decoration = pw.TextDecoration.underline;
+      } else if (isStrikethrough) {
+        decoration = pw.TextDecoration.lineThrough;
+      }
+
+      spans.add(
+        pw.TextSpan(
+          text: insert,
+          style: pw.TextStyle(
+            fontSize: fontSize,
+            fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal,
+            fontStyle: isItalic ? pw.FontStyle.italic : pw.FontStyle.normal,
+            decoration: decoration,
+            color: color,
+          ),
+        ),
+      );
+    }
+
+    return pw.TextSpan(children: spans);
   }
 
   Future<void> exportAttachment(AttachmentModel attachment) async {

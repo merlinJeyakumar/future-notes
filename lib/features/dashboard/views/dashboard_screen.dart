@@ -518,6 +518,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     },
                   ),
                 ),
+                Divider(color: theme.appDivider),
+                // Auto-collapse attachments toggle
+                SwitchListTile(
+                  secondary: Icon(
+                    Icons.vertical_align_bottom_rounded,
+                    color: theme.appTextSecondary,
+                  ),
+                  title: Text(
+                    'Collapse on Edit',
+                    style: TextStyle(color: theme.appTextPrimary),
+                  ),
+                  subtitle: Text(
+                    'Collapse attachments when editing',
+                    style: TextStyle(color: theme.appSubtleGray, fontSize: 12),
+                  ),
+                  value: settings.autoCollapseAttachments,
+                  onChanged: (value) async {
+                    await settings.setAutoCollapseAttachments(value);
+                    setState(() {});
+                  },
+                  activeColor: theme.colorScheme.primary,
+                ),
                 if (!Platform.isAndroid && !Platform.isIOS) ...[
                   Divider(color: theme.appDivider),
                   ListTile(

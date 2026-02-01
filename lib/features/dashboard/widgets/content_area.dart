@@ -704,33 +704,6 @@ class _ContentAreaState extends State<ContentArea> {
                 },
               ),
 
-            // Auto-collapse attachments toggle
-            StatefulBuilder(
-              builder: (context, setDialogState) {
-                final settings = SettingsService();
-                return SwitchListTile(
-                  secondary: Icon(
-                    Icons.vertical_align_bottom_rounded,
-                    color: colors.textPrimary,
-                  ),
-                  title: Text(
-                    'Collapse on Edit',
-                    style: TextStyle(color: colors.textPrimary),
-                  ),
-                  subtitle: Text(
-                    'Collapse attachments when editing',
-                    style: TextStyle(color: colors.textSecondary, fontSize: 12),
-                  ),
-                  value: settings.autoCollapseAttachments,
-                  onChanged: (value) async {
-                    await settings.setAutoCollapseAttachments(value);
-                    setDialogState(() {});
-                  },
-                  activeColor: colors.accent,
-                );
-              },
-            ),
-
             // Spacer and Divider before Delete
             const SizedBox(height: 16),
             Divider(color: colors.divider),

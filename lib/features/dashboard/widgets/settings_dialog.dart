@@ -354,8 +354,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
             horizontal: 24,
             vertical: 4,
           ),
-          title: const Text('Antigravity Notes'),
-          subtitle: const Text('v1.0.0 • Premium Agentic Experience'),
+          title: const Text('Future Notes'),
+          subtitle: const Text('v1.0.0 • Secure, Privacy-first Notes'),
           leading: Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(

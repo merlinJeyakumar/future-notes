@@ -305,33 +305,43 @@ class _ContentAreaState extends State<ContentArea> {
 
   /// Prominent pill-shaped Save button
   Widget _buildSaveButton(bool isMobile) {
-    return ElevatedButton(
-      onPressed: viewModel.isBusy ? null : () => viewModel.saveNote(),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: colors.saveButton,
-        foregroundColor: Colors.white,
-        disabledBackgroundColor: colors.saveButton.withOpacity(0.5),
-        shape: isMobile ? const CircleBorder() : const StadiumBorder(),
-        padding: isMobile
-            ? const EdgeInsets.all(12)
-            : const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-        elevation: 0,
-      ),
-      child: viewModel.isBusy
-          ? const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white,
-              ),
-            )
-          : (isMobile
-                ? Icon(Icons.save_rounded, size: 18)
-                : Text(
-                    'Save Note',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                  )),
+    return ValueListenableBuilder<bool>(
+      valueListenable: viewModel.isSavingNotifier,
+      builder: (context, isSaving, child) {
+        return ElevatedButton(
+          onPressed: (isSaving || viewModel.isBusy)
+              ? null
+              : () => viewModel.saveNote(),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: colors.saveButton,
+            foregroundColor: Colors.white,
+            disabledBackgroundColor: colors.saveButton.withOpacity(0.5),
+            shape: isMobile ? const CircleBorder() : const StadiumBorder(),
+            padding: isMobile
+                ? const EdgeInsets.all(12)
+                : const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            elevation: 0,
+          ),
+          child: isSaving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : (isMobile
+                    ? Icon(Icons.save_rounded, size: 18)
+                    : Text(
+                        'Save Note',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      )),
+        );
+      },
     );
   }
 

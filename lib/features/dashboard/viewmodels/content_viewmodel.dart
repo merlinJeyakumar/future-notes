@@ -57,6 +57,9 @@ class ContentViewModel extends BaseViewModel with WidgetsBindingObserver {
   final ValueNotifier<bool> isLockedNotifier = ValueNotifier(false);
   final ValueNotifier<bool> isAutoSavingNotifier = ValueNotifier(false);
 
+  /// dedicated notifier for manual save operations to avoid full screen blocking
+  final ValueNotifier<bool> isSavingNotifier = ValueNotifier(false);
+
   /// Progress notifier for long-running operations like password change/removal.
   /// Format: "status message" or null when not in progress
   final ValueNotifier<String?> progressNotifier = ValueNotifier(null);
@@ -1090,83 +1093,104 @@ $htmlContent
 
   // region Saving
   Future<void> saveNote({bool isAutoSave = false}) async {
-    if (!isAutoSave) setBusy(true);
+    // If not auto-saving, show loading indicator on the button
+    if (!isAutoSave) {
+      isSavingNotifier.value = true;
+    } else {
+      isAutoSavingNotifier.value = true;
+    }
 
-    if (!isAutoSave) await Future.delayed(const Duration(seconds: 1));
+    try {
+      // Calculate Note ID
+      String noteId;
+      bool isLegacy = false;
 
-    String? noteId;
-    bool isLegacy = false;
-
-    if (_currentFileName != null) {
-      if (_currentFileName!.startsWith('note_')) {
-        noteId = _currentFileName!.replaceFirst('note_', '');
-        // Strip any file extension (e.g., .enc) from the noteId
-        if (noteId.contains('.')) {
-          noteId = noteId.split('.').first;
+      if (_currentFileName != null) {
+        if (_currentFileName!.startsWith('note_')) {
+          noteId = _currentFileName!.replaceFirst('note_', '');
+          if (noteId.contains('.')) {
+            noteId = noteId.split('.').first;
+          }
+        } else {
+          isLegacy = true;
+          noteId = const Uuid().v4();
         }
       } else {
-        isLegacy = true;
         noteId = const Uuid().v4();
       }
-    } else {
-      noteId = const Uuid().v4();
-    }
 
-    String contentToSave = _richTextEditor.getDocumentJson();
-    bool locked = false;
+      // 1. Prepare Content (Inner Layer)
+      String contentJson = _richTextEditor.getDocumentJson();
+      String finalContentForModel = contentJson;
+      bool shouldMarkAsLocked = false;
 
-    // Extract plain text from document
-    String plainText = _richTextEditor.getPlainText();
+      // If user has set a password, encrypt the inner content logic
+      if (isPasswordSet && _currentPassword != null) {
+        finalContentForModel = await _encryptionService.encrypt(
+          contentJson,
+          password: _currentPassword,
+        );
+        shouldMarkAsLocked = true;
+      }
 
-    if (_currentFileName == null &&
-        plainText.isEmpty &&
-        titleController.text == "New Note") {
-      print("Skipping save of empty new note");
-      if (!isAutoSave) setBusy(false);
-      return;
-    }
-
-    String encryptedContent = "";
-    if (_currentPassword != null) {
-      encryptedContent = await _encryptionService.encrypt(
-        contentToSave,
-        password: _currentPassword,
+      // 2. Create Note Model
+      final note = NoteModel(
+        id: noteId,
+        title: titleController.text,
+        content: finalContentForModel,
+        isLocked: shouldMarkAsLocked,
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+        attachments: _attachments,
       );
-      locked = true;
-    } else {
-      encryptedContent = contentToSave;
+
+      // 3. Serialize and App-Encrypt (Outer Layer)
+      final noteJson = note.toJson();
+      final jsonString = json.encode(noteJson);
+
+      // Always encrypt the file on disk with App Key (obfuscation)
+      final String fileContentToSave = await _encryptionService.encryptApp(
+        jsonString,
+      );
+
+      // 4. Save to Disk
+      String fileName;
+      if (isLegacy) {
+        // Keep legacy name if it exists, or update?
+        // Strategy: If it was legacy, we just update it in place or migrate.
+        // Let's assume we maintain the file name if set, else new format.
+        fileName = _currentFileName ?? "note_$noteId";
+      } else {
+        fileName = "note_$noteId";
+      }
+
+      _currentFileName = fileName;
+      await _fileService.saveNoteContent(fileName, fileContentToSave);
+
+      if (_currentFileName != null && _currentPassword != null) {
+        _sessionPasswords[_currentFileName!] = _currentPassword!;
+      }
+
+      _isDirty = false;
+      notifyListeners();
+
+      // Update recent files list
+      await loadRecentFiles();
+
+      if (!isAutoSave) {
+        snackbarNotifier.value = 'Saved successfully';
+      }
+    } catch (e) {
+      print("Error saving note: $e");
+      if (!isAutoSave) {
+        snackbarNotifier.value = 'Error saving note: $e';
+      }
+    } finally {
+      if (!isAutoSave) {
+        isSavingNotifier.value = false;
+      } else {
+        isAutoSavingNotifier.value = false;
+      }
     }
-
-    final note = NoteModel(
-      id: noteId,
-      title: (titleController.text.trim().length < 40)
-          ? _generateTitleFromContent(plainText)
-          : titleController.text,
-      content: encryptedContent,
-      isLocked: locked,
-      timestamp: DateTime.now().millisecondsSinceEpoch,
-      attachments: _attachments,
-    );
-
-    final jsonString = json.encode(note.toJson());
-    final appEncrypted = await _encryptionService.encryptApp(jsonString);
-
-    if (isLegacy) {
-      await _fileService.saveFile(appEncrypted, _currentFileName!);
-    } else {
-      await _fileService.saveNoteContent(noteId, appEncrypted);
-      _currentFileName = "note_$noteId";
-    }
-
-    if (_currentFileName != null && _currentPassword != null) {
-      _sessionPasswords[_currentFileName!] = _currentPassword!;
-    }
-
-    print("SAVED FILE: $_currentFileName (Locked: $locked, Auto: $isAutoSave)");
-
-    await loadRecentFiles();
-
-    if (!isAutoSave) setBusy(false);
   }
 
   Future<void> deleteNote(String fileName) async {

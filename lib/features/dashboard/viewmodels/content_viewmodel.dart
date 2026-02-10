@@ -981,7 +981,7 @@ $htmlContent
       }
 
       _currentFileName = fileName;
-      await _fileService.saveNoteContent(fileName, fileContentToSave);
+      await _fileService.saveNoteContent(noteId, fileContentToSave);
 
       if (_currentFileName != null && _currentPassword != null) {
         _sessionPasswords[_currentFileName!] = _currentPassword!;

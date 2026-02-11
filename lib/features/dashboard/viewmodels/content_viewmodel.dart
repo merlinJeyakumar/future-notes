@@ -24,6 +24,10 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:htmltopdfwidgets/htmltopdfwidgets.dart' as htpdf;
 
 class ContentViewModel extends BaseViewModel with WidgetsBindingObserver {
+  static const int _kMaxTitleWords = 10;
+  static const int _kMaxTitleChars = 60;
+  static const String _kDefaultTitle = 'New Note';
+
   final IFileService _fileService;
   final IEncryptionService _encryptionService;
 
@@ -436,9 +440,8 @@ $htmlContent
     // Initialize Super Editor document model
     _initDocument();
 
-    // Ensure settings are loaded before loading files
+    // Ensure settings and background service are loaded before loading files
     _initAsync();
-    _initFileWatcher();
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -478,7 +481,6 @@ $htmlContent
   }
 
   void _initFileWatcher() {
-    _backgroundService.init();
     _backgroundService.recentFilesStream.listen((files) {
       _recentFiles = files;
       notifyListeners();
@@ -495,8 +497,10 @@ $htmlContent
   }
 
   Future<void> _initAsync() async {
-    // Wait for settings to load so custom data path is available
+    // Wait for settings and background isolate to be ready before loading files
     await SettingsService().init();
+    await _backgroundService.init();
+    _initFileWatcher();
     loadRecentFiles();
   }
   // endregion
@@ -1497,6 +1501,11 @@ $htmlContent
 
   void _onTextChanged() {
     _isDirty = true;
+
+    // Auto-generate title from first line of content
+    final plainText = _richTextEditor.getPlainText();
+    titleController.text = _generateTitleFromContent(plainText);
+
     notifyListeners();
   }
 
@@ -1506,32 +1515,33 @@ $htmlContent
   }
 
   String _generateTitleFromContent(String content) {
-    if (content.trim().isEmpty) return "New Note";
+    if (content.trim().isEmpty) return _kDefaultTitle;
 
+    // Take the first non-empty line
     final lines = content.split('\n');
-    final contentLines = lines.where((line) => line.trim().isNotEmpty).toList();
-
-    if (contentLines.isEmpty) return "New Note";
-
-    String title = "";
-
-    for (var line in contentLines) {
-      String cleaned = _cleanTitleLine(line);
-      if (cleaned.isEmpty) continue;
-
-      if (title.isNotEmpty) {
-        title += " ";
+    String firstLine = "";
+    for (final line in lines) {
+      final cleaned = _cleanTitleLine(line);
+      if (cleaned.isNotEmpty) {
+        firstLine = cleaned;
+        break;
       }
-      title += cleaned;
-
-      if (title.length >= 40) break;
     }
 
-    if (title.length > 40) {
-      title = title.substring(0, 40);
+    if (firstLine.isEmpty) return _kDefaultTitle;
+
+    // Limit to max words
+    final words = firstLine.split(RegExp(r'\s+'));
+    if (words.length > _kMaxTitleWords) {
+      firstLine = words.take(_kMaxTitleWords).join(' ');
     }
 
-    return title.isEmpty ? "New Note" : title;
+    // Limit to max characters
+    if (firstLine.length > _kMaxTitleChars) {
+      firstLine = firstLine.substring(0, _kMaxTitleChars);
+    }
+
+    return firstLine;
   }
 
   String _cleanTitleLine(String line) {

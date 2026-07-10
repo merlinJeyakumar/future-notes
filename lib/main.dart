@@ -5,7 +5,6 @@ import 'features/dashboard/services/settings_service.dart';
 import 'core/theme/app_theme.dart';
 
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:flutter_quill/flutter_quill.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -68,9 +67,8 @@ class _MyAppState extends State<MyApp> {
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
-        FlutterQuillLocalizations.delegate,
       ],
-      supportedLocales: FlutterQuillLocalizations.supportedLocales,
+      supportedLocales: const [Locale('en', 'US')],
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: _settings.themeMode,

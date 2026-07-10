@@ -94,13 +94,26 @@ Future<void> _processRecentFiles(
   final List<FileSystemEntity> entities = directory.listSync();
   final List<_FileCandidate> candidates = [];
 
-  // 1. Collect candidates and get stats (fast)
+  // 1. Collect folder-based note names first (for dedup against legacy flat files)
+  final Set<String> folderNoteNames = {};
+  for (final entity in entities) {
+    if (entity is Directory) {
+      final folderName = _extractName(entity.path);
+      if (folderName.startsWith('note_')) {
+        folderNoteNames.add(folderName);
+      }
+    }
+  }
+
+  // 2. Collect candidates and get stats (fast)
   for (final entity in entities) {
     try {
       if (entity is File) {
         final fileName = _extractName(entity.path);
         if (fileName.startsWith('.')) continue; // Skip hidden
         if (fileName == 'settings.json') continue; // Skip settings file
+        // Skip flat files that have a matching folder (prefer folder version)
+        if (folderNoteNames.contains(fileName)) continue;
 
         candidates.add(
           _FileCandidate(entity, entity.statSync().modified, isFolder: false),

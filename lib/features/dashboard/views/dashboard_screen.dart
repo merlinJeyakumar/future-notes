@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:file_picker/file_picker.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/content_area.dart';
 import '../viewmodels/content_viewmodel.dart';
@@ -10,7 +9,7 @@ import '../services/encryption_service.dart';
 import '../models/note_model.dart';
 import '../widgets/import_confirmation_dialog.dart';
 import '../widgets/export_options_dialog.dart';
-import '../services/settings_service.dart';
+import '../widgets/settings_dialog.dart';
 import '../../../core/theme/app_theme.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -50,7 +49,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       await Process.run('explorer.exe', ['/select,', normalizedPath]);
     } else {
       // Fallback or other platforms
-      print("Show in folder not implemented for this platform");
+      // Show in folder not implemented for this platform
     }
   }
 
@@ -410,182 +409,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _showMasterSettings(BuildContext context) {
-    final theme = Theme.of(context);
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) {
-          final settings = SettingsService();
-          return AlertDialog(
-            backgroundColor: theme.appSurface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            title: Text(
-              'Settings',
-              style: TextStyle(color: theme.appTextPrimary),
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Theme Setting
-                ListTile(
-                  leading: Icon(
-                    Icons.color_lens_outlined,
-                    color: theme.appTextSecondary,
-                  ),
-                  title: Text(
-                    'Theme',
-                    style: TextStyle(color: theme.appTextPrimary),
-                  ),
-                  subtitle: DropdownButton<ThemeMode>(
-                    value: settings.themeMode,
-                    dropdownColor: theme.appSurface,
-                    style: TextStyle(color: theme.appTextPrimary),
-                    underline: Container(
-                      height: 1,
-                      color: theme.colorScheme.primary,
-                    ),
-                    isExpanded: true,
-                    icon: Icon(
-                      Icons.arrow_drop_down,
-                      color: theme.appTextSecondary,
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: ThemeMode.light,
-                        child: Text('Light'),
-                      ),
-                      DropdownMenuItem(
-                        value: ThemeMode.dark,
-                        child: Text('Dark'),
-                      ),
-                      DropdownMenuItem(
-                        value: ThemeMode.system,
-                        child: Text('System'),
-                      ),
-                    ],
-                    onChanged: (ThemeMode? newValue) {
-                      if (newValue != null) {
-                        settings.setThemeMode(newValue).then((_) {
-                          setState(() {});
-                        });
-                      }
-                    },
-                  ),
-                ),
-                Divider(color: theme.appDivider),
-                // File Compression Setting
-                ListTile(
-                  leading: Icon(Icons.compress, color: theme.appTextSecondary),
-                  title: Text(
-                    'File Compression',
-                    style: TextStyle(color: theme.appTextPrimary),
-                  ),
-                  subtitle: DropdownButton<CompressionLevel>(
-                    value: settings.compressionLevel,
-                    dropdownColor: theme.appSurface,
-                    style: TextStyle(color: theme.appTextPrimary),
-                    underline: Container(
-                      height: 1,
-                      color: theme.colorScheme.primary,
-                    ),
-                    isExpanded: true,
-                    icon: Icon(
-                      Icons.arrow_drop_down,
-                      color: theme.appTextSecondary,
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: CompressionLevel.high,
-                        child: Text('High (Max Compression)'),
-                      ),
-                      DropdownMenuItem(
-                        value: CompressionLevel.medium,
-                        child: Text('Medium (Half Size)'),
-                      ),
-                      DropdownMenuItem(
-                        value: CompressionLevel.none,
-                        child: Text('None (Full Size)'),
-                      ),
-                    ],
-                    onChanged: (CompressionLevel? newValue) {
-                      if (newValue != null) {
-                        settings.setCompressionLevel(newValue).then((_) {
-                          setState(() {});
-                        });
-                      }
-                    },
-                  ),
-                ),
-                if (!Platform.isAndroid && !Platform.isIOS) ...[
-                  Divider(color: theme.appDivider),
-                  ListTile(
-                    leading: Icon(
-                      Icons.folder_open,
-                      color: theme.appTextSecondary,
-                    ),
-                    title: Text(
-                      'App Data Folder',
-                      style: TextStyle(color: theme.appTextPrimary),
-                    ),
-                    subtitle: FutureBuilder<String>(
-                      future: settings.getUserDataPath(),
-                      builder: (context, snapshot) {
-                        return Text(
-                          snapshot.data ?? 'Loading...',
-                          style: TextStyle(
-                            color: theme.appSubtleGray,
-                            fontSize: 12,
-                          ),
-                        );
-                      },
-                    ),
-                    trailing: IconButton(
-                      icon: Icon(Icons.edit, color: theme.colorScheme.primary),
-                      onPressed: () async {
-                        final String? selectedDirectory = await FilePicker
-                            .platform
-                            .getDirectoryPath();
-                        if (selectedDirectory != null) {
-                          await settings.setCustomDataPath(selectedDirectory);
-                          setState(() {});
-                          _viewModel.loadRecentFiles();
-                        }
-                      },
-                    ),
-                  ),
-                ],
-                Divider(color: theme.appDivider),
-                ListTile(
-                  leading: Icon(
-                    Icons.info_outline,
-                    color: theme.appTextSecondary,
-                  ),
-                  title: Text(
-                    'About',
-                    style: TextStyle(color: theme.appTextPrimary),
-                  ),
-                  subtitle: Text(
-                    'AntiGravity Notes v1.0',
-                    style: TextStyle(color: theme.appSubtleGray),
-                  ),
-                  onTap: () {},
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(
-                  'Close',
-                  style: TextStyle(color: theme.colorScheme.primary),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
+      barrierColor: Colors.black.withOpacity(0.5),
+      builder: (context) =>
+          SettingsDialog(onRefresh: () => _viewModel.loadRecentFiles()),
     );
   }
 

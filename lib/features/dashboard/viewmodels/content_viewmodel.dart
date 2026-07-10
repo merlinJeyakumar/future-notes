@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-// import 'dart:io'; // duplicate removed
+
 import 'package:file_picker/file_picker.dart';
 import '../../../core/viewmodels/base_viewmodel.dart';
 import '../services/file_service.dart';
@@ -10,25 +10,33 @@ import '../services/background_service.dart';
 import '../services/encryption_service.dart';
 import '../models/note_model.dart';
 import 'dart:convert';
-import 'package:flutter_quill/flutter_quill.dart';
-// Removed invalid quill_delta import
-import 'package:vsc_quill_delta_to_html/vsc_quill_delta_to_html.dart';
-import 'package:flutter_quill_delta_from_html/flutter_quill_delta_from_html.dart';
+import '../core/i_rich_text_editor.dart';
+import '../core/appflowy_editor_adapter.dart';
 import 'package:uuid/uuid.dart';
-import 'package:code_text_field/code_text_field.dart';
-import 'package:highlight/languages/xml.dart'; // XML handles HTML highlighting
-import 'dart:typed_data';
+
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/settings_service.dart';
 import '../services/pack_service.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:htmltopdfwidgets/htmltopdfwidgets.dart' as htpdf;
 
-class ContentViewModel extends BaseViewModel {
+class ContentViewModel extends BaseViewModel with WidgetsBindingObserver {
+  static const int _kMaxTitleWords = 10;
+  static const int _kMaxTitleChars = 60;
+  static const String _kDefaultTitle = 'New Note';
+
   final IFileService _fileService;
   final IEncryptionService _encryptionService;
 
-  final QuillController quillController = QuillController.basic();
+  // Rich text editor adapter - decoupled from specific implementation
+  late IRichTextEditor _richTextEditor;
+
+  // Public getter for UI to access editor interface
+  IRichTextEditor get richTextEditor => _richTextEditor;
+
   final TextEditingController titleController = TextEditingController(
     text: "New Note",
   );
@@ -37,10 +45,11 @@ class ContentViewModel extends BaseViewModel {
 
   String? _currentPassword;
   String? _currentFileName;
-  Timer? _autoSaveTimer;
+
   Timer? _debounceTimer; // For file watching
   Timer? _searchDebounceTimer;
   Timer? _autoSaveDebounceTimer; // Minimal debounce for auto-save
+
   StreamSubscription? _fileWatcherSubscription;
   final BackgroundService _backgroundService = BackgroundService();
   List<RecentFile> _recentFiles = [];
@@ -52,9 +61,15 @@ class ContentViewModel extends BaseViewModel {
   final ValueNotifier<bool> isLockedNotifier = ValueNotifier(false);
   final ValueNotifier<bool> isAutoSavingNotifier = ValueNotifier(false);
 
+  /// dedicated notifier for manual save operations to avoid full screen blocking
+  final ValueNotifier<bool> isSavingNotifier = ValueNotifier(false);
+
   /// Progress notifier for long-running operations like password change/removal.
   /// Format: "status message" or null when not in progress
   final ValueNotifier<String?> progressNotifier = ValueNotifier(null);
+
+  /// Snackbar notifier for showing quick feedback messages
+  final ValueNotifier<String?> snackbarNotifier = ValueNotifier(null);
 
   final Map<String, String> _sessionPasswords = {};
   final Map<String, Uint8List> _attachmentCache = {};
@@ -70,129 +85,318 @@ class ContentViewModel extends BaseViewModel {
   bool get isPasswordSet => _currentPassword != null;
   String? get currentFileName => _currentFileName;
 
-  late final CodeController htmlController;
-  bool _isHtmlMode = false;
-  bool get isHtmlMode => _isHtmlMode;
-
   Future<void> pickAttachment() async {
     final result = await _fileService.pickFile(allowedExtensions: null);
 
-    if (result != null && result.files.single.path != null) {
-      // Don't block UI with setBusy
+    if (result != null && result.files.isNotEmpty) {
+      // Immediate feedback to user
+      final count = result.files.length;
+      snackbarNotifier.value =
+          'Processing $count file${count > 1 ? 's' : ''}...';
 
-      final path = result.files.single.path!;
-      final originalFile = File(path);
-      final fileName = result.files.single.name;
-      final tempId = const Uuid().v4();
-      final ext = fileName.split('.').last.toLowerCase();
+      // Process all selected files
+      for (final platformFile in result.files) {
+        if (platformFile.path == null) continue;
 
-      // 1. Add Placeholder
-      final placeholder = AttachmentModel(
-        id: tempId,
-        fileName: fileName,
-        size: 0,
-        mimeType: 'application/octet-stream', // Unknown pending
-        isLoading: true,
-      );
-      _attachments.add(placeholder);
-      attachmentsNotifier.value = List.from(_attachments);
-      // notifyListeners(); // Removed to reduce rebuilds
+        final path = platformFile.path!;
+        final originalFile = File(path);
+        final fileName = platformFile.name;
+        final tempId = const Uuid().v4();
+        final ext = fileName.split('.').last.toLowerCase();
 
-      // Prepare Note ID
-      String noteId;
-      if (_currentFileName != null) {
-        if (_currentFileName!.startsWith('note_')) {
-          noteId = _currentFileName!.replaceFirst('note_', '');
+        // 1. Add Placeholder
+        final placeholder = AttachmentModel(
+          id: tempId,
+          fileName: fileName,
+          size: 0,
+          mimeType: 'application/octet-stream', // Unknown pending
+          isLoading: true,
+        );
+        _attachments.add(placeholder);
+        attachmentsNotifier.value = List.from(_attachments);
+
+        // Prepare Note ID
+        String noteId;
+        if (_currentFileName != null) {
+          if (_currentFileName!.startsWith('note_')) {
+            noteId = _currentFileName!.replaceFirst('note_', '');
+          } else {
+            noteId = const Uuid().v4();
+            _currentFileName = "note_$noteId";
+          }
         } else {
           noteId = const Uuid().v4();
           _currentFileName = "note_$noteId";
         }
-      } else {
-        noteId = const Uuid().v4();
-        _currentFileName = "note_$noteId";
-      }
 
-      try {
-        // 2. Check Size
-        int size = await originalFile.length();
-        if (size > 10 * 1024 * 1024 * 1024) {
-          _attachments.removeWhere((a) => a.id == tempId);
-          attachmentsNotifier.value = List.from(_attachments);
-          // notifyListeners();
-          print("File too large > 10GB");
-          return;
-        }
-
-        // 3. Compress
-        Uint8List bytes;
-        final settings = SettingsService();
-        final isImage = ['jpg', 'jpeg', 'png', 'webp', 'heic'].contains(ext);
-
-        if (isImage && settings.compressionLevel != CompressionLevel.none) {
-          int quality = 85;
-          int minWidth = 1920;
-          int minHeight = 1080;
-          if (settings.compressionLevel == CompressionLevel.high) {
-            quality = 50;
-            minWidth = 1024;
-            minHeight = 768;
-          } else if (settings.compressionLevel == CompressionLevel.medium) {
-            quality = 70;
-            minWidth = 1280;
-            minHeight = 720;
+        try {
+          // 2. Check Size
+          int size = await originalFile.length();
+          if (size > 10 * 1024 * 1024 * 1024) {
+            _attachments.removeWhere((a) => a.id == tempId);
+            attachmentsNotifier.value = List.from(_attachments);
+            snackbarNotifier.value = 'File too large: $fileName';
+            continue;
           }
-          final compressed = await FlutterImageCompress.compressWithFile(
-            path,
-            quality: quality,
-            minWidth: minWidth,
-            minHeight: minHeight,
-          );
-          if (compressed != null) {
-            bytes = compressed;
-            size = bytes.length;
+
+          // 3. Compress
+          Uint8List bytes;
+          final settings = SettingsService();
+          // PNG excluded from compression (lossless format, compression not effective)
+          final isCompressible = ['jpg', 'jpeg', 'webp', 'heic'].contains(ext);
+
+          if (isCompressible &&
+              settings.compressionLevel != CompressionLevel.none) {
+            int quality = 85;
+            int minWidth = 1920;
+            int minHeight = 1080;
+            if (settings.compressionLevel == CompressionLevel.high) {
+              quality = 50;
+              minWidth = 1024;
+              minHeight = 768;
+            } else if (settings.compressionLevel == CompressionLevel.medium) {
+              quality = 70;
+              minWidth = 1280;
+              minHeight = 720;
+            }
+            try {
+              final compressed = await FlutterImageCompress.compressWithFile(
+                path,
+                quality: quality,
+                minWidth: minWidth,
+                minHeight: minHeight,
+              );
+              if (compressed != null) {
+                bytes = compressed;
+                size = bytes.length;
+              } else {
+                bytes = await originalFile.readAsBytes();
+              }
+            } catch (e) {
+              // Compression failed, use original file
+              bytes = await originalFile.readAsBytes();
+            }
           } else {
             bytes = await originalFile.readAsBytes();
           }
-        } else {
-          bytes = await originalFile.readAsBytes();
-        }
 
-        // 4. Encrypt (Background via Service)
-        final encryptedBytes = await _encryptionService.encryptBinary(
-          bytes,
-          password: _currentPassword,
-        );
-
-        // 5. Save
-        final attachmentId = await _fileService.saveAttachment(
-          encryptedBytes,
-          noteId,
-        );
-
-        // 6. Update List (Replace placeholder)
-        final index = _attachments.indexWhere((a) => a.id == tempId);
-        if (index != -1) {
-          _attachments[index] = AttachmentModel(
-            id: attachmentId,
-            fileName: fileName,
-            size: size,
-            mimeType: isImage ? 'image/$ext' : 'application/octet-stream',
-            isLoading: false,
+          // 4. Encrypt (Background via Service)
+          final encryptedBytes = await _encryptionService.encryptBinary(
+            bytes,
+            password: _currentPassword,
           );
-          attachmentsNotifier.value = List.from(_attachments);
-          // notifyListeners();
-        }
 
-        _scheduleAutoSave();
-      } catch (e) {
-        print("Error adding attachment: $e");
-        // Remove placeholder on error
-        _attachments.removeWhere((a) => a.id == tempId);
-        attachmentsNotifier.value = List.from(_attachments);
-        // notifyListeners();
+          // 5. Save
+          final attachmentId = await _fileService.saveAttachment(
+            encryptedBytes,
+            noteId,
+          );
+
+          // 6. Update List (Replace placeholder)
+          final index = _attachments.indexWhere((a) => a.id == tempId);
+          if (index != -1) {
+            _attachments[index] = AttachmentModel(
+              id: attachmentId,
+              fileName: fileName,
+              size: size,
+              mimeType:
+                  ['jpg', 'jpeg', 'png', 'webp', 'heic', 'gif'].contains(ext)
+                  ? 'image/$ext'
+                  : 'application/octet-stream',
+              isLoading: false,
+            );
+            attachmentsNotifier.value = List.from(_attachments);
+          }
+        } catch (e) {
+          // Remove placeholder on error
+          _attachments.removeWhere((a) => a.id == tempId);
+          attachmentsNotifier.value = List.from(_attachments);
+        }
       }
+
+      _onTextChanged();
     }
   }
+
+  /// Export the current note content as an HTML file.
+  /// On mobile, opens system share sheet. On desktop, uses save dialog.
+  Future<void> exportAsHtml() async {
+    final title = titleController.text.trim();
+    final suggestedName = title.isEmpty
+        ? 'note'
+        : title.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+
+    setBusy(true);
+    try {
+      // Get HTML from editor's built-in conversion
+      final htmlContent = _richTextEditor.getDocumentHtml();
+
+      // Wrap in a complete HTML document with styling
+      final fullHtml =
+          '''<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>$title</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }
+    h1, h2, h3 { margin-top: 1.5em; margin-bottom: 0.5em; }
+    ul, ol { padding-left: 2em; }
+    blockquote { border-left: 4px solid #ccc; margin: 1em 0; padding-left: 1em; color: #666; }
+    code { background: #f4f4f4; padding: 0.2em 0.4em; border-radius: 3px; }
+    pre { background: #f4f4f4; padding: 1em; overflow-x: auto; border-radius: 6px; }
+    img { max-width: 100%; height: auto; }
+  </style>
+</head>
+<body>
+$htmlContent
+</body>
+</html>''';
+
+      // Check if we're on mobile (Android/iOS)
+      final isMobile =
+          defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS;
+
+      if (isMobile) {
+        // Use system share sheet on mobile
+        final tempDir = await getTemporaryDirectory();
+        final tempFile = File('${tempDir.path}/$suggestedName.html');
+        await tempFile.writeAsString(fullHtml);
+
+        await Share.shareXFiles([
+          XFile(tempFile.path),
+        ], subject: title.isNotEmpty ? title : 'Note Export');
+        snackbarNotifier.value = 'Shared HTML';
+      } else {
+        // Use file save dialog on desktop
+        final String? outputFile = await FilePicker.platform.saveFile(
+          dialogTitle: 'Export as HTML',
+          fileName: '$suggestedName.html',
+          lockParentWindow: true,
+          type: FileType.custom,
+          allowedExtensions: ['html'],
+        );
+
+        if (outputFile == null) {
+          setBusy(false);
+          return;
+        }
+
+        final file = File(outputFile);
+        await file.writeAsString(fullHtml);
+        snackbarNotifier.value = 'Exported to HTML';
+      }
+    } catch (e) {
+      snackbarNotifier.value = 'Export failed: $e';
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /// Export the current note content as a PDF file.
+  /// On mobile, opens system share sheet. On desktop, uses save dialog.
+  Future<void> exportAsPdf() async {
+    final title = titleController.text.trim();
+    final suggestedName = title.isEmpty
+        ? 'note'
+        : title.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+
+    setBusy(true);
+    try {
+      // Get HTML from editor for conversion
+      final htmlContent = _richTextEditor.getDocumentHtml();
+
+      // Wrap in a complete HTML document for better styling
+      final fullHtml =
+          '''
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; }
+    h1 { font-size: 24px; font-weight: bold; margin-top: 16px; margin-bottom: 8px; }
+    h2 { font-size: 20px; font-weight: bold; margin-top: 14px; margin-bottom: 6px; }
+    h3 { font-size: 18px; font-weight: bold; margin-top: 12px; margin-bottom: 4px; }
+    p { margin: 8px 0; }
+    ul, ol { padding-left: 20px; }
+    blockquote { border-left: 3px solid #ccc; margin: 10px 0; padding-left: 15px; color: #666; }
+    code { background: #f4f4f4; padding: 2px 4px; }
+  </style>
+</head>
+<body>
+${title.isNotEmpty ? '<h1>$title</h1>' : ''}
+$htmlContent
+</body>
+</html>
+''';
+
+      // Convert HTML to PDF widgets using htmltopdfwidgets
+      final pdfWidgets = await htpdf.HTMLToPdf().convert(
+        fullHtml,
+        useNewEngine:
+            true, // Use new browser rendering engine for better CSS support
+      );
+
+      final pdf = pw.Document();
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(40),
+          maxPages: 100,
+          build: (context) => pdfWidgets,
+        ),
+      );
+
+      final bytes = await pdf.save();
+
+      // Check if we're on mobile (Android/iOS)
+      final isMobile =
+          defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS;
+
+      if (isMobile) {
+        // Use system share sheet on mobile
+        final tempDir = await getTemporaryDirectory();
+        final tempFile = File('${tempDir.path}/$suggestedName.pdf');
+        await tempFile.writeAsBytes(bytes);
+
+        await Share.shareXFiles([
+          XFile(tempFile.path),
+        ], subject: title.isNotEmpty ? title : 'Note Export');
+        snackbarNotifier.value = 'Shared PDF';
+      } else {
+        // Use file save dialog on desktop
+        final String? outputFile = await FilePicker.platform.saveFile(
+          dialogTitle: 'Export as PDF',
+          fileName: '$suggestedName.pdf',
+          lockParentWindow: true,
+          type: FileType.custom,
+          allowedExtensions: ['pdf'],
+        );
+
+        if (outputFile == null) {
+          setBusy(false);
+          return;
+        }
+
+        final file = File(outputFile);
+        await file.writeAsBytes(bytes);
+        snackbarNotifier.value = 'Exported to PDF';
+      }
+    } catch (e) {
+      snackbarNotifier.value = 'Export failed: $e';
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /// Build PDF content from document JSON structure.
+  /// Parses the AppFlowy document format and creates styled PDF widgets.
+
+  /// Convert a document node to a PDF widget.
+
+  /// Convert delta operations to PDF TextSpan with formatting.
 
   Future<void> exportAttachment(AttachmentModel attachment) async {
     // 1. Pick location first
@@ -213,7 +417,6 @@ class ContentViewModel extends BaseViewModel {
         await file.writeAsBytes(data);
       }
     } catch (e) {
-      print("Error saving attachment: $e");
     } finally {
       setBusy(false);
     }
@@ -224,7 +427,7 @@ class ContentViewModel extends BaseViewModel {
     attachmentsNotifier.value = List.from(_attachments);
     _attachmentCache.remove(attachmentId);
     // notifyListeners();
-    _scheduleAutoSave();
+    _onTextChanged();
     // TODO: Physically delete the attachment file to clean up storage
   }
 
@@ -234,32 +437,28 @@ class ContentViewModel extends BaseViewModel {
     required IEncryptionService encryptionService,
   }) : _fileService = fileService,
        _encryptionService = encryptionService {
-    // Initialize CodeController with syntax highlighting
-    htmlController = CodeController(
-      language: xml, // Highlighting for XML/HTML
-    );
+    // Initialize Super Editor document model
+    _initDocument();
 
-    // Ensure settings are loaded before loading files
+    // Ensure settings and background service are loaded before loading files
     _initAsync();
-    _initFileWatcher();
+    WidgetsBinding.instance.addObserver(this);
+  }
 
-    // Listen to changes for auto-save (minimal debounce to reduce timer churn)
-    quillController.document.changes.listen((change) {
-      if (!_isHtmlMode) {
-        _autoSaveDebounceTimer?.cancel();
-        _autoSaveDebounceTimer = Timer(const Duration(milliseconds: 50), () {
-          onTextChanged();
-        });
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      if (_isDirty && SettingsService().autoSave) {
+        saveNote(isAutoSave: true);
       }
-    });
+    }
+  }
 
-    htmlController.addListener(() {
-      if (_isHtmlMode) {
-        _scheduleAutoSave();
-        // Optional: Title generation from HTML could go here,
-        // but stripping tags might be expensive/complex to do continuously.
-      }
-    });
+  /// Initialize the rich text editor adapter
+  void _initDocument() {
+    _richTextEditor = AppFlowyEditorAdapter();
+    _richTextEditor.addChangeListener(_onTextChanged);
   }
 
   Future<void> handleLinkClick(String url) async {
@@ -278,42 +477,10 @@ class ContentViewModel extends BaseViewModel {
       // We can use launchUrl from url_launcher
       // But user needs to import it?
       // For now print
-      print("External Link Clicked: $url");
     }
-  }
-
-  Future<void> toggleEditorMode() async {
-    setBusy(true);
-    if (_isHtmlMode) {
-      // Switch to Rich Text
-      // Convert HTML string to Delta
-      try {
-        final html = htmlController.text;
-        // Offload to background
-        final deltaList = await compute(_htmlToDeltaTask, html);
-        quillController.document = Document.fromJson(deltaList);
-        // Move cursor to end to avoid issues
-        quillController.moveCursorToPosition(quillController.document.length);
-      } catch (e) {
-        print("Error converting HTML to Delta: $e");
-      }
-      _isHtmlMode = false;
-    } else {
-      // Switch to HTML Editor
-      // Convert Delta to HTML string
-      final delta = quillController.document.toDelta();
-      // Offload to background
-      final html = await compute(_deltaToHtmlTask, delta.toJson());
-
-      htmlController.text = html;
-      _isHtmlMode = true;
-    }
-    notifyListeners();
-    setBusy(false);
   }
 
   void _initFileWatcher() {
-    _backgroundService.init();
     _backgroundService.recentFilesStream.listen((files) {
       _recentFiles = files;
       notifyListeners();
@@ -330,8 +497,10 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<void> _initAsync() async {
-    // Wait for settings to load so custom data path is available
+    // Wait for settings and background isolate to be ready before loading files
     await SettingsService().init();
+    await _backgroundService.init();
+    _initFileWatcher();
     loadRecentFiles();
   }
   // endregion
@@ -345,12 +514,15 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<void> loadNote(String fileName) async {
+    // 1. Force save if there are pending changes from the previous file
+    if (_isDirty && SettingsService().autoSave) {
+      // Ensure we save the CURRENT file before switching
+      await saveNote(isAutoSave: true);
+    }
+
     setBusy(true);
     _currentFileName = fileName;
     _attachmentCache.clear();
-
-    // Reset mode to Rich Text on new load for consistency
-    _isHtmlMode = false;
 
     final content = await _fileService.readFile(fileName);
     if (content != null) {
@@ -361,8 +533,8 @@ class ContentViewModel extends BaseViewModel {
         await _applyNoteModel(note, fileName);
       } else {
         // 3. Fallback to Plain Text
-        print("Loading as plain text");
-        _loadContentToQuill(content);
+
+        _loadContentToEditor(content);
         titleController.text = _generateTitleFromContent(content);
         _isLocked = false;
         isLockedNotifier.value = false;
@@ -391,14 +563,13 @@ class ContentViewModel extends BaseViewModel {
         // Locked state - clear editor
         _isLocked = true;
         isLockedNotifier.value = true;
-        quillController.document = Document();
-        htmlController.clear();
+        _initDocument();
         _currentPassword = null;
         notifyListeners();
       }
     } else {
       // Not locked
-      _loadContentToQuill(note.content);
+      _loadContentToEditor(note.content);
       _currentPassword = null;
     }
 
@@ -410,13 +581,13 @@ class ContentViewModel extends BaseViewModel {
   void setPassword(String password) {
     _currentPassword = password;
     notifyListeners();
-    _scheduleAutoSave();
+    _onTextChanged();
   }
 
   void clearPassword() {
     _currentPassword = null;
     notifyListeners();
-    _scheduleAutoSave();
+    _onTextChanged();
   }
 
   /// Removes password protection from the current note.
@@ -547,7 +718,7 @@ class ContentViewModel extends BaseViewModel {
       // Success
       _currentPassword = password;
       _sessionPasswords[_currentFileName!] = password;
-      _loadContentToQuill(decryptedContent);
+      _loadContentToEditor(decryptedContent);
       _isLocked = false;
       isLockedNotifier.value = false;
       notifyListeners(); // Keep for unlock transition
@@ -564,12 +735,13 @@ class ContentViewModel extends BaseViewModel {
       password: password,
     );
     if (decrypted.startsWith("Error decrypting:")) {
-      quillController.document = Document()..insert(0, "Incorrect Password");
+      _initDocument();
+      _createSimpleDocument("Incorrect Password");
       _sessionPasswords.remove(_currentFileName); // Invalid pass
       _isLocked = true;
       isLockedNotifier.value = true;
     } else {
-      _loadContentToQuill(decrypted);
+      _loadContentToEditor(decrypted);
       _isLocked = false;
       isLockedNotifier.value = false;
     }
@@ -585,8 +757,7 @@ class ContentViewModel extends BaseViewModel {
       _currentPassword = null;
       _isLocked = true;
       isLockedNotifier.value = true;
-      quillController.document = Document();
-      htmlController.clear();
+      _initDocument();
       _attachmentCache.clear();
       notifyListeners();
     }
@@ -615,17 +786,10 @@ class ContentViewModel extends BaseViewModel {
 
     setBusy(true);
     try {
-      // 1. Get content from editor (already decrypted in memory)
       progressNotifier.value = 'Re-encrypting content...';
       await Future.delayed(Duration.zero);
 
-      String contentToSave = "";
-      if (_isHtmlMode) {
-        contentToSave = htmlController.text;
-      } else {
-        final delta = quillController.document.toDelta();
-        contentToSave = jsonEncode(delta.toJson());
-      }
+      String contentToSave = _richTextEditor.getDocumentJson();
 
       // Re-encrypt content with new password
       final newEncryptedContent = await _encryptionService.encrypt(
@@ -750,96 +914,104 @@ class ContentViewModel extends BaseViewModel {
 
   // region Saving
   Future<void> saveNote({bool isAutoSave = false}) async {
-    if (!isAutoSave) setBusy(true);
+    // If not auto-saving, show loading indicator on the button
+    if (!isAutoSave) {
+      isSavingNotifier.value = true;
+    } else {
+      isAutoSavingNotifier.value = true;
+    }
 
-    if (!isAutoSave) await Future.delayed(const Duration(seconds: 1));
+    try {
+      // Calculate Note ID
+      String noteId;
+      bool isLegacy = false;
 
-    String? noteId;
-    bool isLegacy = false;
-
-    if (_currentFileName != null) {
-      if (_currentFileName!.startsWith('note_')) {
-        noteId = _currentFileName!.replaceFirst('note_', '');
-        // Strip any file extension (e.g., .enc) from the noteId
-        if (noteId.contains('.')) {
-          noteId = noteId.split('.').first;
+      if (_currentFileName != null) {
+        if (_currentFileName!.startsWith('note_')) {
+          noteId = _currentFileName!.replaceFirst('note_', '');
+          if (noteId.contains('.')) {
+            noteId = noteId.split('.').first;
+          }
+        } else {
+          isLegacy = true;
+          noteId = const Uuid().v4();
         }
       } else {
-        isLegacy = true;
         noteId = const Uuid().v4();
       }
-    } else {
-      noteId = const Uuid().v4();
-    }
 
-    String contentToSave = "";
-    bool locked = false;
+      // 1. Prepare Content (Inner Layer)
+      String contentJson = _richTextEditor.getDocumentJson();
+      String finalContentForModel = contentJson;
+      bool shouldMarkAsLocked = false;
 
-    if (_isHtmlMode) {
-      contentToSave = htmlController.text;
-    } else {
-      final delta = quillController.document.toDelta();
-      contentToSave = jsonEncode(delta.toJson());
-    }
+      // If user has set a password, encrypt the inner content logic
+      if (isPasswordSet && _currentPassword != null) {
+        finalContentForModel = await _encryptionService.encrypt(
+          contentJson,
+          password: _currentPassword,
+        );
+        shouldMarkAsLocked = true;
+      }
 
-    String plainText = "";
-    if (_isHtmlMode) {
-      plainText = htmlController.text.replaceAll(RegExp(r'<[^>]*>'), '').trim();
-    } else {
-      plainText = quillController.document.toPlainText().trim();
-    }
-
-    if (_currentFileName == null &&
-        plainText.isEmpty &&
-        titleController.text == "New Note") {
-      print("Skipping save of empty new note");
-      if (!isAutoSave) setBusy(false);
-      return;
-    }
-
-    String encryptedContent = "";
-    if (_currentPassword != null) {
-      encryptedContent = await _encryptionService.encrypt(
-        contentToSave,
-        password: _currentPassword,
+      // 2. Create Note Model
+      final note = NoteModel(
+        id: noteId,
+        title: titleController.text,
+        content: finalContentForModel,
+        isLocked: shouldMarkAsLocked,
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+        attachments: _attachments,
       );
-      locked = true;
-    } else {
-      encryptedContent = contentToSave;
+
+      // 3. Serialize and App-Encrypt (Outer Layer)
+      final noteJson = note.toJson();
+      final jsonString = json.encode(noteJson);
+
+      // Always encrypt the file on disk with App Key (obfuscation)
+      final String fileContentToSave = await _encryptionService.encryptApp(
+        jsonString,
+      );
+
+      // 4. Save to Disk
+      String fileName;
+      if (isLegacy) {
+        // Keep legacy name if it exists, or update?
+        // Strategy: If it was legacy, we just update it in place or migrate.
+        // Let's assume we maintain the file name if set, else new format.
+        fileName = _currentFileName ?? "note_$noteId";
+      } else {
+        fileName = "note_$noteId";
+      }
+
+      _currentFileName = fileName;
+      await _fileService.saveNoteContent(noteId, fileContentToSave);
+
+      if (_currentFileName != null && _currentPassword != null) {
+        _sessionPasswords[_currentFileName!] = _currentPassword!;
+      }
+
+      _isDirty = false;
+      notifyListeners();
+
+      // Update recent files list
+      await loadRecentFiles();
+
+      if (!isAutoSave) {
+        snackbarNotifier.value = 'Saved successfully';
+      }
+    } catch (e) {
+      print("Error saving note: $e");
+      if (!isAutoSave) {
+        snackbarNotifier.value = 'Error saving note: $e';
+      }
+    } finally {
+      if (!isAutoSave) {
+        isSavingNotifier.value = false;
+      } else {
+        isAutoSavingNotifier.value = false;
+      }
     }
-
-    final note = NoteModel(
-      id: noteId,
-      title: (titleController.text.trim().length < 40)
-          ? (_isHtmlMode
-                ? titleController.text
-                : _generateTitleFromContent(plainText))
-          : titleController.text,
-      content: encryptedContent,
-      isLocked: locked,
-      timestamp: DateTime.now().millisecondsSinceEpoch,
-      attachments: _attachments,
-    );
-
-    final jsonString = json.encode(note.toJson());
-    final appEncrypted = await _encryptionService.encryptApp(jsonString);
-
-    if (isLegacy) {
-      await _fileService.saveFile(appEncrypted, _currentFileName!);
-    } else {
-      await _fileService.saveNoteContent(noteId, appEncrypted);
-      _currentFileName = "note_$noteId";
-    }
-
-    if (_currentFileName != null && _currentPassword != null) {
-      _sessionPasswords[_currentFileName!] = _currentPassword!;
-    }
-
-    print("SAVED FILE: $_currentFileName (Locked: $locked, Auto: $isAutoSave)");
-
-    await loadRecentFiles();
-
-    if (!isAutoSave) setBusy(false);
   }
 
   Future<void> deleteNote(String fileName) async {
@@ -1188,52 +1360,86 @@ class ContentViewModel extends BaseViewModel {
   // endregion
 
   // region Helpers
-  void _loadContentToQuill(String content) {
+
+  /// Load content into the editor document
+  void _loadContentToEditor(String content) {
+    if (content.trim().isEmpty) return;
+
     try {
       content = content.trim();
 
-      // 1. Try Delta JSON
-      if (content.startsWith('[') || content.startsWith('{')) {
+      // 1. Try native AppFlowy JSON format (preferred)
+      if (content.startsWith('{')) {
+        final loaded = _richTextEditor.setDocumentJson(content);
+        if (loaded) return;
+      }
+
+      // 2. Legacy Delta JSON - convert to plain text (backwards compatibility)
+      if (content.startsWith('[')) {
         try {
           final jsonContent = jsonDecode(content);
           if (jsonContent is List) {
-            quillController.document = Document.fromJson(jsonContent);
-            quillController.moveCursorToPosition(
-              quillController.document.length,
-            );
+            final buffer = StringBuffer();
+            for (final op in jsonContent) {
+              if (op is Map && op['insert'] is String) {
+                buffer.write(op['insert']);
+              }
+            }
+            final plainText = buffer.toString().trim();
+            _createSimpleDocument(plainText);
             return;
           }
         } catch (e) {
-          // Not JSON or failed to parse, fall through
+          // Not valid Delta JSON
         }
       }
 
-      // 2. Try HTML
+      // 3. Legacy HTML - convert to plain text (backwards compatibility)
       if (content.startsWith('<')) {
-        final delta = HtmlToDelta().convert(content);
-        quillController.document = Document.fromDelta(delta);
-      } else {
-        // 3. Plain text
-        quillController.document = Document()..insert(0, content);
+        final plainText = content.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+        _createSimpleDocument(plainText);
+        return;
       }
-    } catch (e) {
-      // Fallback
-      print("Error loading content: $e");
-      quillController.document = Document()..insert(0, content);
-    }
 
-    // Move cursor to end
-    quillController.moveCursorToPosition(quillController.document.length);
+      // 4. Plain text fallback
+      _createSimpleDocument(content);
+    } catch (e) {
+      debugPrint("Error loading content: $e");
+      _createSimpleDocument(content);
+    }
+  }
+
+  /// Create a simple document with plain text content
+  void _createSimpleDocument(String text) {
+    if (text.trim().isEmpty) return;
+    // Create a minimal AppFlowy document structure
+    final documentJson = {
+      'document': {
+        'type': 'page',
+        'children': text
+            .split('\n')
+            .map(
+              (line) => {
+                'type': 'paragraph',
+                'data': {
+                  'delta': [
+                    {'insert': line},
+                  ],
+                },
+              },
+            )
+            .toList(),
+      },
+    };
+    _richTextEditor.setDocumentJson(jsonEncode(documentJson));
   }
 
   void reset() {
     _currentFileName = null;
     _currentPassword = null;
     _isLocked = false;
-    _isHtmlMode = false;
     _attachments = [];
-    quillController.document = Document();
-    htmlController.clear();
+    _initDocument();
     titleController.text = "New Note";
     _attachmentCache.clear();
     notifyListeners();
@@ -1242,14 +1448,13 @@ class ContentViewModel extends BaseViewModel {
   // region Lifecycle
   @override
   void dispose() {
-    _autoSaveTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _richTextEditor.removeChangeListener(_onTextChanged);
     _debounceTimer?.cancel();
     _autoSaveDebounceTimer?.cancel();
     _searchDebounceTimer?.cancel();
     _fileWatcherSubscription?.cancel();
-    quillController.dispose();
     titleController.dispose();
-    htmlController.dispose();
     focusNode.dispose();
     scrollController.dispose();
     _backgroundService.dispose();
@@ -1263,27 +1468,6 @@ class ContentViewModel extends BaseViewModel {
 
   // Title generation removed - was causing performance issues
   // Title now updates only on save
-
-  // Background isolate for auto-saving note content
-  static Future<void> _autoSaveIsolate(Map<String, dynamic> args) async {
-    final fileName = args['fileName'] as String?;
-    final plainText = args['plainText'] as String?;
-    final isPasswordSet = args['isPasswordSet'] as bool;
-    final password = args['password'] as String?;
-
-    if (fileName == null || plainText == null) return;
-    try {
-      String dataToSave = plainText;
-      if (isPasswordSet && password != null) {
-        // Use async encryption within isolate
-        dataToSave = await EncryptionService().encryptApp(plainText);
-      }
-      final file = File('${Directory.current.path}/$fileName');
-      await file.writeAsString(dataToSave);
-    } catch (e) {
-      // Silently ignore errors in background save
-    }
-  }
 
   static Future<NoteModel?> _parseNoteIsolate(String content) async {
     // 1. Try App Decryption
@@ -1313,49 +1497,51 @@ class ContentViewModel extends BaseViewModel {
     return null;
   }
 
+  bool _isDirty = false;
+
+  void _onTextChanged() {
+    _isDirty = true;
+
+    // Auto-generate title from first line of content
+    final plainText = _richTextEditor.getPlainText();
+    titleController.text = _generateTitleFromContent(plainText);
+
+    notifyListeners();
+  }
+
+  // Legacy method kept for interface compatibility if needed, but unused for internal logic now
   void _scheduleAutoSave() {
-    if (_currentFileName != null || isPasswordSet) {
-      _autoSaveTimer?.cancel();
-      _autoSaveTimer = Timer(const Duration(seconds: 2), () async {
-        // Offload save to background isolate to avoid UI thread blocking
-        final plainText = quillController.document.toPlainText();
-        await compute(_autoSaveIsolate, {
-          'fileName': _currentFileName,
-          'plainText': plainText,
-          'isPasswordSet': isPasswordSet,
-          'password': _currentPassword,
-        });
-      });
-    }
+    _onTextChanged();
   }
 
   String _generateTitleFromContent(String content) {
-    if (content.trim().isEmpty) return "New Note";
+    if (content.trim().isEmpty) return _kDefaultTitle;
 
+    // Take the first non-empty line
     final lines = content.split('\n');
-    final contentLines = lines.where((line) => line.trim().isNotEmpty).toList();
-
-    if (contentLines.isEmpty) return "New Note";
-
-    String title = "";
-
-    for (var line in contentLines) {
-      String cleaned = _cleanTitleLine(line);
-      if (cleaned.isEmpty) continue;
-
-      if (title.isNotEmpty) {
-        title += " ";
+    String firstLine = "";
+    for (final line in lines) {
+      final cleaned = _cleanTitleLine(line);
+      if (cleaned.isNotEmpty) {
+        firstLine = cleaned;
+        break;
       }
-      title += cleaned;
-
-      if (title.length >= 40) break;
     }
 
-    if (title.length > 40) {
-      title = title.substring(0, 40);
+    if (firstLine.isEmpty) return _kDefaultTitle;
+
+    // Limit to max words
+    final words = firstLine.split(RegExp(r'\s+'));
+    if (words.length > _kMaxTitleWords) {
+      firstLine = words.take(_kMaxTitleWords).join(' ');
     }
 
-    return title.isEmpty ? "New Note" : title;
+    // Limit to max characters
+    if (firstLine.length > _kMaxTitleChars) {
+      firstLine = firstLine.substring(0, _kMaxTitleChars);
+    }
+
+    return firstLine;
   }
 
   String _cleanTitleLine(String line) {
@@ -1365,8 +1551,9 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<Uint8List?> readAttachment(String attachmentId) async {
-    if (_currentFileName == null || !_currentFileName!.startsWith('note_'))
+    if (_currentFileName == null || !_currentFileName!.startsWith('note_')) {
       return null;
+    }
     final noteId = _currentFileName!.replaceFirst('note_', '');
 
     if (_attachmentCache.containsKey(attachmentId)) {
@@ -1404,17 +1591,4 @@ class ImportVerificationResult {
     this.isPack = false,
     this.isPackEncrypted = false,
   });
-}
-
-Future<List<dynamic>> _htmlToDeltaTask(String html) async {
-  final delta = HtmlToDelta().convert(html);
-  return delta.toJson();
-}
-
-Future<String> _deltaToHtmlTask(List<dynamic> deltaJson) async {
-  final converter = QuillDeltaToHtmlConverter(
-    deltaJson.cast<Map<String, dynamic>>(),
-    ConverterOptions.forEmail(),
-  );
-  return converter.convert();
 }

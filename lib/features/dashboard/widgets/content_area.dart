@@ -98,7 +98,10 @@ class _ContentAreaState extends State<ContentArea> {
                   valueListenable: viewModel.isLockedNotifier,
                   builder: (context, isLocked, child) {
                     if (isLocked) return const SizedBox.shrink();
-                    return _buildFloatingToolbar(isMobile);
+                    return IgnorePointer(
+                      ignoring: viewModel.isLibraryCutover,
+                      child: _buildFloatingToolbar(isMobile),
+                    );
                   },
                 ),
 
@@ -187,6 +190,7 @@ class _ContentAreaState extends State<ContentArea> {
         Expanded(
           child: TextField(
             controller: viewModel.titleController,
+            readOnly: viewModel.isLibraryCutover,
             style: TextStyle(
               color: colors.textPrimary,
               fontWeight: FontWeight.w600,
@@ -664,7 +668,7 @@ class _ContentAreaState extends State<ContentArea> {
           mode: mode,
           onVerifyCurrent: (password) async {
             if (mode == PasswordMode.unlock) {
-              return await viewModel.unlockNote(password);
+              return await viewModel.verifyStoredPassword(password);
             }
             return viewModel.verifyPassword(password);
           },
@@ -741,6 +745,7 @@ class _ContentAreaState extends State<ContentArea> {
                 child: SingleChildScrollView(
                   child: CodeField(
                     controller: viewModel.htmlController,
+                    readOnly: viewModel.isLibraryCutover,
                     textStyle: TextStyle(
                       fontFamily: 'monospace',
                       fontSize: 14,

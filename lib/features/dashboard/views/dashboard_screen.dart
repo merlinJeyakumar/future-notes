@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show AppExitResponse, AppExitType;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -12,9 +14,22 @@ import '../widgets/import_confirmation_dialog.dart';
 import '../widgets/export_options_dialog.dart';
 import '../services/settings_service.dart';
 import '../../../core/theme/app_theme.dart';
+import '../models/draft_transition.dart';
+import '../widgets/draft_decision_dialog.dart';
+import '../../../core/operations/operation_result.dart';
+import '../../../core/operations/shutdown_sequence.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  const DashboardScreen({
+    super.key,
+    this.settings,
+    this.fileService,
+    this.onClose,
+  });
+
+  final SettingsService? settings;
+  final IFileService? fileService;
+  final Future<OperationResult<void>> Function()? onClose;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -22,19 +37,174 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   late final ContentViewModel _viewModel;
+  late final AppLifecycleListener _lifecycle;
+  Future<AppExitResponse>? _pendingExit;
   bool _isSidebarVisible = true;
+  bool _shutdownStarted = false;
+  String _shutdownMessage = 'Finishing storage operations…';
+  ShutdownSequence? _shutdown;
+  bool _exitTimedOut = false;
+  final _shutdownElapsed = Stopwatch();
 
   @override
   void initState() {
     super.initState();
     _viewModel = ContentViewModel(
-      fileService: FileService(),
+      fileService: widget.fileService ?? FileService(settings: widget.settings),
+      settings: widget.settings,
       encryptionService: EncryptionService(),
+      onDraftDecision: _showDraftDecision,
     );
+    _lifecycle = AppLifecycleListener(onExitRequested: _requestExit);
+    _viewModel.operationResultNotifier.addListener(_showOperationFailure);
+  }
+
+  Future<DraftDecision> _showDraftDecision(DraftDecisionRequest request) async {
+    if (!mounted) return DraftDecision.cancel;
+    final decision = await showDialog<DraftDecision>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => DraftDecisionDialog(request: request),
+    );
+    return mounted ? decision ?? DraftDecision.cancel : DraftDecision.cancel;
+  }
+
+  void _showOperationFailure() {
+    if (!mounted) return;
+    final result = _viewModel.operationResultNotifier.value;
+    if (result == null ||
+        result.isSuccess ||
+        result.outcome == OperationOutcome.cancelled)
+      return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(
+        content: Text(
+          result.message ?? 'The operation could not be completed.',
+        ),
+      ),
+    );
+  }
+
+  Future<AppExitResponse> _requestExit() async {
+    if (_pendingExit != null) return _pendingExit!;
+    final operation = _resolveExit();
+    _pendingExit = operation;
+    try {
+      return await operation;
+    } finally {
+      _pendingExit = null;
+    }
+  }
+
+  Future<AppExitResponse> _resolveExit() async {
+    try {
+      if (!_shutdownStarted) {
+        final result = await _viewModel.prepareToExit();
+        if (!mounted || !result.isSuccess) {
+          return AppExitResponse.cancel;
+        }
+      }
+      final close = widget.onClose;
+      if (close == null) {
+        return AppExitResponse.exit;
+      }
+      // Once services begin closing, keep the validation editor non-writable,
+      // including after partial cleanup. A subsequent close request retries.
+      FocusManager.instance.primaryFocus?.unfocus();
+      setState(() => _shutdownStarted = true);
+      final shutdown = _shutdown ??= ShutdownSequence(
+        closeWatchers: _viewModel.closeLibraryResources,
+        closeStorage: close,
+        onPhase: _onShutdownPhase,
+      );
+      final closed = await shutdown.close().timeout(
+        const Duration(seconds: 10),
+      );
+      if (closed.isSuccess) {
+        return AppExitResponse.exit;
+      }
+    } on TimeoutException {
+      // A timeout only cancels this exit response. The owned cleanup continues;
+      // subsequent requests join it instead of releasing the same handles twice.
+      _exitTimedOut = true;
+      if (mounted) {
+        setState(
+          () => _shutdownMessage =
+              'Closing is taking longer than expected.\n'
+              'The window will close when cleanup finishes.',
+        );
+      }
+      return AppExitResponse.cancel;
+    } catch (_) {
+      // Retain owned handles for a subsequent orderly close attempt.
+    }
+    if (mounted) {
+      setState(
+        () => _shutdownMessage =
+            'Storage cleanup is incomplete. Close the window again to retry.',
+      );
+    }
+    return AppExitResponse.cancel;
+  }
+
+  void _onShutdownPhase(ShutdownPhase phase) {
+    _shutdownElapsed.start();
+    debugPrint(
+      'Storage shutdown: ${phase.name} '
+      'at ${_shutdownElapsed.elapsedMilliseconds} ms',
+    );
+    if (phase == ShutdownPhase.complete || phase == ShutdownPhase.failed) {
+      _shutdownElapsed.stop();
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(
+      () => _shutdownMessage = switch (phase) {
+        ShutdownPhase.watchers => 'Stopping library monitoring…',
+        ShutdownPhase.storage => 'Closing note storage…',
+        ShutdownPhase.complete => 'Storage closed.',
+        ShutdownPhase.failed =>
+          'Storage cleanup is incomplete. Close the window again to retry.',
+      },
+    );
+    if (phase == ShutdownPhase.complete && _exitTimedOut) {
+      unawaited(_resumeCompletedExit());
+    }
+  }
+
+  Future<void> _resumeCompletedExit() async {
+    // Finish replying to the original request before sending another cancelable
+    // request. Never bypass another exit observer or force process termination.
+    await _pendingExit;
+    if (!mounted || !_shutdownStarted) {
+      return;
+    }
+    _exitTimedOut = false;
+    try {
+      final response = await ServicesBinding.instance.exitApplication(
+        AppExitType.cancelable,
+      );
+      if (mounted && response == AppExitResponse.cancel) {
+        setState(
+          () => _shutdownMessage =
+              'Storage closed. Close the window again to exit.',
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _shutdownMessage =
+              'Storage closed. Close the window again to exit.',
+        );
+      }
+    }
   }
 
   @override
   void dispose() {
+    _lifecycle.dispose();
+    _viewModel.operationResultNotifier.removeListener(_showOperationFailure);
     _viewModel.dispose();
     super.dispose();
   }
@@ -65,9 +235,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     // First load the note so we have access to attachments and metadata
-    await _viewModel.loadNote(file.path);
+    final loaded = await _viewModel.loadNote(file.path);
 
     if (!mounted) return;
+    if (!loaded.isSuccess) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            loaded.message ?? 'The requested note could not be opened.',
+          ),
+        ),
+      );
+      return;
+    }
 
     // If note is locked, require password to export
     if (_viewModel.isLocked) {
@@ -415,7 +595,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) {
-          final settings = SettingsService();
+          final settings = _viewModel.settings;
           return AlertDialog(
             backgroundColor: theme.appSurface,
             shape: RoundedRectangleBorder(
@@ -547,10 +727,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         final String? selectedDirectory = await FilePicker
                             .platform
                             .getDirectoryPath();
-                        if (selectedDirectory != null) {
-                          await settings.setCustomDataPath(selectedDirectory);
-                          setState(() {});
-                          _viewModel.loadRecentFiles();
+                        if (selectedDirectory != null &&
+                            mounted &&
+                            context.mounted) {
+                          await _viewModel.switchLibrary(selectedDirectory);
+                          if (mounted && context.mounted) setState(() {});
                         }
                       },
                     ),
@@ -591,16 +772,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_shutdownStarted) {
+      return Scaffold(body: Center(child: Text(_shutdownMessage)));
+    }
     final theme = Theme.of(context);
     return ListenableBuilder(
       listenable: _viewModel,
       builder: (context, _) {
         return CallbackShortcuts(
           bindings: {
-            SingleActivator(LogicalKeyboardKey.keyS, control: true): () =>
-                _viewModel.saveNote(),
-            SingleActivator(LogicalKeyboardKey.keyN, control: true): () =>
-                _viewModel.reset(),
+            SingleActivator(LogicalKeyboardKey.keyS, control: true): () {
+              if (!_shutdownStarted) {
+                _viewModel.saveNote();
+              }
+            },
+            SingleActivator(LogicalKeyboardKey.keyN, control: true): () {
+              if (!_shutdownStarted) {
+                _viewModel.reset();
+              }
+            },
           },
           child: LayoutBuilder(
             builder: (context, constraints) {

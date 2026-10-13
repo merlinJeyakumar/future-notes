@@ -3,25 +3,30 @@ import 'package:flutter/services.dart';
 import 'features/dashboard/views/dashboard_screen.dart';
 import 'features/dashboard/services/settings_service.dart';
 import 'core/theme/app_theme.dart';
+import 'core/storage/storage_environment.dart';
 
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  SettingsService().configureStorage(StorageEnvironment.fromDefines());
   await SettingsService().init();
   runApp(const MyApp());
 }
 
 class MyApp extends StatefulWidget {
-  const MyApp({super.key});
+  const MyApp({super.key, this.settings, this.home});
+
+  final SettingsService? settings;
+  final Widget? home;
 
   @override
   State<MyApp> createState() => _MyAppState();
 }
 
 class _MyAppState extends State<MyApp> {
-  final _settings = SettingsService();
+  late final _settings = widget.settings ?? SettingsService();
 
   @override
   void initState() {
@@ -74,7 +79,7 @@ class _MyAppState extends State<MyApp> {
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: _settings.themeMode,
-      home: const DashboardScreen(),
+      home: widget.home ?? const DashboardScreen(),
     );
   }
 }

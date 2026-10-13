@@ -2,6 +2,13 @@
 
 Baseline: development, a9f6d247d7e27322d4afe542aa27240c72af031e.
 
+2026-10-13 integration candidate: branch `integration/recoverable-storage`, based
+on preserved checkpoint `31dfe4e`. The normal entry point has opt-in owned Windows
+storage wiring; default activation remains disabled. Shared settings/library
+roots use one lease and queue, and unfinished workflows are guarded before draft
+mutation. Code review/static lint only; tests/build/runtime and real-library
+activation remain pending. See [native integration](NATIVE_STORAGE_INTEGRATION.md).
+
 The original development analysis is baseline evidence, not verification of
 subsequent patches. No finding is closed without its regression evidence.
 

@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:math';
 
+import 'package:path/path.dart' as p;
+
 import '../operations/operation_result.dart';
 import 'commit_record.dart';
 import 'native_storage_primitives.dart';
@@ -74,12 +76,12 @@ class StorageOwnerWorker implements StorageOwner {
     StorageWorkerLauncher? launcher,
     Duration startupTimeout = const Duration(seconds: 10),
   }) async {
-    if (!environment.isValidation ||
+    if (!environment.hasOwnedStorage ||
         !Platform.isWindows ||
         startupTimeout <= Duration.zero) {
       return const OperationResult.failure(
         OperationOutcome.rejectedInput,
-        'Storage worker requires an explicit disposable Windows environment.',
+        'Storage worker requires explicitly bound Windows storage.',
       );
     }
     final random = Random.secure();
@@ -371,7 +373,7 @@ class StorageOwnerWorker implements StorageOwner {
     final stores = <int, RecoverableStore>{};
     var nextRoot = 0;
     try {
-      if (!start.environment.isValidation || !Platform.isWindows) {
+      if (!start.environment.hasOwnedStorage || !Platform.isWindows) {
         throw StateError('Unsupported storage owner.');
       }
       await start.environment.verifyConfiguredPaths();
@@ -388,10 +390,24 @@ class StorageOwnerWorker implements StorageOwner {
         var shutdown = false;
         try {
           if (message.kind == _Kind.open) {
-            final opened = await RecoverableStore.open(
-              root: message.root!,
-              environment: start.environment,
-            );
+            if (!start.environment.permitsOwnerRoot(message.root!)) {
+              throw const FormatException('Unadmitted storage root.');
+            }
+            // Settings and notes can share UserData. Each binding gets its own
+            // capability, while aliases retain one queue, recovery and lease.
+            RecoverableStore? shared;
+            for (final store in stores.values) {
+              if (p.equals(store.root, p.normalize(message.root!))) {
+                shared = store;
+                break;
+              }
+            }
+            final OperationResult<RecoverableStore> opened = shared == null
+                ? await RecoverableStore.open(
+                    root: message.root!,
+                    environment: start.environment,
+                  )
+                : OperationResult.success(shared);
             if (opened.isSuccess) {
               final id = ++nextRoot;
               stores[id] = opened.value!;
@@ -404,9 +420,9 @@ class StorageOwnerWorker implements StorageOwner {
               result = OperationResult.failure(opened.outcome, opened.message);
             }
           } else if (message.kind == _Kind.shutdown) {
-            for (final id in stores.keys.toList()) {
-              await stores[id]!.close();
-              stores.remove(id);
+            for (final store in stores.values.toSet()) {
+              await store.close();
+              stores.removeWhere((_, value) => identical(value, store));
             }
             result = const OperationResult.success();
             shutdown = true;
@@ -416,7 +432,12 @@ class StorageOwnerWorker implements StorageOwner {
               throw const FormatException('Unknown storage owner.');
             }
             if (message.kind == _Kind.release) {
-              await store.close();
+              final aliases = stores.values
+                  .where((value) => identical(value, store))
+                  .length;
+              if (aliases == 1) {
+                await store.close();
+              }
               stores.remove(message.rootIdentity);
               result = const OperationResult.success();
             } else if (message.kind == _Kind.commit) {
@@ -464,7 +485,7 @@ class StorageOwnerWorker implements StorageOwner {
     } catch (_) {
       start.replies.send(false);
     } finally {
-      for (final store in stores.values) {
+      for (final store in stores.values.toSet()) {
         try {
           await store.close();
         } catch (_) {

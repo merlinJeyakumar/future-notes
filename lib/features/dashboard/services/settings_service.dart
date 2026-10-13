@@ -48,7 +48,8 @@ class SettingsService {
   bool get isValidationMode => _storage.isValidation;
   StorageEnvironment get storageEnvironment => _storage;
   bool get settingsCleanupPending => _ownedPersistence?.cleanupPending ?? false;
-  bool get supportsRecoverableLibrarySwitch => _storageOwner != null;
+  bool get supportsRecoverableLibrarySwitch =>
+      _storageOwner != null && !_storage.isRecoverable;
 
   void configureStorage(StorageEnvironment storage) {
     if (_initialization != null) {
@@ -129,8 +130,16 @@ class SettingsService {
         _themeMode = theme == null
             ? ThemeMode.dark
             : ThemeMode.values[theme as int];
-        // Explicit validation input overrides any copied library setting.
-        _customDataPath = null;
+        // Validation overrides copied paths; native preview must agree with the
+        // recovered setting so opting in never silently selects another library.
+        final storedPath = metadata['customDataPath'] as String?;
+        if (_storage.isRecoverable) {
+          final selected = storedPath == null || storedPath.isEmpty
+              ? p.dirname(_storage.settingsFile!)
+              : storedPath;
+          _storage.validateLibraryPath(selected);
+        }
+        _customDataPath = _storage.isValidation ? null : storedPath;
         themeModeNotifier.value = _themeMode;
         return;
       } on SettingsPersistenceFailure {
@@ -271,7 +280,7 @@ class SettingsService {
   /// If a custom path is set, returns that.
   /// Otherwise, returns '[Documents]/UserData'.
   Future<String> getUserDataPath() async {
-    if (_storage.isValidation) {
+    if (_storage.hasOwnedStorage) {
       final location = _customDataPath ?? _storage.dataRoot!;
       await _storage.verifyLocation(location);
       return location;
@@ -284,7 +293,7 @@ class SettingsService {
   }
 
   Future<String> getSettingsFilePath() async {
-    if (_storage.isValidation) {
+    if (_storage.hasOwnedStorage) {
       await _storage.verifyLocation(_storage.settingsFile!);
       return _storage.settingsFile!;
     }

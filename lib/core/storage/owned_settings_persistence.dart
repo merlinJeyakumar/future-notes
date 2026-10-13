@@ -9,12 +9,14 @@ import 'recoverable_store.dart';
 import 'storage_environment.dart';
 import 'storage_owner_worker.dart';
 
-/// Validation-only settings binding. The caller serializes settings mutations
+/// Captured settings binding. The caller serializes settings mutations
 /// and owns this root; the injected worker may also own an independent library.
 class OwnedSettingsPersistence {
   OwnedSettingsPersistence({required this.environment, required this.owner}) {
-    if (!environment.isValidation || !Platform.isWindows) {
-      throw ArgumentError('Owned settings require disposable Windows storage.');
+    if (!environment.hasOwnedStorage || !Platform.isWindows) {
+      throw ArgumentError(
+        'Owned settings require explicitly bound Windows storage.',
+      );
     }
   }
 
@@ -122,12 +124,13 @@ class OwnedSettingsPersistence {
     Directory? operation;
     try {
       await environment.verifyLocation(
-        environment.validationRoot!,
+        environment.operationRoot,
         allowRunRoot: true,
       );
-      operation = await Directory(
-        environment.validationRoot!,
-      ).createTemp('settings-operation-');
+      final sources = Directory(environment.operationRoot);
+      await sources.create(recursive: true);
+      await environment.verifyLocation(sources.path, allowRunRoot: true);
+      operation = await sources.createTemp('settings-operation-');
       _temporarySources.add(operation);
       final file = File(p.join(operation.path, 'candidate.json'));
       await environment.verifyLocation(file.path);

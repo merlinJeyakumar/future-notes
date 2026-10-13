@@ -225,10 +225,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _handleDelete(RecentFile file) {
+    if (!_viewModel.ensureExtendedNoteOperations()) return;
     _viewModel.deleteNote(file.path);
   }
 
   Future<void> _handleExportPack(RecentFile file) async {
+    if (!_viewModel.ensureExtendedNoteOperations()) return;
     // Close the sidebar first on mobile
     if (Navigator.canPop(context)) {
       Navigator.pop(context);
@@ -418,6 +420,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _handleImport() async {
+    if (!_viewModel.ensureExtendedNoteOperations()) return;
     // Close the drawer first on mobile
     if (Navigator.canPop(context)) {
       Navigator.pop(context);
@@ -589,6 +592,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return result?.isEmpty == true ? null : result;
   }
 
+  Future<void> _persistSetting(
+    Future<void> Function() update,
+    BuildContext dialogContext,
+    StateSetter refresh,
+  ) async {
+    try {
+      await update();
+      if (mounted && dialogContext.mounted) refresh(() {});
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Settings could not be saved. The previous value was retained.',
+          ),
+        ),
+      );
+    }
+  }
+
   void _showMasterSettings(BuildContext context) {
     final theme = Theme.of(context);
     showDialog(
@@ -647,9 +670,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ],
                     onChanged: (ThemeMode? newValue) {
                       if (newValue != null) {
-                        settings.setThemeMode(newValue).then((_) {
-                          setState(() {});
-                        });
+                        unawaited(
+                          _persistSetting(
+                            () => settings.setThemeMode(newValue),
+                            context,
+                            setState,
+                          ),
+                        );
                       }
                     },
                   ),
@@ -691,9 +718,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ],
                     onChanged: (CompressionLevel? newValue) {
                       if (newValue != null) {
-                        settings.setCompressionLevel(newValue).then((_) {
-                          setState(() {});
-                        });
+                        unawaited(
+                          _persistSetting(
+                            () => settings.setCompressionLevel(newValue),
+                            context,
+                            setState,
+                          ),
+                        );
                       }
                     },
                   ),
@@ -797,6 +828,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               final isDesktop = constraints.maxWidth > 800;
               return Scaffold(
                 resizeToAvoidBottomInset: true,
+                bottomNavigationBar: _viewModel.supportsExtendedNoteOperations
+                    ? null
+                    : const SafeArea(
+                        child: Padding(
+                          padding: EdgeInsets.all(8),
+                          child: Text(
+                            'Storage preview: attachments, password changes, import, export and Delete are unavailable.',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
                 appBar: isDesktop
                     ? null
                     : AppBar(

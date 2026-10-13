@@ -136,6 +136,7 @@ class ContentViewModel extends BaseViewModel {
   bool get isHtmlMode => _isHtmlMode;
 
   Future<void> pickAttachment() async {
+    if (!ensureExtendedNoteOperations()) return;
     return _libraryTask(_pickAttachment, null);
   }
 
@@ -224,7 +225,7 @@ class ContentViewModel extends BaseViewModel {
 
         // 3. Compress
         Uint8List bytes;
-        final settings = SettingsService();
+        final settings = _settings;
         final isImage = ['jpg', 'jpeg', 'png', 'webp', 'heic'].contains(ext);
 
         if (isImage && settings.compressionLevel != CompressionLevel.none) {
@@ -294,6 +295,7 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<void> exportAttachment(AttachmentModel attachment) async {
+    if (!ensureExtendedNoteOperations()) return;
     return _libraryTask(() => _exportAttachment(attachment), null);
   }
 
@@ -323,6 +325,7 @@ class ContentViewModel extends BaseViewModel {
   }
 
   void removeAttachment(String attachmentId) {
+    if (!ensureExtendedNoteOperations()) return;
     if (_librarySwitching) return;
     if (_disposed || !_session.canWrite || _isLocked) return;
     if (!_attachments.any((a) => a.id == attachmentId)) return;
@@ -1282,10 +1285,28 @@ class ContentViewModel extends BaseViewModel {
     OperationOutcome.cancelled,
     'A newer editor operation owns this request.',
   );
+
+  bool get supportsExtendedNoteOperations =>
+      _fileService is! NoteMutationPolicy ||
+      (_fileService as NoteMutationPolicy).supportsExtendedNoteOperations;
+
+  /// Reject before dialogs, draft changes, file selection or service I/O.
+  bool ensureExtendedNoteOperations() {
+    if (supportsExtendedNoteOperations) return true;
+    _reportResult(
+      const OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        'Attachments, password changes, import, export and Delete are temporarily '
+        'unavailable in this storage preview. Your draft was retained.',
+      ),
+    );
+    return false;
+  }
   // endregion
 
   // region Password & Locking
   void setPassword(String password) {
+    if (!ensureExtendedNoteOperations()) return;
     if (_librarySwitching) return;
     if (_disposed || !_session.canWrite || _isLocked) return;
     _currentPassword = password;
@@ -1294,6 +1315,7 @@ class ContentViewModel extends BaseViewModel {
   }
 
   void clearPassword() {
+    if (!ensureExtendedNoteOperations()) return;
     if (_librarySwitching) return;
     if (_disposed || !_session.canWrite || _isLocked) return;
     _currentPassword = null;
@@ -1305,6 +1327,7 @@ class ContentViewModel extends BaseViewModel {
   /// Decrypts all attachments and saves the note without encryption.
   /// If [password] is provided, it will be used instead of the stored password.
   Future<bool> removePassword({String? password}) async {
+    if (!ensureExtendedNoteOperations()) return false;
     return _libraryTask(() => _removePassword(password: password), false);
   }
 
@@ -1545,6 +1568,8 @@ class ContentViewModel extends BaseViewModel {
     String newPassword, {
     String? oldPassword,
   }) async {
+    if (!ensureExtendedNoteOperations())
+      return 'Password changes are unavailable in this storage preview.';
     return _libraryTask(
       () => _changePassword(newPassword, oldPassword: oldPassword),
       'Library switching is in progress.',
@@ -2009,6 +2034,7 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<void> deleteNote(String fileName) async {
+    if (!ensureExtendedNoteOperations()) return;
     return _libraryTask(() => _deleteNote(fileName), null);
   }
 
@@ -2125,6 +2151,7 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<void> performImport(PlatformFile file) async {
+    if (!ensureExtendedNoteOperations()) return;
     return _libraryTask(() => _performImport(file), null);
   }
 
@@ -2141,6 +2168,7 @@ class ContentViewModel extends BaseViewModel {
     required ExportFormat format,
     String? password,
   }) async {
+    if (!ensureExtendedNoteOperations()) return;
     return _libraryTask(
       () => _exportNotePack(format: format, password: password),
       null,
@@ -2256,6 +2284,7 @@ class ContentViewModel extends BaseViewModel {
     String filePath, {
     String? archivePassword,
   }) async {
+    if (!ensureExtendedNoteOperations()) return null;
     return _libraryTask(
       () => _importNotePack(filePath, archivePassword: archivePassword),
       null,

@@ -4,15 +4,44 @@ import 'features/dashboard/views/dashboard_screen.dart';
 import 'features/dashboard/services/settings_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/storage/storage_environment.dart';
+import 'core/storage/owned_app_services.dart';
+import 'core/storage/storage_startup_failure.dart';
 
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SettingsService().configureStorage(StorageEnvironment.fromDefines());
-  await SettingsService().init();
-  runApp(const MyApp());
+  OwnedAppServices? services;
+  try {
+    final environment = StorageEnvironment.fromDefines();
+    SettingsService().configureStorage(environment);
+    if (environment.hasOwnedStorage) {
+      final runtime = OwnedAppServices(environment: environment);
+      services = runtime;
+      final initialized = await runtime.initialize();
+      if (!initialized.isSuccess) {
+        runApp(StorageStartupFailure(services: runtime));
+        return;
+      }
+      runApp(
+        MyApp(
+          settings: runtime.settings,
+          home: DashboardScreen(
+            settings: runtime.settings,
+            fileService: runtime.files,
+            onClose: runtime.close,
+          ),
+        ),
+      );
+      return;
+    }
+    await SettingsService().init();
+    runApp(const MyApp());
+  } catch (_) {
+    // A bad opt-in configuration must never select the old writer as fallback.
+    runApp(StorageStartupFailure(services: services));
+  }
 }
 
 class MyApp extends StatefulWidget {

@@ -10,12 +10,14 @@ import 'recoverable_store.dart';
 import 'storage_environment.dart';
 import 'storage_owner_worker.dart';
 
-/// Injected validation-only library owner. Exact references carry both their
+/// Injected library owner. Exact references carry both their
 /// observed revision and worker capability; no mutable settings are consulted.
 class OwnedNotePersistence {
   OwnedNotePersistence({required this.environment, required this.owner}) {
-    if (!environment.isValidation || !Platform.isWindows) {
-      throw ArgumentError('Owned notes require disposable Windows storage.');
+    if (!environment.hasOwnedStorage || !Platform.isWindows) {
+      throw ArgumentError(
+        'Owned notes require explicitly bound Windows storage.',
+      );
     }
   }
 
@@ -198,12 +200,13 @@ class OwnedNotePersistence {
         Directory? operation;
         try {
           await environment.verifyLocation(
-            environment.validationRoot!,
+            environment.operationRoot,
             allowRunRoot: true,
           );
-          operation = await Directory(
-            environment.validationRoot!,
-          ).createTemp('note-operation-');
+          final sources = Directory(environment.operationRoot);
+          await sources.create(recursive: true);
+          await environment.verifyLocation(sources.path, allowRunRoot: true);
+          operation = await sources.createTemp('note-operation-');
           _sources.add(operation);
           final file = File(p.join(operation.path, 'candidate.enc'));
           await environment.verifyLocation(file.path);

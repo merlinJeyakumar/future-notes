@@ -57,8 +57,8 @@ class RecoveryReport {
   final int restoredTransactions;
 }
 
-/// Validation-only replacement backend. Own and dispatch it in one storage
-/// isolate. It performs no discovery and cannot open a production environment.
+/// Captured-root replacement backend. Own and dispatch it in one storage
+/// isolate. It performs no discovery and cannot open an unconfigured environment.
 /// Flush/rename does not establish complete power-loss atomicity.
 class RecoverableStore {
   RecoverableStore._(
@@ -98,15 +98,15 @@ class RecoverableStore {
     CommitFaultHook? faultHook,
     String Function()? transactionIdentity,
   }) async {
-    // Refuse before any I/O. Production activation is a separate integration.
-    if (!environment.isValidation ||
+    // Refuse before any I/O; root admission never follows mutable settings.
+    if (!environment.hasOwnedStorage ||
         !Platform.isWindows ||
         !p.isAbsolute(root) ||
         p.split(root).contains('..') ||
-        !p.isWithin(environment.validationRoot!, root)) {
+        !environment.permitsOwnerRoot(root)) {
       return const OperationResult.failure(
         OperationOutcome.rejectedInput,
-        'Recoverable storage requires an explicit disposable Windows location.',
+        'Recoverable storage requires an explicitly admitted Windows location.',
       );
     }
     WriterLease? lease;

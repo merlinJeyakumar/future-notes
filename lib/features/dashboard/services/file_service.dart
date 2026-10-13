@@ -21,6 +21,11 @@ abstract interface class LibraryFileService {
   Future<void> releaseLibrary(StorageBinding binding);
 }
 
+/// Keeps unfinished mutation adapters out of an owned persistence session.
+abstract interface class NoteMutationPolicy {
+  bool get supportsExtendedNoteOperations;
+}
+
 abstract class IFileService {
   Future<FilePickerResult?> pickFile({List<String>? allowedExtensions});
   Future<void> saveFile(String content, String fileName);
@@ -41,7 +46,8 @@ abstract class IFileService {
   Future<NoteReference> writeResolved(NoteReference reference, String content);
 }
 
-class FileService implements IFileService, LibraryFileService {
+class FileService
+    implements IFileService, LibraryFileService, NoteMutationPolicy {
   FileService({SettingsService? settings, StorageOwner? storageOwner})
     : _settings = settings ?? SettingsService() {
     if (storageOwner != null) {
@@ -54,6 +60,8 @@ class FileService implements IFileService, LibraryFileService {
 
   final SettingsService _settings;
   OwnedNotePersistence? _ownedNotes;
+  @override
+  bool get supportsExtendedNoteOperations => _ownedNotes == null;
   bool get noteCleanupPending => _ownedNotes?.cleanupPending ?? false;
   Future<void> closePersistence() async {
     await _ownedNotes?.close();
@@ -450,7 +458,7 @@ class FileService implements IFileService, LibraryFileService {
       }
       return await _settings.getLibraryFilePath(fileName);
     } catch (e) {
-      if (_settings.isValidationMode) rethrow;
+      if (_settings.storageEnvironment.hasOwnedStorage) rethrow;
       return fileName;
     }
   }
@@ -497,7 +505,7 @@ class FileService implements IFileService, LibraryFileService {
       }
       return userDataDir.path;
     } catch (e) {
-      if (_settings.isValidationMode) rethrow;
+      if (_settings.storageEnvironment.hasOwnedStorage) rethrow;
       return '';
     }
   }

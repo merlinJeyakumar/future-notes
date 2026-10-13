@@ -646,6 +646,7 @@ class _ContentAreaState extends State<ContentArea> {
       // Lock the file manually as requested
       viewModel.manualLock();
     } else {
+      if (!viewModel.ensureExtendedNoteOperations()) return;
       final password = await _showPasswordDialog(
         context,
         mode: PasswordMode.set,
@@ -775,6 +776,7 @@ class _ContentAreaState extends State<ContentArea> {
   }
 
   void _showSettingsMenu(BuildContext context) {
+    if (!viewModel.ensureExtendedNoteOperations()) return;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1012,6 +1014,7 @@ class _ContentAreaState extends State<ContentArea> {
   }
 
   void _confirmDelete(BuildContext context) {
+    if (!viewModel.ensureExtendedNoteOperations()) return;
     if (viewModel.currentFileName == null) return;
     showDialog(
       context: context,

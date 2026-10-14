@@ -28,6 +28,58 @@ void main() {
   tearDown(() => deleteValidationRun(run));
 
   test(
+    'unknown native failure with a racing destination reports conflict and retains both files',
+    () async {
+      final source = File(p.join(root, 'racing.staged'));
+      final destination = File(p.join(root, 'racing.enc'));
+      await source.writeAsString('source retained', flush: true);
+      var called = false;
+      final injected = WindowsFileActions(
+        root: root,
+        environment: moves.environment,
+        nativeMove: (_, to) {
+          called = true;
+          File(to).writeAsStringSync('external destination', flush: true);
+          return -1;
+        },
+      );
+      final result = await injected.moveWithoutReplace(
+        source.path,
+        destination.path,
+      );
+      expect(called, isTrue);
+      expect(result.outcome, OperationOutcome.conflict);
+      expect(await source.readAsString(), 'source retained');
+      expect(await destination.readAsString(), 'external destination');
+    },
+    skip: !Platform.isWindows,
+  );
+
+  test(
+    'unknown native failure without a destination remains failure',
+    () async {
+      final source = File(p.join(root, 'retained.staged'));
+      final destination = File(p.join(root, 'absent.enc'));
+      await source.writeAsString('retained', flush: true);
+      final injected = WindowsFileActions(
+        root: root,
+        environment: moves.environment,
+        nativeMove: (_, to) => -1,
+      );
+      expect(
+        (await injected.moveWithoutReplace(
+          source.path,
+          destination.path,
+        )).outcome,
+        OperationOutcome.ioFailure,
+      );
+      expect(await source.readAsString(), 'retained');
+      expect(await destination.exists(), isFalse);
+    },
+    skip: !Platform.isWindows,
+  );
+
+  test(
     'Windows native move publishes exact bytes to an absent destination',
     () async {
       final source = File(p.join(root, 'synthetic.staged'));
@@ -60,6 +112,30 @@ void main() {
       expect(await source.readAsString(), 'Synthetic candidate');
       expect(await destination.readAsString(), 'Synthetic external object');
       expect(result.outcome, OperationOutcome.conflict, reason: result.message);
+    },
+    skip: !Platform.isWindows,
+  );
+
+  test(
+    'native destination conflicts retain error classification across allocation',
+    () async {
+      for (var index = 0; index < 20; index++) {
+        final source = File(p.join(root, 'candidate-$index.staged'));
+        final destination = File(p.join(root, 'existing-$index.enc'));
+        await source.writeAsBytes([index, 0, 255], flush: true);
+        await destination.writeAsBytes([255, index, 0], flush: true);
+        final result = await moves.moveWithoutReplace(
+          source.path,
+          destination.path,
+        );
+        expect(await source.readAsBytes(), [index, 0, 255]);
+        expect(await destination.readAsBytes(), [255, index, 0]);
+        expect(
+          result.outcome,
+          OperationOutcome.conflict,
+          reason: result.message,
+        );
+      }
     },
     skip: !Platform.isWindows,
   );

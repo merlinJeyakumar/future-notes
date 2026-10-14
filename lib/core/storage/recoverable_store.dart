@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import '../operations/operation_result.dart';
 import 'commit_record.dart';
 import 'native_storage_primitives.dart';
+import 'permanent_deletion.dart';
 import 'storage_environment.dart';
 import 'windows_file_actions.dart';
 
@@ -34,6 +35,9 @@ enum CommitBoundary {
   recoveryCandidateRetained,
   recoveryRestored,
   recoveryReceiptWritten,
+  deletionIntentVerified,
+  deletionFileRemoved,
+  deletionReceiptWritten,
 }
 
 typedef CommitFaultHook =
@@ -51,10 +55,15 @@ class RecoveryReport {
     required this.libraryReadOnly,
     required Set<String> blockedTargets,
     required this.restoredTransactions,
-  }) : blockedTargets = Set.unmodifiable(blockedTargets);
+    this.pendingDeletions = const [],
+    Set<String> restoredTargets = const {},
+  }) : blockedTargets = Set.unmodifiable(blockedTargets),
+       restoredTargets = Set.unmodifiable(restoredTargets);
   final bool libraryReadOnly;
   final Set<String> blockedTargets;
   final int restoredTransactions;
+  final List<DeletionIntent> pendingDeletions;
+  final Set<String> restoredTargets;
 }
 
 /// Captured-root replacement backend. Own and dispatch it in one storage
@@ -79,6 +88,18 @@ class RecoverableStore {
   final CommitFaultHook? _fault;
   final String Function() _identity;
   final _blocked = <String>{};
+  final _deletedTransactions = <String>{};
+  final _pendingDeletions = <String, DeletionIntent>{};
+  final _restoredTargets = <String>{};
+  late final _deletion = PermanentDeletion(
+    root: root,
+    environment: environment,
+    onBoundary: (phase, id) => _point(switch (phase) {
+      'intent' => CommitBoundary.deletionIntentVerified,
+      'removed' => CommitBoundary.deletionFileRemoved,
+      _ => CommitBoundary.deletionReceiptWritten,
+    }, id),
+  );
   bool _libraryReadOnly = false;
   bool _closing = false;
   Future<void> _tail = Future.value();
@@ -89,6 +110,8 @@ class RecoverableStore {
     libraryReadOnly: _libraryReadOnly,
     blockedTargets: _blocked,
     restoredTransactions: _restored,
+    pendingDeletions: List.unmodifiable(_pendingDeletions.values),
+    restoredTargets: _restoredTargets,
   );
 
   static Future<OperationResult<RecoverableStore>> open({
@@ -171,6 +194,105 @@ class RecoverableStore {
   Future<void> close() {
     _closing = true;
     return _closeFuture ??= _close();
+  }
+
+  Future<OperationResult<DeletionReport>> delete({
+    required String target,
+    required StorageRevision expected,
+    String? attachmentDirectory,
+  }) {
+    if (_closing) {
+      return Future.value(
+        const OperationResult.failure(
+          OperationOutcome.rejectedInput,
+          'Storage owner is closing.',
+        ),
+      );
+    }
+    final completed = Completer<OperationResult<DeletionReport>>();
+    _tail = _tail.then((_) async {
+      try {
+        if (_libraryReadOnly) {
+          completed.complete(
+            const OperationResult.failure(
+              OperationOutcome.recoveryRequired,
+              'Library recovery is incomplete.',
+            ),
+          );
+          return;
+        }
+        DeletionIntent? intent;
+        for (final existing in await _deletion.load()) {
+          if (_key(existing.target) == _key(target)) {
+            intent = existing;
+            break;
+          }
+        }
+        if (intent == null) {
+          if (_blocked.contains(_key(target))) {
+            completed.complete(
+              const OperationResult.failure(
+                OperationOutcome.recoveryRequired,
+                'Recover this note before deleting it.',
+              ),
+            );
+            return;
+          }
+          intent = await _deletion.prepare(
+            id: _checkedIdentity(),
+            target: target,
+            expected: expected,
+            attachmentDirectory: attachmentDirectory,
+          );
+        }
+        _admitDeletion(intent);
+        final result = await _deletion.apply(intent);
+        if (result.isSuccess) {
+          _pendingDeletions.remove(intent.id);
+        } else {
+          _pendingDeletions[intent.id] = intent;
+        }
+        completed.complete(result);
+      } on DeletionConflict {
+        completed.complete(
+          const OperationResult.failure(
+            OperationOutcome.conflict,
+            'The reviewed note changed before deletion.',
+          ),
+        );
+      } catch (_) {
+        await _loadDeletions();
+        completed.complete(
+          const OperationResult.failure(
+            OperationOutcome.recoveryRequired,
+            'Deletion could not finish. Retained journals require cleanup.',
+          ),
+        );
+      }
+    });
+    return completed.future;
+  }
+
+  void _admitDeletion(DeletionIntent intent) {
+    _blocked.addAll(intent.objects.map(_key));
+    _deletedTransactions.addAll(
+      intent.transactions.map((r) => r.transactionId),
+    );
+  }
+
+  Future<void> _loadDeletions() async {
+    try {
+      for (final intent in await _deletion.load()) {
+        _admitDeletion(intent);
+        if (!await _deletion.isComplete(intent)) {
+          _pendingDeletions[intent.id] = intent;
+        } else {
+          _pendingDeletions.remove(intent.id);
+        }
+      }
+    } catch (_) {
+      _libraryReadOnly = true;
+    }
   }
 
   Future<void> _close() async {
@@ -337,6 +459,8 @@ class RecoverableStore {
   }
 
   Future<void> _recover() async {
+    await _loadDeletions();
+    if (_libraryReadOnly) return;
     final directory = await _location('.future-notes-storage/transactions');
     final pending = <CommitRecord>[];
     final records = <CommitRecord>[];
@@ -349,6 +473,7 @@ class RecoverableStore {
           return;
         }
         final name = p.basename(entry.path);
+        if (_deletedTransactions.contains(name.split('.').first)) continue;
         if (!RegExp(
               r'^[a-f0-9]{32}\.(json|receipt|resolution)$',
             ).hasMatch(name) ||
@@ -528,6 +653,7 @@ class RecoverableStore {
     );
     await _point(CommitBoundary.recoveryReceiptWritten, record.transactionId);
     _restored++;
+    _restoredTargets.add(_key(record.target));
   }
 
   Future<void> _ensureBaseline(CommitRecord record, String prior) async {

@@ -36,12 +36,12 @@ class FileDetailsDialog extends StatelessWidget {
           _buildCopiableDetailRow(context, "File Path:", file.fullPath),
           _buildDetailRow(
             context,
-            "Created:",
+            "Note date:",
             file.created?.toString().split('.').first ?? "Unknown",
           ),
           _buildDetailRow(
             context,
-            "Modified:",
+            "File modified:",
             file.modified?.toString().split('.').first ?? "Unknown",
           ),
           _buildDetailRow(context, "Locked:", file.isLocked ? "Yes" : "No"),

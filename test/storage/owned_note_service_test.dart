@@ -31,6 +31,7 @@ void main() {
   late FileService files;
   late List<ContentViewModel> editors;
   late List<File> cleanupObstructions;
+  late List<StorageOwnerWorker> probeWorkers;
 
   setUp(() async {
     run = await Directory.systemTemp.createTemp('future-notes-validation-');
@@ -53,6 +54,7 @@ void main() {
     files = FileService(settings: settings, storageOwner: owner);
     editors = [];
     cleanupObstructions = [];
+    probeWorkers = [];
   });
 
   tearDown(() async {
@@ -73,8 +75,18 @@ void main() {
     await settings.closePersistence();
     settings.themeModeNotifier.dispose();
     expect((await worker.close()).isSuccess, isTrue);
+    for (final probe in probeWorkers) {
+      expect((await probe.close()).isSuccess, isTrue);
+    }
     await deleteValidationRun(run);
   });
+
+  Future<StorageOwnerWorker> independentOwner() async {
+    final started = await StorageOwnerWorker.start(environment: environment);
+    expect(started.isSuccess, isTrue, reason: started.message);
+    probeWorkers.add(started.value!);
+    return started.value!;
+  }
 
   Future<File> fixture(String relative, String content, {String? root}) async {
     final file = File(p.join(root ?? environment.dataRoot!, relative));
@@ -393,13 +405,14 @@ void main() {
   test(
     'lease contention rejects preparation and explicit retry can acquire after release',
     () async {
-      final external = await worker.openRoot(environment.dataRoot!);
+      final probe = await independentOwner();
+      final external = await probe.openRoot(environment.dataRoot!);
       expect(external.isSuccess, isTrue);
       await expectLater(
         files.newNoteReference('fresh'),
         throwsA(failure(OperationOutcome.conflict)),
       );
-      expect((await worker.releaseRoot(external.value!)).isSuccess, isTrue);
+      expect((await probe.releaseRoot(external.value!)).isSuccess, isTrue);
       expect(
         (await files.newNoteReference('fresh')).storageRevision!.exists,
         isFalse,
@@ -597,7 +610,9 @@ void main() {
       for (final result in await Future.wait([active, intermediate, latest])) {
         expect(result.outcome, OperationOutcome.conflict);
       }
-      expect(owner.commits, 2);
+      // The second coalesced snapshot is rejected by its revision precheck,
+      // before calling the writer. The first active request reached it.
+      expect(owner.commits, 1);
       expect(await content.readAsString(), external);
       expect(vm.titleController.text, 'Retained latest');
       expect(vm.hasUnsavedChanges, isTrue);
@@ -619,6 +634,7 @@ void main() {
       );
       final retained = (await journal.list(recursive: true).toList())
           .map((entry) => p.relative(entry.path, from: journal.path))
+          .where((relative) => p.split(relative).first != 'sources')
           .toSet();
       await expectLater(
         files.closePersistence(),
@@ -640,6 +656,7 @@ void main() {
       expect(
         (await journal.list(recursive: true).toList())
             .map((entry) => p.relative(entry.path, from: journal.path))
+            .where((relative) => p.split(relative).first != 'sources')
             .toSet(),
         retained,
       );
@@ -678,6 +695,7 @@ void main() {
   test(
     'thrown note release error permits other root cleanup and a sanitized retry',
     () async {
+      final probe = await independentOwner();
       final first = await files.newNoteReference('first');
       final secondRoot = p.join(run.path, 'other-library');
       await settings.setCustomDataPath(secondRoot);
@@ -700,16 +718,16 @@ void main() {
         ),
       );
       expect(
-        (await worker.openRoot(first.binding.root)).outcome,
+        (await probe.openRoot(first.binding.root)).outcome,
         OperationOutcome.conflict,
       );
-      final secondOwner = await worker.openRoot(second.binding.root);
+      final secondOwner = await probe.openRoot(second.binding.root);
       expect(secondOwner.isSuccess, isTrue);
-      expect((await worker.releaseRoot(secondOwner.value!)).isSuccess, isTrue);
+      expect((await probe.releaseRoot(secondOwner.value!)).isSuccess, isTrue);
       await files.closePersistence();
-      final firstOwner = await worker.openRoot(first.binding.root);
+      final firstOwner = await probe.openRoot(first.binding.root);
       expect(firstOwner.isSuccess, isTrue);
-      expect((await worker.releaseRoot(firstOwner.value!)).isSuccess, isTrue);
+      expect((await probe.releaseRoot(firstOwner.value!)).isSuccess, isTrue);
       expect(worker.isReady, isTrue);
     },
   );
@@ -717,6 +735,7 @@ void main() {
   test(
     'typed note release failure retains ownership until explicit retry',
     () async {
+      final probe = await independentOwner();
       final reference = await files.newNoteReference('release');
       owner.failRelease = OperationOutcome.ioFailure;
       await expectLater(
@@ -724,7 +743,7 @@ void main() {
         throwsA(failure(OperationOutcome.recoveryRequired)),
       );
       expect(
-        (await worker.openRoot(reference.binding.root)).outcome,
+        (await probe.openRoot(reference.binding.root)).outcome,
         OperationOutcome.conflict,
       );
       await expectLater(
@@ -733,9 +752,9 @@ void main() {
       );
       owner.failRelease = null;
       await files.closePersistence();
-      final reacquired = await worker.openRoot(reference.binding.root);
+      final reacquired = await probe.openRoot(reference.binding.root);
       expect(reacquired.isSuccess, isTrue);
-      expect((await worker.releaseRoot(reacquired.value!)).isSuccess, isTrue);
+      expect((await probe.releaseRoot(reacquired.value!)).isSuccess, isTrue);
     },
   );
   test(
@@ -796,6 +815,7 @@ void main() {
   test(
     'root release failure retains ownership for explicit retry and reopening',
     () async {
+      final probe = await independentOwner();
       final binding = await files.prepareLibrary(environment.dataRoot!);
       owner.failRelease = OperationOutcome.ioFailure;
       await expectLater(
@@ -803,11 +823,14 @@ void main() {
         throwsA(failure(OperationOutcome.ioFailure)),
       );
       expect(
-        (await worker.openRoot(binding.root)).outcome,
+        (await probe.openRoot(binding.root)).outcome,
         OperationOutcome.conflict,
       );
       owner.failRelease = null;
       await files.releaseLibrary(binding);
+      final reacquired = await probe.openRoot(binding.root);
+      expect(reacquired.isSuccess, isTrue);
+      expect((await probe.releaseRoot(reacquired.value!)).isSuccess, isTrue);
       final reference = await files.newNoteReference('reopened');
       expect(reference.binding.root, binding.root);
       expect(reference.storageOwner, isNotNull);
@@ -841,6 +864,18 @@ void main() {
 class NoteTestOwner implements StorageOwner {
   NoteTestOwner(this.delegate);
   final StorageOwner delegate;
+  @override
+  Future<OperationResult<DeletionReport>> delete(
+    StorageOwnerRoot owner, {
+    required String target,
+    required StorageRevision expected,
+    String? attachmentDirectory,
+  }) => delegate.delete(
+    owner,
+    target: target,
+    expected: expected,
+    attachmentDirectory: attachmentDirectory,
+  );
   int opens = 0;
   int commits = 0;
   int revisions = 0;

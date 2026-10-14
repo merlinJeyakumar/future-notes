@@ -180,8 +180,7 @@ Future<String> _encryptStringTask(Map<String, dynamic> args) async {
   final text = args['text'] as String;
   final key = Key(args['keyBytes'] as Uint8List);
   final iv = IV.fromLength(16);
-  final encrypter = Encrypter(AES(key));
-  final encrypted = encrypter.encrypt(text, iv: iv);
+  final encrypted = _encryptCompatible(key, iv, utf8.encode(text));
   return "${iv.base64}:${encrypted.base64}";
 }
 
@@ -215,8 +214,7 @@ Future<Uint8List> _encryptBinaryTask(Map<String, dynamic> args) async {
   final data = args['data'] as Uint8List;
   final key = Key(args['keyBytes'] as Uint8List);
   final iv = IV.fromLength(16);
-  final encrypter = Encrypter(AES(key));
-  final encrypted = encrypter.encryptBytes(data, iv: iv);
+  final encrypted = _encryptCompatible(key, iv, data);
   final combined = BytesBuilder();
   combined.add(iv.bytes);
   combined.add(encrypted.bytes);
@@ -254,8 +252,7 @@ Future<String> _encryptAppTask(Map<String, dynamic> args) async {
   final key = Key(args['keyBytes'] as Uint8List);
   final ivStr = args['iv'] as String;
   final iv = IV.fromUtf8(ivStr);
-  final encrypter = Encrypter(AES(key));
-  final encrypted = encrypter.encrypt(text, iv: iv);
+  final encrypted = _encryptCompatible(key, iv, utf8.encode(text));
   return encrypted.base64;
 }
 
@@ -274,6 +271,17 @@ Future<DecryptionResult<String>> _decryptAppTask(
   } catch (e) {
     return const DecryptionResult.failure(DecryptionFailure.invalidCiphertext);
   }
+}
+
+Encrypted _encryptCompatible(Key key, IV iv, List<int> bytes) {
+  if (bytes.isEmpty) {
+    // The legacy writer cannot accept empty input. Encode its exact PKCS7
+    // empty-message block explicitly, with the same SIC cipher and IV layout.
+    return Encrypter(
+      AES(key, padding: null),
+    ).encryptBytes(List.filled(16, 16), iv: iv);
+  }
+  return Encrypter(AES(key)).encryptBytes(bytes, iv: iv);
 }
 
 void _validateLegacyCipher(Uint8List iv, Uint8List ciphertext) {

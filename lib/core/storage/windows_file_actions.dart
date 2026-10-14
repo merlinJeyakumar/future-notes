@@ -16,10 +16,15 @@ abstract class StorageFileActions {
 /// Metadata-only, same-volume move with native destination exclusion.
 /// Dispatch through the storage owner worker before wiring to UI operations.
 class WindowsFileActions implements StorageFileActions {
-  WindowsFileActions({required this.root, required this.environment});
+  WindowsFileActions({
+    required this.root,
+    required this.environment,
+    this.nativeMove,
+  });
 
   final String root;
   final StorageEnvironment environment;
+  final int Function(String source, String destination)? nativeMove;
   late final _api = _WindowsMoveApi();
 
   Future<void> _verify(String location) async {
@@ -74,12 +79,34 @@ class WindowsFileActions implements StorageFileActions {
           'Only a regular file can be moved.',
         );
       }
-      final error = _api.move(nativeSource, nativeDestination);
+      // Preexisting destinations need no native call. The move still enforces
+      // exclusion atomically if another writer creates one after this check.
+      if (await FileSystemEntity.type(destination, followLinks: false) !=
+          FileSystemEntityType.notFound) {
+        return const OperationResult.failure(
+          OperationOutcome.conflict,
+          'Move destination already exists.',
+        );
+      }
+      final error = (nativeMove ?? _api.move)(nativeSource, nativeDestination);
       if (error == 0) return const OperationResult.success();
       if (error == 80 || error == 183) {
         return const OperationResult.failure(
           OperationOutcome.conflict,
           'Move destination already exists.',
+        );
+      }
+      // The native error can be unavailable. An unknown failed result remains
+      // a failure; occupied destination plus a retained
+      // source establishes the no-replace conflict without guessing an errno.
+      if (error == -1 &&
+          await FileSystemEntity.type(destination, followLinks: false) !=
+              FileSystemEntityType.notFound &&
+          await FileSystemEntity.type(source, followLinks: false) ==
+              FileSystemEntityType.file) {
+        return const OperationResult.failure(
+          OperationOutcome.conflict,
+          'Move destination already exists; source retained.',
         );
       }
       return OperationResult.failure(
@@ -180,6 +207,7 @@ class _WindowsMoveApi {
         >('MoveFileExW');
     _lastError = kernel.lookupFunction<ffi.Uint32 Function(), int Function()>(
       'GetLastError',
+      isLeaf: true,
     );
   }
 
@@ -218,10 +246,14 @@ class _WindowsMoveApi {
       from = _utf16(heap, source);
       to = _utf16(heap, destination);
       // No REPLACE_EXISTING, COPY_ALLOWED or deferred/reboot operation.
+      // Bind before the move and avoid a VM transition when reading its
+      // thread-local error. Only this short accessor is a leaf call; the move
+      // itself may block and must remain a normal FFI call.
+      final readError = _lastError;
       final result = _move(from, to, 0);
+      final error = result == 0 ? readError() : 0;
       moved = result != 0;
       if (moved) return 0;
-      final error = _lastError();
       // A failed native result must never become success if no error is set.
       return error == 0 ? -1 : error;
     } finally {

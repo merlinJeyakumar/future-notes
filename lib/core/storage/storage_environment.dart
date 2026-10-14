@@ -11,12 +11,14 @@ class StorageEnvironment {
   const StorageEnvironment.production()
     : validationRoot = null,
       dataRoot = null,
-      settingsFile = null;
+      settingsFile = null,
+      _admittedLibraries = const {};
 
   StorageEnvironment._recoverable({
     required this.dataRoot,
     required this.settingsFile,
-  }) : validationRoot = null;
+  }) : validationRoot = null,
+       _admittedLibraries = {};
 
   /// Preview admission is explicit; never infer or relocate an existing library.
   /// Default builds retain the previous writer until rollout validation passes.
@@ -53,7 +55,7 @@ class StorageEnvironment {
     required this.validationRoot,
     required this.dataRoot,
     required this.settingsFile,
-  });
+  }) : _admittedLibraries = {};
 
   factory StorageEnvironment.validation({
     required String validationRoot,
@@ -136,6 +138,7 @@ class StorageEnvironment {
   final String? validationRoot;
   final String? dataRoot;
   final String? settingsFile;
+  final Set<String> _admittedLibraries;
 
   bool get isValidation => validationRoot != null;
   bool get isRecoverable => !isValidation && dataRoot != null;
@@ -155,7 +158,9 @@ class StorageEnvironment {
     final root = p.normalize(value);
     return isValidation
         ? p.isWithin(validationRoot!, root)
-        : p.equals(root, dataRoot!) || p.equals(root, p.dirname(settingsFile!));
+        : p.equals(root, dataRoot!) ||
+              p.equals(root, p.dirname(settingsFile!)) ||
+              _admittedLibraries.any((candidate) => p.equals(candidate, root));
   }
 
   static String _absolutePath(String value) {
@@ -173,7 +178,8 @@ class StorageEnvironment {
   String validateLibraryPath(String value) {
     if (isRecoverable) {
       final candidate = _absolutePath(value);
-      if (!p.equals(candidate, dataRoot!)) {
+      if (!p.equals(candidate, dataRoot!) &&
+          !_admittedLibraries.any((root) => p.equals(root, candidate))) {
         throw ArgumentError(
           'Opening another library requires its own rollout review.',
         );
@@ -190,6 +196,41 @@ class StorageEnvironment {
       );
     }
     return candidate;
+  }
+
+  /// Explicitly selected libraries are admitted only by the library coordinator;
+  /// settings JSON and ordinary openRoot requests cannot broaden capabilities.
+  String validateLibraryCandidate(String value) {
+    if (!isRecoverable) return validateLibraryPath(value);
+    final candidate = StorageEnvironment.recoverable(
+      dataRoot: value,
+      settingsFile: settingsFile!,
+    ).dataRoot!;
+    for (final root in [dataRoot!, ..._admittedLibraries]) {
+      if (!p.equals(root, candidate) &&
+          (p.isWithin(root, candidate) || p.isWithin(candidate, root))) {
+        throw ArgumentError('Library roots cannot overlap.');
+      }
+    }
+    return candidate;
+  }
+
+  Future<void> admitSelectedLibrary(String value) async {
+    final candidate = validateLibraryCandidate(value);
+    if (isValidation) {
+      await verifyLocation(candidate);
+      return;
+    }
+    if (!isRecoverable || _admittedLibraries.length >= 128) {
+      throw ArgumentError('Library admission unavailable.');
+    }
+    _admittedLibraries.add(candidate);
+    try {
+      await verifyLocation(candidate);
+    } catch (_) {
+      _admittedLibraries.remove(candidate);
+      rethrow;
+    }
   }
 
   /// Resolves a library-relative path before native services access it.
@@ -225,7 +266,10 @@ class StorageEnvironment {
         : p.equals(dataRoot!, target) ||
               p.isWithin(dataRoot!, target) ||
               p.equals(p.dirname(settingsFile!), target) ||
-              p.isWithin(p.dirname(settingsFile!), target);
+              p.isWithin(p.dirname(settingsFile!), target) ||
+              _admittedLibraries.any(
+                (root) => p.equals(root, target) || p.isWithin(root, target),
+              );
     if (!permitted) {
       throw ArgumentError(
         'Storage access must remain inside its captured roots.',

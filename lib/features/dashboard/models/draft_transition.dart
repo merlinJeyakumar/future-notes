@@ -1,6 +1,11 @@
 enum DraftDecision { save, retry, discard, cancel }
 
-enum DraftDecisionKind { firstSave, saveFailure, firstAttachment }
+enum DraftDecisionKind {
+  firstSave,
+  saveFailure,
+  firstAttachment,
+  activeAttachments,
+}
 
 enum DraftTransition { navigation, newNote, lock, library, exit }
 

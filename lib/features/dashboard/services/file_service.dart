@@ -7,10 +7,14 @@ import 'package:universal_html/html.dart' as html;
 import 'package:uuid/uuid.dart';
 import 'package:path/path.dart' as p;
 import 'settings_service.dart';
+import 'attachment_ownership.dart';
 import '../../../core/storage/note_reference.dart';
+import '../../../core/storage/commit_record.dart';
 import '../../../core/storage/owned_note_persistence.dart';
 import '../../../core/storage/storage_owner_worker.dart';
 import '../../../core/storage/library_watch.dart';
+import '../../../core/storage/streaming_file_cipher.dart';
+import '../../../core/operations/operation_result.dart';
 
 abstract interface class LibraryFileService {
   bool get supportsLibrarySwitch;
@@ -21,9 +25,28 @@ abstract interface class LibraryFileService {
   Future<void> releaseLibrary(StorageBinding binding);
 }
 
-/// Keeps unfinished mutation adapters out of an owned persistence session.
+/// Capabilities exposed by the transactional view-model adapters.
 abstract interface class NoteMutationPolicy {
   bool get supportsExtendedNoteOperations;
+}
+
+abstract interface class TransactionalNoteFiles {
+  bool get usesOwnedStorage;
+  Future<List<NoteReference>> pendingDeletions();
+  Future<StreamingFileSource> attachmentSource(
+    NoteReference reference,
+    String id,
+  );
+  Future<NoteReference> commitGeneration(
+    NoteReference reference,
+    String content,
+    List<PreparedAttachmentFile> attachments,
+  );
+  Future<OperationResult<DeletionReport>> deleteResolved(
+    NoteReference reference,
+  );
+  Future<Directory> createOperationDirectory(NoteReference reference);
+  Future<void> removeOperationDirectory(Directory directory);
 }
 
 abstract class IFileService {
@@ -47,7 +70,11 @@ abstract class IFileService {
 }
 
 class FileService
-    implements IFileService, LibraryFileService, NoteMutationPolicy {
+    implements
+        IFileService,
+        LibraryFileService,
+        NoteMutationPolicy,
+        TransactionalNoteFiles {
   FileService({SettingsService? settings, StorageOwner? storageOwner})
     : _settings = settings ?? SettingsService() {
     if (storageOwner != null) {
@@ -61,10 +88,103 @@ class FileService
   final SettingsService _settings;
   OwnedNotePersistence? _ownedNotes;
   @override
-  bool get supportsExtendedNoteOperations => _ownedNotes == null;
+  bool get usesOwnedStorage => _ownedNotes != null;
+  @override
+  bool get supportsExtendedNoteOperations => true;
   bool get noteCleanupPending => _ownedNotes?.cleanupPending ?? false;
+  @override
+  Future<List<NoteReference>> pendingDeletions() async {
+    final binding = await _captureBinding();
+    return _ownedNotes == null
+        ? []
+        : await _ownedNotes!.pendingDeletions(binding);
+  }
+
   Future<void> closePersistence() async {
     await _ownedNotes?.close();
+  }
+
+  @override
+  Future<StreamingFileSource> attachmentSource(
+    NoteReference reference,
+    String id,
+  ) async {
+    await _verifyReference(reference);
+    if (_ownedNotes == null) {
+      throw UnsupportedError('Owned attachment source required.');
+    }
+    return _ownedNotes!.attachmentSource(reference, id);
+  }
+
+  @override
+  Future<NoteReference> commitGeneration(
+    NoteReference reference,
+    String content,
+    List<PreparedAttachmentFile> attachments,
+  ) async {
+    await _verifyReference(reference);
+    if (_ownedNotes == null) {
+      throw UnsupportedError('Owned generation commit required.');
+    }
+    return _ownedNotes!.commit(reference, content, attachments: attachments);
+  }
+
+  @override
+  Future<OperationResult<DeletionReport>> deleteResolved(
+    NoteReference reference,
+  ) async {
+    await _verifyReference(reference);
+    if (_ownedNotes == null) throw UnsupportedError('Owned deletion required.');
+    if (await _ownedNotes!.needsDeletionOwnershipCheck(reference)) {
+      final ownership = await verifyAttachmentOwnership(
+        reference,
+        _settings.storageEnvironment,
+      );
+      if (!ownership.isSuccess)
+        return OperationResult.failure(ownership.outcome, ownership.message);
+    }
+    return _ownedNotes!.delete(reference);
+  }
+
+  @override
+  Future<Directory> createOperationDirectory(NoteReference reference) async {
+    if (_ownedNotes == null) {
+      throw UnsupportedError('Owned operation required.');
+    }
+    await _verifyReference(reference);
+    final target = p.posix.joinAll(
+      p.split(p.relative(reference.contentPath, from: reference.binding.root)),
+    );
+    final location = reference.binding.child(
+      '.future-notes-storage/sources/${CommitRecord.objectIdentity(target)}',
+    );
+    await _settings.storageEnvironment.verifyLocation(
+      location,
+      allowRunRoot: true,
+    );
+    final root = Directory(location);
+    await root.create(recursive: true);
+    return root.createTemp('attachment-operation-');
+  }
+
+  @override
+  Future<void> removeOperationDirectory(Directory directory) async {
+    final parts = p.split(directory.path);
+    if (parts.length < 4 ||
+        parts[parts.length - 4] != '.future-notes-storage' ||
+        parts[parts.length - 3] != 'sources' ||
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(parts[parts.length - 2]) ||
+        !p.basename(directory.path).startsWith('attachment-operation-')) {
+      throw ArgumentError('Unowned operation directory.');
+    }
+    await _settings.storageEnvironment.verifyLocation(directory.path);
+    if (!await directory.exists()) return;
+    await for (final entity in directory.list(followLinks: false)) {
+      if (entity is! File) throw StateError('Unexpected operation object.');
+      await _settings.storageEnvironment.verifyLocation(entity.path);
+      await entity.delete();
+    }
+    await directory.delete();
   }
 
   void _rejectUnintegratedMutation() {
@@ -97,9 +217,9 @@ class FileService
       throw ArgumentError('Absolute library required.');
     }
     final canonical = StorageBinding(root, ++_nextRootGeneration);
-    _settings.storageEnvironment.validateLibraryPath(canonical.root);
-    await _settings.verifyStoragePath(canonical.root);
+    _settings.storageEnvironment.validateLibraryCandidate(canonical.root);
     await _ownedNotes?.prepareLibrary(canonical.root);
+    await _settings.verifyStoragePath(canonical.root);
     return canonical;
   }
 
@@ -142,7 +262,7 @@ class FileService
       final folderId = fileName.substring(5);
       final contentPath = binding.child('$fileName/note_content_$folderId.enc');
       await _settings.verifyStoragePath(contentPath);
-      if (await File(contentPath).exists())
+      if (await File(contentPath).exists()) {
         return _captureReference(
           NoteReference(
             binding: binding,
@@ -152,6 +272,7 @@ class FileService
             attachmentLocation: binding.child('$fileName/attachments'),
           ),
         );
+      }
     }
     if (!await File(direct).exists()) return null;
     return _captureReference(

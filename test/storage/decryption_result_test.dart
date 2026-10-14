@@ -37,6 +37,38 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final service = EncryptionService();
   const password = 'synthetic-key-123456789012345678';
+  test(
+    'empty writers produce the existing full padding block accepted by legacy readers',
+    () async {
+      final body = await service.encrypt('', password: password);
+      expect((await service.decryptResult(body, password: password)).value, '');
+      final parts = body.split(':');
+      expect(
+        legacy.Encrypter(legacy.AES(_fixtureKey)).decrypt(
+          legacy.Encrypted.fromBase64(parts.last),
+          iv: legacy.IV.fromBase64(parts.first),
+        ),
+        '',
+      );
+      final binary = await service.encryptBinary(
+        Uint8List(0),
+        password: password,
+      );
+      expect(binary.length, 32);
+      expect(
+        (await service.decryptBinaryResult(binary, password: password)).value,
+        isEmpty,
+      );
+      final app = await service.encryptApp('');
+      expect((await service.decryptAppResult(app)).value, '');
+      expect(
+        app,
+        base64Encode(
+          _cipher([], _appKey, legacy.IV.fromUtf8('1234567890123456')),
+        ),
+      );
+    },
+  );
 
   test('empty string has success authority distinct from a failure', () async {
     final fixture = _text('', _fixtureKey);

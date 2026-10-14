@@ -6,6 +6,14 @@ Read this file before starting work in this repository. Follow higher-priority i
 
 This rulesbook applies to this repository only. Inspect other NativeDevps projects and their rules separately before working in them.
 
+## Requested scope
+
+Do only the work the user requests and the necessary supporting steps to complete it. Do not suggest extra features, unrelated improvements, optional validation, or follow-up tasks unless the user asks for suggestions. Use reasonable judgment for routine implementation details without expanding the requested outcome.
+
+Do not silently substitute a guarded preview, restricted build, alternate backend, isolated app, or reduced feature set for the version the user requested. Testing in isolation does not authorize substituting an isolated app for the requested app. If the requested outcome cannot be delivered within the agreed constraints, explain the concrete blocker and ask one concise clarification before making that substitution.
+
+Do not disable existing features, add user-facing restrictions or warnings, change storage locations, or create extra app entry points unless required by the requested work and already authorized. Preserve existing notes and unrelated changes throughout.
+
 ## Engineering priorities
 
 1. Reliability
@@ -64,7 +72,18 @@ Keep designs compatible with the Flutter implementation, including keyboard inte
 
 ## Validation and execution approval
 
-Before builds, tests, device/emulator validation, CI, or production actions, state the exact command and wait for approval unless the user requested that exact run in the current turn. Existing explicit authorization remains valid for its stated scope; do not request it again. Production actions require explicit production authorization.
+Treat a user's request to implement, fix, validate, build, run, or launch as authorization for the task-focused commands and permission requests reasonably required to complete that request. This includes formatting, syntax checks, static analysis, relevant tests, affected-platform builds, dependency resolution that does not upgrade versions, isolated runtime validation, and ordinary retries or narrow corrections after a failed check. State material commands and their scope in progress updates, but do not stop to request another approval merely because the exact command was not written by the user.
+
+Task-focused authorization persists until the requested outcome is complete, the user pauses or cancels it, or the work would cross one of the boundaries below. Request explicit approval before:
+
+- destructive or irreversible actions;
+- production deployment or production-data mutation;
+- accessing or mutating real notes when the request is limited to isolated validation;
+- forced process termination when normal shutdown has not completed;
+- committing, pushing, changing branches, or publishing unless the task request already authorizes it;
+- expanding into unrelated work or materially increasing the agreed risk.
+
+Request necessary sandbox or operating-system permissions directly through the available execution tool when they are task-focused. Do not ask the user a separate conversational permission question first. Existing authorization remains valid for corrections and reruns within the same scope; do not request it repeatedly.
 
 For executable code changes, run syntax/format checks, static analysis, relevant tests, and a build for the affected target after each coherent change, once authorized. Use the repository's existing tooling. Typical commands from the repository root are:
 
@@ -82,7 +101,7 @@ For documentation-only changes, review content, referenced paths, whitespace, an
 
 For runtime features, verify visible startup, logs, error handling, latency, resource usage, and continuous operation for a stated duration. Test integrations under realistic usage conditions. For note workflows, cover the affected save/reopen, editing/preview, import, lock/unlock, and failure paths. Report the device/platform, commands, duration, and observed evidence. Passing static checks or a build does not establish runtime success or support for other platforms.
 
-If validation fails, stop affected work and report the exact command and failure. Ask for confirmation before proceeding, enabling the feature, or replacing stable behavior. Preserve the last validated path. If a required check cannot run, state the reason and mark the work as pending validation.
+If validation fails, stop dependent actions, report the exact command and failure, diagnose the cause, and make narrowly scoped corrections within the already authorized task. Rerun only the relevant failed gate without requesting repeated approval. Ask before proceeding only when the correction crosses an approval boundary above, enables an unvalidated replacement on real data, or materially changes scope or risk. Preserve the last validated path. If a required check cannot run, state the reason and mark the work as pending validation.
 
 ## Existing validation limitations
 

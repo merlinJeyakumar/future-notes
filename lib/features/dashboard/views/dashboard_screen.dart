@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' show AppExitResponse, AppExitType;
+import 'dart:ui' show AppExitResponse;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -12,6 +12,7 @@ import '../services/encryption_service.dart';
 import '../models/note_model.dart';
 import '../widgets/import_confirmation_dialog.dart';
 import '../widgets/export_options_dialog.dart';
+import '../widgets/password_dialog.dart';
 import '../services/settings_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../models/draft_transition.dart';
@@ -25,11 +26,13 @@ class DashboardScreen extends StatefulWidget {
     this.settings,
     this.fileService,
     this.onClose,
+    this.startBackgroundServices = true,
   });
 
   final SettingsService? settings;
   final IFileService? fileService;
   final Future<OperationResult<void>> Function()? onClose;
+  final bool startBackgroundServices;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -41,9 +44,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<AppExitResponse>? _pendingExit;
   bool _isSidebarVisible = true;
   bool _shutdownStarted = false;
-  String _shutdownMessage = 'Finishing storage operations…';
   ShutdownSequence? _shutdown;
-  bool _exitTimedOut = false;
   final _shutdownElapsed = Stopwatch();
 
   @override
@@ -54,6 +55,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       settings: widget.settings,
       encryptionService: EncryptionService(),
       onDraftDecision: _showDraftDecision,
+      startBackgroundServices: widget.startBackgroundServices,
     );
     _lifecycle = AppLifecycleListener(onExitRequested: _requestExit);
     _viewModel.operationResultNotifier.addListener(_showOperationFailure);
@@ -74,8 +76,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final result = _viewModel.operationResultNotifier.value;
     if (result == null ||
         result.isSuccess ||
-        result.outcome == OperationOutcome.cancelled)
+        result.outcome == OperationOutcome.cancelled) {
       return;
+    }
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
       SnackBar(
         content: Text(
@@ -108,8 +111,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (close == null) {
         return AppExitResponse.exit;
       }
-      // Once services begin closing, keep the validation editor non-writable,
-      // including after partial cleanup. A subsequent close request retries.
+      // Keep the editor mounted but non-writable, including after partial
+      // cleanup. Flutter's current exit snapshot still owns its listeners.
       FocusManager.instance.primaryFocus?.unfocus();
       setState(() => _shutdownStarted = true);
       final shutdown = _shutdown ??= ShutdownSequence(
@@ -117,34 +120,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
         closeStorage: close,
         onPhase: _onShutdownPhase,
       );
-      final closed = await shutdown.close().timeout(
-        const Duration(seconds: 10),
+      final closed = await shutdown.closeForExit(
+        onSlow: () {
+          if (mounted) {
+            _showShutdownNotice(
+              'Closing is taking longer than expected. '
+              'The window will close when cleanup finishes.',
+            );
+          }
+        },
       );
       if (closed.isSuccess) {
+        debugPrint('Storage shutdown: returning exit to Windows.');
         return AppExitResponse.exit;
       }
-    } on TimeoutException {
-      // A timeout only cancels this exit response. The owned cleanup continues;
-      // subsequent requests join it instead of releasing the same handles twice.
-      _exitTimedOut = true;
-      if (mounted) {
-        setState(
-          () => _shutdownMessage =
-              'Closing is taking longer than expected.\n'
-              'The window will close when cleanup finishes.',
-        );
-      }
-      return AppExitResponse.cancel;
     } catch (_) {
       // Retain owned handles for a subsequent orderly close attempt.
     }
     if (mounted) {
-      setState(
-        () => _shutdownMessage =
-            'Storage cleanup is incomplete. Close the window again to retry.',
+      _showShutdownNotice(
+        'Storage cleanup is incomplete. Close the window again to retry.',
       );
     }
     return AppExitResponse.cancel;
+  }
+
+  void _showShutdownNotice(String message) {
+    ScaffoldMessenger.maybeOf(
+      context,
+    )?.showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _onShutdownPhase(ShutdownPhase phase) {
@@ -156,49 +160,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (phase == ShutdownPhase.complete || phase == ShutdownPhase.failed) {
       _shutdownElapsed.stop();
     }
-    if (!mounted) {
-      return;
-    }
-    setState(
-      () => _shutdownMessage = switch (phase) {
-        ShutdownPhase.watchers => 'Stopping library monitoring…',
-        ShutdownPhase.storage => 'Closing note storage…',
-        ShutdownPhase.complete => 'Storage closed.',
-        ShutdownPhase.failed =>
-          'Storage cleanup is incomplete. Close the window again to retry.',
-      },
-    );
-    if (phase == ShutdownPhase.complete && _exitTimedOut) {
-      unawaited(_resumeCompletedExit());
-    }
   }
 
-  Future<void> _resumeCompletedExit() async {
-    // Finish replying to the original request before sending another cancelable
-    // request. Never bypass another exit observer or force process termination.
-    await _pendingExit;
-    if (!mounted || !_shutdownStarted) {
-      return;
+  Future<void> _handleNewNote({bool closeDrawer = false}) async {
+    final result = await _viewModel.reset();
+    if (!mounted || !result.isSuccess) return;
+    if (closeDrawer && Navigator.canPop(context)) {
+      Navigator.pop(context);
     }
-    _exitTimedOut = false;
-    try {
-      final response = await ServicesBinding.instance.exitApplication(
-        AppExitType.cancelable,
-      );
-      if (mounted && response == AppExitResponse.cancel) {
-        setState(
-          () => _shutdownMessage =
-              'Storage closed. Close the window again to exit.',
-        );
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(
-          () => _shutdownMessage =
-              'Storage closed. Close the window again to exit.',
-        );
-      }
-    }
+    _viewModel.focusNode.requestFocus();
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      const SnackBar(
+        content: Text(
+          'New draft ready. Edit it, then select Save to create the note.',
+        ),
+      ),
+    );
   }
 
   @override
@@ -224,12 +201,88 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  void _handleDelete(RecentFile file) {
+  Future<void> _handleDelete(RecentFile file) async {
+    if (_viewModel.usesOwnedStorage) {
+      final reference = await _viewModel.reviewDeletion(file.path);
+      if (!mounted || reference == null) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Delete Note?'),
+          content: const Text(
+            'Permanently remove this note and its app-managed recovery copies?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      );
+      if (mounted && confirmed == true) {
+        await _viewModel.deleteReviewedNote(reference);
+      }
+      return;
+    }
     if (!_viewModel.ensureExtendedNoteOperations()) return;
     _viewModel.deleteNote(file.path);
   }
 
   Future<void> _handleExportPack(RecentFile file) async {
+    if (_viewModel.usesOwnedStorage) {
+      final review = await _viewModel.captureNoteForExport(file.path);
+      if (!mounted) return;
+      if (!review.isSuccess) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(review.message ?? 'Export unavailable.')),
+        );
+        return;
+      }
+      final captured = review.value!;
+      if (!_viewModel.exportHasVerifiedCredential(captured)) {
+        final verified = await showDialog<String>(
+          context: context,
+          builder: (_) => PasswordDialog(
+            title: 'Verify password for export',
+            description:
+                'Confirm this note password before exporting its encrypted contents.',
+            onVerifyCurrent: (password) =>
+                _viewModel.verifyExportCredential(captured, password),
+            onConfirm: (_) {},
+          ),
+        );
+        if (!mounted || verified == null) return;
+      }
+      final options = await showDialog<ExportOptions>(
+        context: context,
+        builder: (_) => ExportOptionsDialog(
+          hasAttachments: captured.note.note.attachments.isNotEmpty,
+        ),
+      );
+      if (!mounted || options == null) return;
+      final result = await _viewModel.exportNotePack(
+        format: options.format,
+        password: options.password,
+        fileName: file.path,
+        captured: captured,
+      );
+      if (!mounted || result.outcome == OperationOutcome.cancelled) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.isSuccess
+                ? 'Complete note package exported.'
+                : result.message ?? 'Export failed.',
+          ),
+        ),
+      );
+      return;
+    }
     if (!_viewModel.ensureExtendedNoteOperations()) return;
     // Close the sidebar first on mobile
     if (Navigator.canPop(context)) {
@@ -470,7 +523,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
 
       // If password is required and user cancelled, abort
-      if (verification.isPackEncrypted && password == null) {
+      if (password == null) {
         return;
       }
 
@@ -482,7 +535,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       if (importedNoteId == null) {
         // Determine error reason
-        if (password != null && password.isNotEmpty) {
+        if (password.isNotEmpty) {
           errorMessage = 'Import failed - incorrect archive password';
         } else {
           errorMessage = 'Import failed - archive may be password protected';
@@ -490,8 +543,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     } else {
       // Handle regular file import
-      await _viewModel.performImport(file);
-      importedNoteId = 'success'; // placeholder for success check
+      final result = await _viewModel.performImport(file);
+      importedNoteId = result.isSuccess ? result.value ?? 'success' : null;
+      if (!result.isSuccess) errorMessage = result.message;
     }
 
     if (!mounted) return;
@@ -588,8 +642,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
 
     // Don't dispose controller here - it will be garbage collected
-    // If result is empty string (from Skip or empty input), treat as no password
-    return result?.isEmpty == true ? null : result;
+    // Null means Cancel; an empty string is an explicit no-password import.
+    return result;
   }
 
   Future<void> _persistSetting(
@@ -803,9 +857,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_shutdownStarted) {
-      return Scaffold(body: Center(child: Text(_shutdownMessage)));
-    }
+    // These ancestors remain present before and during closing. Replacing the
+    // editor would dispose listeners still in Flutter's exit-request snapshot.
+    return AbsorbPointer(
+      absorbing: _shutdownStarted,
+      child: ExcludeFocus(
+        excluding: _shutdownStarted,
+        child: _buildDashboard(context),
+      ),
+    );
+  }
+
+  Widget _buildDashboard(BuildContext context) {
     final theme = Theme.of(context);
     return ListenableBuilder(
       listenable: _viewModel,
@@ -828,17 +891,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               final isDesktop = constraints.maxWidth > 800;
               return Scaffold(
                 resizeToAvoidBottomInset: true,
-                bottomNavigationBar: _viewModel.supportsExtendedNoteOperations
-                    ? null
-                    : const SafeArea(
-                        child: Padding(
-                          padding: EdgeInsets.all(8),
-                          child: Text(
-                            'Storage preview: attachments, password changes, import, export and Delete are unavailable.',
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      ),
                 appBar: isDesktop
                     ? null
                     : AppBar(
@@ -869,10 +921,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         },
                         onOpenFolder: _handleOpenFolder,
                         onDelete: _handleDelete,
-                        onNewNote: () {
-                          _viewModel.reset();
-                          Navigator.pop(context);
-                        },
+                        onNewNote: () =>
+                            unawaited(_handleNewNote(closeDrawer: true)),
                         onImportNote: _handleImport,
                         onSettings: () {
                           Navigator.pop(context);
@@ -895,7 +945,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             onFileSelected: (path) => _viewModel.loadNote(path),
                             onOpenFolder: _handleOpenFolder,
                             onDelete: _handleDelete,
-                            onNewNote: _viewModel.reset,
+                            onNewNote: () => unawaited(_handleNewNote()),
                             onImportNote: _handleImport,
                             onSettings: () => _showMasterSettings(context),
                             onRefresh: _viewModel.loadRecentFiles,

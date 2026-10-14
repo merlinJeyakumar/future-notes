@@ -32,6 +32,15 @@ void main() {
       );
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
+      if (kind == DraftDecisionKind.activeAttachments) {
+        expect(find.text('Keep editing'), findsOneWidget);
+        expect(find.text('Cancel & wait'), findsOneWidget);
+        expect(find.text('Discard'), findsNothing);
+        await tester.tap(find.text('Keep editing'));
+        await tester.pumpAndSettle();
+        expect(chosen, DraftDecision.cancel);
+        return;
+      }
       expect(find.text('Cancel'), findsOneWidget);
       expect(
         find.text('Discard'),

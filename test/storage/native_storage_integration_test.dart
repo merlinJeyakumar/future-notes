@@ -10,6 +10,8 @@ import 'package:flutter_application_1/core/storage/owned_app_services.dart';
 import 'package:flutter_application_1/core/storage/owned_note_persistence.dart';
 import 'package:flutter_application_1/core/storage/storage_environment.dart';
 import 'package:flutter_application_1/core/storage/storage_owner_worker.dart';
+import 'package:flutter_application_1/core/storage/recoverable_store.dart';
+import 'package:flutter_application_1/core/storage/native_storage_primitives.dart';
 import 'package:flutter_application_1/core/storage/validation_app_services.dart';
 import 'package:flutter_application_1/features/dashboard/viewmodels/content_viewmodel.dart';
 
@@ -118,7 +120,7 @@ void main() {
           await current.settings.getSettingsFilePath(),
           configuration.path,
         );
-        expect(current.files.supportsLibrarySwitch, isFalse);
+        expect(current.files.supportsLibrarySwitch, isTrue);
         final reference = await current.files.newNoteReference(
           'synthetic-native',
         );
@@ -171,7 +173,71 @@ void main() {
       },
     );
 
-    test('a recovered settings path mismatch retains existing bytes', () async {
+    test(
+      'verified settings rollback restores the previous selected library before startup',
+      () async {
+        final next = p.join(run.path, 'interrupted-selected-library');
+        await configuration.parent.create(recursive: true);
+        await configuration.writeAsString(
+          jsonEncode({'customDataPath': library}),
+          flush: true,
+        );
+        final previous = await NativeStoragePrimitives(
+          environment,
+        ).captureRevision(configuration.path);
+        final candidate = File(p.join(library, 'synthetic-settings-candidate'));
+        await candidate.writeAsString(
+          jsonEncode({'customDataPath': next}),
+          flush: true,
+        );
+        final opened = await RecoverableStore.open(
+          root: library,
+          environment: environment,
+          faultHook: (point, _) async {
+            if (point == CommitBoundary.published)
+              throw StateError('synthetic interruption');
+          },
+        );
+        expect(opened.isSuccess, isTrue);
+        final store = opened.value!;
+        try {
+          expect(
+            (await store.commit(
+              target: 'settings.json',
+              expected: previous,
+              source: CommitFileSource(
+                candidate.path,
+                await candidate.length(),
+              ),
+            )).outcome,
+            OperationOutcome.recoveryRequired,
+          );
+        } finally {
+          await store.close();
+        }
+        expect(
+          jsonDecode(await configuration.readAsString())['customDataPath'],
+          next,
+        );
+        final current = OwnedAppServices(
+          environment: StorageEnvironment.recoverable(
+            dataRoot: next,
+            settingsFile: configuration.path,
+          ),
+        );
+        services = current;
+        final initialized = await current.initialize();
+        expect(initialized.isSuccess, isTrue, reason: initialized.message);
+        expect(await current.settings.getUserDataPath(), library);
+        expect((await current.files.currentLibrary()).root, library);
+        expect(
+          jsonDecode(await configuration.readAsString())['customDataPath'],
+          library,
+        );
+      },
+    );
+
+    test('unrecovered settings path mismatch retains existing bytes', () async {
       await configuration.parent.create(recursive: true);
       final source = jsonEncode({
         'customDataPath': p.join(run.path, 'other-library'),
@@ -216,7 +282,7 @@ void main() {
     });
 
     test(
-      'unfinished entry points reject before draft mutation and I/O',
+      'new draft protection stays in memory until explicit Save; invalid inputs perform no writes',
       () async {
         final current = await initialize();
         final editor = ContentViewModel(
@@ -228,28 +294,28 @@ void main() {
         try {
           editor.titleController.text = 'Synthetic retained draft';
           final revision = editor.draftSession.editRevision;
-          editor.setPassword('synthetic-only');
-          editor.clearPassword();
+          expect(
+            (await editor.setPassword('synthetic-only')).isSuccess,
+            isTrue,
+          );
+          expect((await editor.clearPassword()).isSuccess, isTrue);
           expect(
             await editor.removePassword(password: 'synthetic-only'),
             isFalse,
           );
           expect(
             await editor.changePassword('synthetic-only'),
-            contains('unavailable'),
+            contains('No active password'),
           );
           await editor.pickAttachment();
-          await editor.performImport(
+          final invalidImport = await editor.performImport(
             PlatformFile(name: 'synthetic.txt', size: 0),
           );
           await editor.deleteNote('note_synthetic');
           expect(editor.titleController.text, 'Synthetic retained draft');
-          expect(editor.draftSession.editRevision, revision);
+          expect(editor.draftSession.editRevision, revision + 2);
           expect(editor.isPasswordSet, isFalse);
-          expect(
-            editor.operationResultNotifier.value!.outcome,
-            OperationOutcome.rejectedInput,
-          );
+          expect(invalidImport.outcome, OperationOutcome.rejectedInput);
           expect(await current.files.getRecentFiles(), isEmpty);
         } finally {
           editor.dispose();

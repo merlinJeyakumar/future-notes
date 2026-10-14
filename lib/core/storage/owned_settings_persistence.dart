@@ -28,6 +28,9 @@ class OwnedSettingsPersistence {
   bool _closed = false;
   final _temporarySources = <Directory>{};
   bool get cleanupPending => _temporarySources.isNotEmpty;
+  bool get settingsRestored =>
+      _root != null &&
+      (owner.recoveryFor(_root!)?.restoredTargets.contains(_target) ?? false);
 
   String get _target => p.basename(environment.settingsFile!);
 

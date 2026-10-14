@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'operation_result.dart';
 
 enum ShutdownPhase { watchers, storage, complete, failed }
@@ -20,6 +22,26 @@ class ShutdownSequence {
   ShutdownPhase _phase = ShutdownPhase.watchers;
 
   ShutdownPhase get phase => _phase;
+
+  /// Warn about latency without cancelling the native exit handshake. A second
+  /// exit request is unnecessary when the original request is still awaiting us.
+  Future<OperationResult<void>> closeForExit({
+    required void Function() onSlow,
+    Duration slowAfter = const Duration(seconds: 10),
+  }) async {
+    final warning = Timer(slowAfter, () {
+      try {
+        onSlow();
+      } catch (_) {
+        // Presentation cannot change the cleanup result.
+      }
+    });
+    try {
+      return await close();
+    } finally {
+      warning.cancel();
+    }
+  }
 
   Future<OperationResult<void>> close() {
     if (_closed) {

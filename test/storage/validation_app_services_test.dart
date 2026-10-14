@@ -229,6 +229,18 @@ void main() {
 class _RuntimeOwner implements StorageOwner {
   _RuntimeOwner(this.delegate);
   final StorageOwner delegate;
+  @override
+  Future<OperationResult<DeletionReport>> delete(
+    StorageOwnerRoot owner, {
+    required String target,
+    required StorageRevision expected,
+    String? attachmentDirectory,
+  }) => delegate.delete(
+    owner,
+    target: target,
+    expected: expected,
+    attachmentDirectory: attachmentDirectory,
+  );
   final opened = <String>[];
   final releases = <String>[];
   String? failReleaseRoot;

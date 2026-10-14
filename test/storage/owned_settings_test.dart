@@ -25,6 +25,7 @@ void main() {
   late List<SettingsService> services;
   late int documentsRequests;
   late List<File> cleanupObstructions;
+  late List<StorageOwnerWorker> probeWorkers;
 
   setUp(() async {
     run = await Directory.systemTemp.createTemp('future-notes-validation-');
@@ -39,6 +40,7 @@ void main() {
     owner = ControlledOwner(worker);
     documentsRequests = 0;
     cleanupObstructions = [];
+    probeWorkers = [];
     services = [];
     settings = SettingsService.withStorage(
       storage: environment,
@@ -66,11 +68,21 @@ void main() {
       service.themeModeNotifier.dispose();
     }
     expect((await worker.close()).isSuccess, isTrue);
+    for (final probe in probeWorkers) {
+      expect((await probe.close()).isSuccess, isTrue);
+    }
     expect(documentsRequests, 0);
     await deleteValidationRun(run);
   });
 
   File getSettingsFile() => File(environment.settingsFile!);
+
+  Future<StorageOwnerWorker> independentOwner() async {
+    final started = await StorageOwnerWorker.start(environment: environment);
+    expect(started.isSuccess, isTrue, reason: started.message);
+    probeWorkers.add(started.value!);
+    return started.value!;
+  }
 
   Future<void> fixture(String content) async {
     final file = getSettingsFile();
@@ -348,9 +360,10 @@ void main() {
 
   test('settings lease conflict cannot fall back to a direct write', () async {
     await settings.init();
+    final probe = await independentOwner();
     final second = SettingsService.withStorage(
       storage: environment,
-      storageOwner: worker,
+      storageOwner: probe,
     );
     services.add(second);
     await expectLater(
@@ -567,6 +580,7 @@ void main() {
   test(
     'thrown settings release error is sanitized and remains retryable',
     () async {
+      final probe = await independentOwner();
       await settings.init();
       final library = await worker.openRoot(environment.dataRoot!);
       expect(library.isSuccess, isTrue);
@@ -588,7 +602,7 @@ void main() {
         ),
       );
       expect(
-        (await worker.openRoot(getSettingsFile().parent.path)).outcome,
+        (await probe.openRoot(getSettingsFile().parent.path)).outcome,
         OperationOutcome.conflict,
       );
       expect(
@@ -596,9 +610,9 @@ void main() {
         isTrue,
       );
       await settings.closePersistence();
-      final reacquired = await worker.openRoot(getSettingsFile().parent.path);
+      final reacquired = await probe.openRoot(getSettingsFile().parent.path);
       expect(reacquired.isSuccess, isTrue);
-      expect((await worker.releaseRoot(reacquired.value!)).isSuccess, isTrue);
+      expect((await probe.releaseRoot(reacquired.value!)).isSuccess, isTrue);
       expect((await worker.releaseRoot(library.value!)).isSuccess, isTrue);
     },
   );
@@ -606,6 +620,7 @@ void main() {
   test(
     'typed settings release failure retains its lease until close retry',
     () async {
+      final probe = await independentOwner();
       await settings.init();
       owner.failRelease = OperationOutcome.ioFailure;
       await expectLater(
@@ -613,7 +628,7 @@ void main() {
         throwsA(failure(OperationOutcome.ioFailure)),
       );
       expect(
-        (await worker.openRoot(getSettingsFile().parent.path)).outcome,
+        (await probe.openRoot(getSettingsFile().parent.path)).outcome,
         OperationOutcome.conflict,
       );
       await expectLater(
@@ -622,9 +637,9 @@ void main() {
       );
       owner.failRelease = null;
       await settings.closePersistence();
-      final reacquired = await worker.openRoot(getSettingsFile().parent.path);
+      final reacquired = await probe.openRoot(getSettingsFile().parent.path);
       expect(reacquired.isSuccess, isTrue);
-      expect((await worker.releaseRoot(reacquired.value!)).isSuccess, isTrue);
+      expect((await probe.releaseRoot(reacquired.value!)).isSuccess, isTrue);
       expect(worker.isReady, isTrue);
     },
   );
@@ -633,6 +648,18 @@ void main() {
 class ControlledOwner implements StorageOwner {
   ControlledOwner(this.delegate);
   final StorageOwner delegate;
+  @override
+  Future<OperationResult<DeletionReport>> delete(
+    StorageOwnerRoot owner, {
+    required String target,
+    required StorageRevision expected,
+    String? attachmentDirectory,
+  }) => delegate.delete(
+    owner,
+    target: target,
+    expected: expected,
+    attachmentDirectory: attachmentDirectory,
+  );
   int opens = 0;
   int revisions = 0;
   int commits = 0;

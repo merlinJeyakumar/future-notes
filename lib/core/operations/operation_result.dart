@@ -15,6 +15,9 @@ class OperationResult<T> {
 
   const OperationResult.failure(this.outcome, this.message) : value = null;
 
+  /// A failed operation can still report irreversible partial progress.
+  const OperationResult.partial(this.outcome, this.message, this.value);
+
   final OperationOutcome outcome;
   final T? value;
   final String? message;

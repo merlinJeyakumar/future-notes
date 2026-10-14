@@ -18,11 +18,14 @@ import 'package:uuid/uuid.dart';
 import 'package:code_text_field/code_text_field.dart';
 import 'package:highlight/languages/xml.dart'; // XML handles HTML highlighting
 import 'dart:typed_data';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/settings_service.dart';
 import '../services/pack_service.dart';
+import '../services/streaming_pack_service.dart';
+import '../../../core/storage/external_file_export.dart';
 import '../../../core/operations/operation_result.dart';
 import '../models/draft_session.dart';
 import '../models/draft_transition.dart';
@@ -30,6 +33,9 @@ import '../models/note_envelope.dart' show DecodedNote;
 import '../services/note_codec.dart';
 import '../../../core/storage/note_reference.dart';
 import '../../../core/storage/owned_note_persistence.dart';
+import '../../../core/storage/attachment_transform_worker.dart';
+import '../../../core/storage/streaming_file_cipher.dart';
+import '../models/attachment_job.dart';
 import '../../../core/storage/library_watch.dart';
 import '../../../core/storage/owned_settings_persistence.dart';
 import 'package:path/path.dart' as p;
@@ -91,12 +97,97 @@ class ContentViewModel extends BaseViewModel {
   String _observedTitle = 'New Note';
   Object? _observedRichDelta;
   NoteModel? _storedNote;
+  String? _retainedPlainBody;
   NoteReference? _noteReference;
   String _draftNoteId = const Uuid().v4();
   int? _draftTimestamp;
   Map<String, dynamic> _retainedMetadata = {};
   NoteEnvelopeKind _envelopeKind = NoteEnvelopeKind.appEncrypted;
   Future<void> _saveTail = Future<void>.value();
+  Future<void> _mutationTail = Future.value();
+  int _mutationsPending = 0;
+  final _attachmentWorker = AttachmentTransformWorker();
+  final ValueNotifier<List<AttachmentJobState>> attachmentJobsNotifier =
+      ValueNotifier([]);
+  final Map<String, FileTransformJob> _attachmentTransforms = {};
+  final Map<String, File> _packageCancellationFiles = {};
+  final Map<String, Future<void> Function()> _attachmentRetries = {};
+  final Set<String> _cancelledAttachmentJobs = {};
+  final Set<Future<void>> _activeOwnedJobs = {};
+  final Set<AttachmentJobState> _ownedJobStates = {};
+  bool _bulkAttachmentJob = false;
+  bool _deleting = false;
+  bool _deletingCurrent = false;
+  bool get isDeletingCurrent => _deletingCurrent;
+  final ValueNotifier<List<NoteReference>> pendingDeletionsNotifier =
+      ValueNotifier([]);
+  bool get _usesOwnedMutations =>
+      _fileService is TransactionalNoteFiles &&
+      (_fileService as TransactionalNoteFiles).usesOwnedStorage;
+  bool get usesOwnedStorage => _usesOwnedMutations;
+  bool get hasAttachmentJobs =>
+      attachmentJobsNotifier.value.any((j) => j.progress.value.active);
+
+  Future<T> _mutate<T>(Future<T> Function() action) {
+    final queued = _mutationsPending != 0;
+    _mutationsPending++;
+    // An idle queue starts in the caller's zone rather than joining a completed
+    // future from a different zone (notably Flutter's fake-async test harness).
+    final result = queued
+        ? _mutationTail.then((_) => action())
+        : Future<T>.sync(action);
+    _mutationTail = result.then<void>(
+      (_) {
+        _mutationsPending--;
+      },
+      onError: (Object _, StackTrace __) {
+        _mutationsPending--;
+      },
+    );
+    return result;
+  }
+
+  Future<T> _trackOwnedJob<T>(Future<T> future) {
+    final settled = future.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    _activeOwnedJobs.add(settled);
+    settled.then((_) => _activeOwnedJobs.remove(settled));
+    return future;
+  }
+
+  Future<OperationResult<void>> _resolveOwnerJobs(
+    DraftTransition transition,
+  ) async {
+    if (!hasAttachmentJobs) return const OperationResult.success();
+    final accepted = _activeOwnedJobs.toList();
+    if (attachmentJobsNotifier.value.any(
+      (job) => job.progress.value.phase == AttachmentJobPhase.finalizing,
+    )) {
+      return const OperationResult.failure(
+        OperationOutcome.conflict,
+        'Finishing attachment commit. Wait before continuing.',
+      );
+    }
+    final decision = await _askDraftDecision(
+      DraftDecisionRequest(DraftDecisionKind.activeAttachments, transition),
+    );
+    if (decision != DraftDecision.discard) return _cancelledResult();
+    for (final job in attachmentJobsNotifier.value) {
+      if (job.progress.value.active) {
+        _cancelledAttachmentJobs.add(job.progress.value.id);
+        await _packageCancellationFiles[job.progress.value.id]?.writeAsString(
+          'cancel',
+          flush: true,
+        );
+        await _attachmentTransforms[job.progress.value.id]?.cancel();
+      }
+    }
+    await Future.wait(accepted);
+    return const OperationResult.success();
+  }
+
   final List<_PendingSave> _pendingSaves = [];
   bool _drainingSaves = false;
   final ValueNotifier<OperationResult<void>?> operationResultNotifier =
@@ -112,6 +203,7 @@ class ContentViewModel extends BaseViewModel {
       ValueNotifier([]);
   final ValueNotifier<bool> isLockedNotifier = ValueNotifier(false);
   final ValueNotifier<bool> isAutoSavingNotifier = ValueNotifier(false);
+  final ValueNotifier<bool> isSavingNotifier = ValueNotifier(false);
 
   /// Progress notifier for long-running operations like password change/removal.
   /// Format: "status message" or null when not in progress
@@ -119,6 +211,7 @@ class ContentViewModel extends BaseViewModel {
 
   final Map<String, String> _sessionPasswords = {};
   final Map<String, Uint8List> _attachmentCache = {};
+  final Map<String, Future<Uint8List?>> _previewReads = {};
   bool _isLocked = false;
 
   bool get isLocked => _isLocked;
@@ -130,24 +223,538 @@ class ContentViewModel extends BaseViewModel {
   List<AttachmentModel> get attachments => _attachments;
   bool get isPasswordSet => _currentPassword != null;
   String? get currentFileName => _currentFileName;
+  DateTime? get currentNoteDate {
+    final timestamp = _storedNote?.timestamp;
+    if (timestamp == null) return null;
+    try {
+      return DateTime.fromMillisecondsSinceEpoch(timestamp);
+    } catch (_) {
+      return null;
+    }
+  }
 
   late final CodeController htmlController;
   bool _isHtmlMode = false;
   bool get isHtmlMode => _isHtmlMode;
 
   Future<void> pickAttachment() async {
+    if (_usesOwnedMutations) {
+      return _libraryTask(_pickOwnedAttachment, null);
+    }
     if (!ensureExtendedNoteOperations()) return;
     return _libraryTask(_pickAttachment, null);
   }
 
   Future<T> _libraryTask<T>(Future<T> Function() action, T rejected) async {
-    if (_disposed || _librarySwitching) return rejected;
+    if (_disposed || _librarySwitching || _deleting) return rejected;
     _librarySensitiveJobs++;
     try {
       return await action();
     } finally {
       _librarySensitiveJobs--;
     }
+  }
+
+  Future<void> _pickOwnedAttachment() async {
+    if (_disposed || !_session.canWrite || _isLocked) return;
+    final owner = _session.generation;
+    if (!_session.isPersisted) {
+      final decision = await _askDraftDecision(
+        const DraftDecisionRequest(
+          DraftDecisionKind.firstAttachment,
+          DraftTransition.navigation,
+        ),
+      );
+      if (decision != DraftDecision.save || owner != _session.generation) {
+        return;
+      }
+      if (!(await saveNote(allowEmptyFirstSave: true)).isSuccess) return;
+    }
+    final selection = await _fileService.pickFile();
+    if (_disposed || owner != _session.generation || selection == null) return;
+    final selected = selection.files.single;
+    final path = selected.path;
+    if (path == null) return;
+    _reportResult(await addOwnedAttachment(path, selected.name));
+  }
+
+  AttachmentJobState _newAttachmentJob(
+    String id,
+    String fileName, {
+    bool batch = false,
+    String? originalAttachmentId,
+  }) {
+    final job = AttachmentJobState(
+      AttachmentJobSnapshot(
+        id: id,
+        owner: _session.generation,
+        fileName: fileName,
+        phase: AttachmentJobPhase.queued,
+        batch: batch,
+        originalAttachmentId: originalAttachmentId,
+      ),
+    );
+    _ownedJobStates.add(job);
+    attachmentJobsNotifier.value = [...attachmentJobsNotifier.value, job];
+    return job;
+  }
+
+  void _jobPhase(
+    AttachmentJobState job,
+    AttachmentJobPhase phase, {
+    int bytes = 0,
+    int? total,
+    String? error,
+  }) {
+    if (_disposed) return;
+    final previous = job.progress.value;
+    job.update(
+      AttachmentJobSnapshot(
+        id: previous.id,
+        owner: previous.owner,
+        fileName: previous.fileName,
+        phase: phase,
+        bytes: bytes,
+        total: total,
+        error: error,
+        batch: previous.batch,
+        originalAttachmentId: previous.originalAttachmentId,
+      ),
+    );
+  }
+
+  Future<void> cancelAttachmentJob(String id) async {
+    final jobs = attachmentJobsNotifier.value.where(
+      (j) => j.progress.value.id == id,
+    );
+    if (jobs.isEmpty || !jobs.first.progress.value.cancellable) return;
+    if (jobs.first.progress.value.batch) {
+      for (final job in attachmentJobsNotifier.value.where(
+        (j) => j.progress.value.batch && j.progress.value.active,
+      )) {
+        _cancelledAttachmentJobs.add(job.progress.value.id);
+        await _attachmentTransforms[job.progress.value.id]?.cancel();
+      }
+      return;
+    }
+    _cancelledAttachmentJobs.add(id);
+    await _packageCancellationFiles[id]?.writeAsString('cancel', flush: true);
+    await _attachmentTransforms[id]?.cancel();
+  }
+
+  Future<void> retryAttachmentJob(String id) async {
+    final retry = _attachmentRetries.remove(id);
+    if (retry == null) return;
+    removePendingAttachmentJob(id);
+    await retry();
+  }
+
+  void removePendingAttachmentJob(String id) {
+    final current = attachmentJobsNotifier.value;
+    final match = current.where((job) => job.progress.value.id == id).toList();
+    if (match.isEmpty || match.first.progress.value.active) return;
+    attachmentJobsNotifier.value = current
+        .where((job) => job.progress.value.id != id)
+        .toList();
+    _attachmentRetries.remove(id);
+    // A card may still own the notifier until its next build.
+  }
+
+  Future<OperationResult<CipherFileResult>> _transformAttachment(
+    AttachmentJobState job,
+    StreamingFileSource source,
+    String destination, {
+    required bool decrypt,
+    String? oldPassword,
+    String? newPassword,
+  }) async {
+    final id = job.progress.value.id;
+    if (_cancelledAttachmentJobs.contains(id)) {
+      return const OperationResult.failure(
+        OperationOutcome.cancelled,
+        'Attachment preparation cancelled.',
+      );
+    }
+    final transform = _attachmentWorker.submit(
+      FileTransformRequest(
+        source: source,
+        destination: destination,
+        decryptSource: decrypt,
+        encryptDestination: true,
+        sourcePassword: oldPassword,
+        destinationPassword: newPassword,
+      ),
+      onProgress: (phase, bytes, total) => _jobPhase(
+        job,
+        switch (phase) {
+          'Decrypting' => AttachmentJobPhase.decrypting,
+          'Verifying' => AttachmentJobPhase.verifying,
+          _ => AttachmentJobPhase.encrypting,
+        },
+        bytes: bytes,
+        total: total,
+      ),
+    );
+    _attachmentTransforms[id] = transform;
+    try {
+      return await transform.result;
+    } finally {
+      _attachmentTransforms.remove(id);
+    }
+  }
+
+  NoteSnapshot _generationSnapshot(
+    List<AttachmentModel> attachments,
+    String? password, {
+    required bool changesProtection,
+    Map<String, dynamic>? metadata,
+  }) {
+    _observeRichEdit();
+    final reuseBody =
+        !changesProtection &&
+        _storedNote != null &&
+        !_session.dirtyFields.contains(DraftField.body);
+    return NoteSnapshot(
+      sessionGeneration: _session.generation,
+      editRevision: _session.editRevision + 1,
+      credentialGeneration: _session.credentialGeneration,
+      fileName: _currentFileName,
+      reference: _noteReference,
+      noteId: _storedNote?.id ?? _draftNoteId,
+      title: titleController.text,
+      body: reuseBody
+          ? _storedNote!.content
+          : (changesProtection &&
+                    !_session.dirtyFields.contains(DraftField.body) &&
+                    _retainedPlainBody != null
+                ? _retainedPlainBody!
+                : (_isHtmlMode
+                      ? htmlController.text
+                      : jsonEncode(
+                          quillController.document.toDelta().toJson(),
+                        ))),
+      timestamp:
+          _storedNote?.timestamp ?? (_draftTimestamp ??= _nowMilliseconds()),
+      password: password,
+      envelopeKind: _envelopeKind,
+      metadata: metadata ?? _retainedMetadata,
+      attachments: attachments,
+      reuseStoredBody: reuseBody,
+      attachmentsChanged: true,
+    );
+  }
+
+  Future<OperationResult<void>> addOwnedAttachment(
+    String path,
+    String fileName,
+  ) => _trackOwnedJob(_runOwnedAttachment(path, fileName));
+
+  Future<OperationResult<void>> _runOwnedAttachment(
+    String path,
+    String fileName,
+  ) async {
+    if (!_usesOwnedMutations ||
+        _disposed ||
+        !_session.canWrite ||
+        _isLocked ||
+        !_session.isPersisted ||
+        _deleting ||
+        _librarySwitching ||
+        _libraryResourcesClosing ||
+        _bulkAttachmentJob) {
+      return const OperationResult.failure(
+        OperationOutcome.conflict,
+        'Save the note and finish its active operation first.',
+      );
+    }
+    _bulkAttachmentJob = true;
+    final owner = _session.generation;
+    final credential = _session.credentialGeneration;
+    final password = _currentPassword;
+    final id = const Uuid().v4();
+    final job = _newAttachmentJob(id, fileName);
+    final files = _fileService as TransactionalNoteFiles;
+    Directory? operation;
+    OperationResult<void> result;
+    try {
+      _jobPhase(job, AttachmentJobPhase.preparing);
+      final source = StreamingFileSource(path, await File(path).length());
+      operation = await files.createOperationDirectory(_noteReference!);
+      final staged = p.join(operation.path, '$id.med');
+      final transformed = await _transformAttachment(
+        job,
+        source,
+        staged,
+        decrypt: false,
+        newPassword: password,
+      );
+      if (!transformed.isSuccess) {
+        result = OperationResult.failure(
+          transformed.outcome,
+          transformed.message,
+        );
+      } else {
+        result = await _mutate(() async {
+          if (_disposed ||
+              owner != _session.generation ||
+              credential != _session.credentialGeneration ||
+              _cancelledAttachmentJobs.contains(id)) {
+            return _cancelledResult();
+          }
+          _jobPhase(job, AttachmentJobPhase.finalizing);
+          final attachment = AttachmentModel(
+            id: id,
+            fileName: fileName,
+            size: source.length,
+            mimeType: 'application/octet-stream',
+          );
+          return _saveSnapshot(
+            _generationSnapshot(
+              [..._attachments, attachment],
+              password,
+              changesProtection: false,
+            ),
+            true,
+            generationChange: true,
+            prepared: [
+              PreparedAttachmentFile(
+                id,
+                StreamingFileSource(staged, transformed.value!.length),
+              ),
+            ],
+          );
+        });
+      }
+    } catch (_) {
+      result = const OperationResult.failure(
+        OperationOutcome.ioFailure,
+        'Attachment preparation failed; the note was retained.',
+      );
+    } finally {
+      if (operation != null) {
+        try {
+          await files.removeOperationDirectory(operation);
+        } catch (_) {
+          /* Retain operation sources for manual cleanup. */
+        }
+      }
+      _bulkAttachmentJob = false;
+    }
+    _jobPhase(
+      job,
+      result.isSuccess
+          ? AttachmentJobPhase.completed
+          : result.outcome == OperationOutcome.cancelled
+          ? AttachmentJobPhase.cancelled
+          : AttachmentJobPhase.failed,
+      error: result.message,
+    );
+    if (!result.isSuccess && result.outcome != OperationOutcome.cancelled) {
+      _attachmentRetries[id] = () async {
+        _reportResult(await addOwnedAttachment(path, fileName));
+      };
+    }
+    return result;
+  }
+
+  Future<OperationResult<void>> _changeOwnedProtection(
+    String? password, {
+    String? verifiedOldPassword,
+  }) => _trackOwnedJob(
+    _runOwnedProtection(password, verifiedOldPassword: verifiedOldPassword),
+  );
+
+  Future<OperationResult<void>> _runOwnedProtection(
+    String? password, {
+    String? verifiedOldPassword,
+  }) async {
+    if (_disposed ||
+        !_session.canWrite ||
+        _isLocked ||
+        _bulkAttachmentJob ||
+        _deleting ||
+        hasAttachmentJobs) {
+      return const OperationResult.failure(
+        OperationOutcome.conflict,
+        'Finish the active note operation first.',
+      );
+    }
+    if (verifiedOldPassword != null && !verifyPassword(verifiedOldPassword)) {
+      return const OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        'Incorrect current password.',
+      );
+    }
+    if (!_session.isPersisted) {
+      // A never-saved draft still requires explicit Save; no files exist yet.
+      _currentPassword = password;
+      _recordEdit(DraftField.protection);
+      notifyListeners();
+      return const OperationResult.success();
+    }
+    _bulkAttachmentJob = true;
+    final generation = _session.generation;
+    final credential = _session.credentialGeneration;
+    final previousPassword = _currentPassword;
+    final original = List<AttachmentModel>.of(_attachments);
+    final reference = _noteReference!;
+    final files = _fileService as TransactionalNoteFiles;
+    final prepared = <PreparedAttachmentFile>[];
+    final replacement = <AttachmentModel>[];
+    final jobs = <AttachmentJobState>[
+      _newAttachmentJob(const Uuid().v4(), 'Note protection', batch: true),
+      for (final attachment in original)
+        _newAttachmentJob(
+          const Uuid().v4(),
+          attachment.fileName,
+          batch: true,
+          originalAttachmentId: attachment.id,
+        ),
+    ];
+    Directory? operation;
+    OperationResult<void> result = const OperationResult.success();
+    try {
+      operation = await files.createOperationDirectory(reference);
+      _jobPhase(jobs.first, AttachmentJobPhase.preparing);
+      for (
+        var attachmentIndex = 0;
+        attachmentIndex < original.length;
+        attachmentIndex++
+      ) {
+        final attachment = original[attachmentIndex];
+        if (jobs.any(
+          (job) => _cancelledAttachmentJobs.contains(job.progress.value.id),
+        )) {
+          result = _cancelledResult();
+          break;
+        }
+        final job = jobs[attachmentIndex + 1];
+        final id = job.progress.value.id;
+        _jobPhase(job, AttachmentJobPhase.preparing);
+        final source = await files.attachmentSource(
+          _noteReference ?? reference,
+          attachment.id,
+        );
+        var staged = p.join(operation.path, '$id.med');
+        var transform = await _transformAttachment(
+          job,
+          source,
+          staged,
+          decrypt: true,
+          oldPassword: previousPassword,
+          newPassword: password,
+        );
+        if (!transform.isSuccess &&
+            transform.outcome == OperationOutcome.rejectedInput &&
+            previousPassword != null) {
+          // Legacy mixed-key attachments can use the app key. A retry owns a
+          // fresh output; valid padding alone is never called authentication.
+          staged = p.join(operation.path, '$id.fallback.med');
+          transform = await _transformAttachment(
+            job,
+            source,
+            staged,
+            decrypt: true,
+            newPassword: password,
+          );
+        }
+        if (!transform.isSuccess) {
+          result = OperationResult.failure(
+            transform.outcome,
+            transform.message,
+          );
+          break;
+        }
+        prepared.add(
+          PreparedAttachmentFile(
+            id,
+            StreamingFileSource(staged, transform.value!.length),
+          ),
+        );
+        replacement.add(
+          AttachmentModel(
+            id: id,
+            fileName: attachment.fileName,
+            size: attachment.size,
+            mimeType: attachment.mimeType,
+          ),
+        );
+      }
+      if (result.isSuccess) {
+        result = await _mutate(() async {
+          if (_disposed ||
+              generation != _session.generation ||
+              credential != _session.credentialGeneration ||
+              jobs.any(
+                (job) =>
+                    _cancelledAttachmentJobs.contains(job.progress.value.id),
+              )) {
+            return _cancelledResult();
+          }
+          for (final job in jobs) {
+            _jobPhase(job, AttachmentJobPhase.finalizing);
+          }
+          final metadata = <String, dynamic>{..._retainedMetadata};
+          final oldFields = metadata['attachments'];
+          if (oldFields is List &&
+              oldFields.isNotEmpty &&
+              oldFields.first is String) {
+            metadata['attachments'] = replacement.map((a) => a.id).toList();
+          } else {
+            final byId = <String, Map<String, dynamic>>{};
+            if (oldFields is List) {
+              for (final fields in oldFields) {
+                if (fields is Map<String, dynamic> && fields['id'] is String) {
+                  byId[fields['id'] as String] = fields;
+                }
+              }
+            }
+            metadata['attachments'] = [
+              for (var i = 0; i < replacement.length; i++)
+                {...?byId[original[i].id], ...replacement[i].toJson()},
+            ];
+          }
+          return _saveSnapshot(
+            _generationSnapshot(
+              replacement,
+              password,
+              changesProtection: true,
+              metadata: metadata,
+            ),
+            true,
+            generationChange: true,
+            changesProtection: true,
+            prepared: prepared,
+          );
+        });
+      }
+    } catch (_) {
+      result = const OperationResult.failure(
+        OperationOutcome.ioFailure,
+        'Protection change failed; the old credentials and attachments were retained.',
+      );
+    } finally {
+      if (operation != null) {
+        try {
+          await files.removeOperationDirectory(operation);
+        } catch (_) {
+          /* Retain operation sources for manual cleanup. */
+        }
+      }
+      _bulkAttachmentJob = false;
+    }
+    for (final job in jobs) {
+      _jobPhase(
+        job,
+        result.isSuccess
+            ? AttachmentJobPhase.completed
+            : result.outcome == OperationOutcome.cancelled
+            ? AttachmentJobPhase.cancelled
+            : AttachmentJobPhase.failed,
+        error: result.message,
+      );
+    }
+    return _reportResult(result);
   }
 
   Future<void> _pickAttachment() async {
@@ -295,8 +902,136 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<void> exportAttachment(AttachmentModel attachment) async {
+    if (_usesOwnedMutations) {
+      _reportResult(await _trackOwnedJob(_exportOwnedAttachment(attachment)));
+      return;
+    }
     if (!ensureExtendedNoteOperations()) return;
     return _libraryTask(() => _exportAttachment(attachment), null);
+  }
+
+  Future<OperationResult<void>> _exportOwnedAttachment(
+    AttachmentModel attachment,
+  ) async {
+    final ready = await _resolveOwnerJobs(DraftTransition.navigation);
+    if (!ready.isSuccess) return ready;
+    if (_bulkAttachmentJob ||
+        _disposed ||
+        _isLocked ||
+        _noteReference == null ||
+        _deleting) {
+      return _cancelledResult();
+    }
+    _bulkAttachmentJob = true;
+    final job = _newAttachmentJob(const Uuid().v4(), attachment.fileName);
+    final files = _fileService as TransactionalNoteFiles;
+    String? candidate;
+    OperationResult<void> result;
+    try {
+      final source = await files.attachmentSource(
+        _noteReference!,
+        attachment.id,
+      );
+      final destination = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save Attachment',
+        fileName: attachment.fileName,
+      );
+      if (destination == null) {
+        result = const OperationResult.failure(
+          OperationOutcome.cancelled,
+          'Export cancelled.',
+        );
+      } else {
+        await _verifyExportDestination(destination);
+        final expected = await ExternalFileExport.review(destination);
+        candidate = ExternalFileExport.candidatePath(destination);
+        final id = job.progress.value.id;
+        final transform = _attachmentWorker.submit(
+          FileTransformRequest(
+            source: source,
+            destination: candidate,
+            decryptSource: true,
+            encryptDestination: false,
+            sourcePassword: _currentPassword,
+          ),
+          onProgress: (phase, bytes, total) => _jobPhase(
+            job,
+            phase == 'Verifying'
+                ? AttachmentJobPhase.verifying
+                : AttachmentJobPhase.decrypting,
+            bytes: bytes,
+            total: total,
+          ),
+        );
+        _attachmentTransforms[id] = transform;
+        var transformed = await transform.result;
+        _attachmentTransforms.remove(id);
+        if (!transformed.isSuccess &&
+            transformed.outcome == OperationOutcome.rejectedInput &&
+            _currentPassword != null &&
+            !_cancelledAttachmentJobs.contains(id)) {
+          candidate = ExternalFileExport.candidatePath(destination);
+          final fallback = _attachmentWorker.submit(
+            FileTransformRequest(
+              source: source,
+              destination: candidate,
+              decryptSource: true,
+              encryptDestination: false,
+            ),
+            onProgress: (phase, bytes, total) => _jobPhase(
+              job,
+              phase == 'Verifying'
+                  ? AttachmentJobPhase.verifying
+                  : AttachmentJobPhase.decrypting,
+              bytes: bytes,
+              total: total,
+            ),
+          );
+          _attachmentTransforms[id] = fallback;
+          transformed = await fallback.result;
+          _attachmentTransforms.remove(id);
+        }
+        if (!transformed.isSuccess) {
+          result = OperationResult.failure(
+            transformed.outcome,
+            transformed.message,
+          );
+        } else if (_cancelledAttachmentJobs.contains(id)) {
+          result = _cancelledResult();
+        } else {
+          _jobPhase(job, AttachmentJobPhase.finalizing);
+          result = await ExternalFileExport.publish(
+            candidate: candidate,
+            destination: destination,
+            expected: expected,
+          );
+        }
+      }
+    } catch (_) {
+      result = const OperationResult.failure(
+        OperationOutcome.ioFailure,
+        'Attachment export failed; the source was retained.',
+      );
+    } finally {
+      if (candidate != null && await File(candidate).exists()) {
+        try {
+          await File(candidate).delete();
+        } catch (_) {
+          /* Retain owned export candidate. */
+        }
+      }
+      _bulkAttachmentJob = false;
+    }
+    _jobPhase(
+      job,
+      result.isSuccess
+          ? AttachmentJobPhase.completed
+          : result.outcome == OperationOutcome.cancelled
+          ? AttachmentJobPhase.cancelled
+          : AttachmentJobPhase.failed,
+      error: result.message,
+    );
+    return result;
   }
 
   Future<void> _exportAttachment(AttachmentModel attachment) async {
@@ -324,17 +1059,83 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
-  void removeAttachment(String attachmentId) {
-    if (!ensureExtendedNoteOperations()) return;
-    if (_librarySwitching) return;
-    if (_disposed || !_session.canWrite || _isLocked) return;
-    if (!_attachments.any((a) => a.id == attachmentId)) return;
+  Future<void> _verifyExportDestination(String destination) async {
+    if (!p.isAbsolute(destination) || p.split(destination).contains('..')) {
+      throw const FormatException(
+        'An absolute export destination is required.',
+      );
+    }
+    final settings = await _settings.getSettingsFilePath();
+    if (p.equals(settings, destination))
+      throw const FormatException(
+        'Export cannot replace application settings.',
+      );
+    final roots = <String>{
+      await _fileService.getUserDataPath(),
+      p.dirname(settings),
+      if (_settings.storageEnvironment.dataRoot != null)
+        _settings.storageEnvironment.dataRoot!,
+      if (_noteReference != null) _noteReference!.binding.root,
+    };
+    for (final root in roots) {
+      if (!p.isWithin(root, destination)) continue;
+      final relative = p.split(p.relative(destination, from: root));
+      if (relative.any((part) => part.startsWith('.future-notes-')) ||
+          (relative.first.startsWith('note_') && relative.length > 1) ||
+          (relative.length == 1 &&
+              p.extension(destination).toLowerCase() == '.enc')) {
+        throw const FormatException(
+          'Choose an export destination outside managed note objects.',
+        );
+      }
+    }
+  }
+
+  Future<OperationResult<void>> removeAttachment(String attachmentId) {
+    if (_usesOwnedMutations) {
+      if (_disposed ||
+          !_session.canWrite ||
+          _isLocked ||
+          hasAttachmentJobs ||
+          _deleting) {
+        return Future.value(_cancelledResult());
+      }
+      final generation = _session.generation;
+      return _libraryTask(
+        () => _mutate(() async {
+          if (_disposed ||
+              generation != _session.generation ||
+              !_session.canWrite ||
+              _isLocked ||
+              !_attachments.any((a) => a.id == attachmentId))
+            return _cancelledResult();
+          final result = await _saveSnapshot(
+            _generationSnapshot(
+              _attachments.where((a) => a.id != attachmentId).toList(),
+              _currentPassword,
+              changesProtection: false,
+            ),
+            true,
+            generationChange: true,
+          );
+          return _reportResult(result);
+        }),
+        _cancelledResult(),
+      );
+    }
+    if (!ensureExtendedNoteOperations() ||
+        _librarySwitching ||
+        _disposed ||
+        !_session.canWrite ||
+        _isLocked ||
+        !_attachments.any((a) => a.id == attachmentId))
+      return Future.value(_cancelledResult());
     _attachments.removeWhere((a) => a.id == attachmentId);
     attachmentsNotifier.value = List.from(_attachments);
     _attachmentCache.remove(attachmentId);
     // notifyListeners();
     _recordEdit(DraftField.attachments);
-    // TODO: Physically delete the attachment file to clean up storage
+    return Future.value(const OperationResult.success());
   }
 
   // region Initialization
@@ -461,8 +1262,9 @@ class ContentViewModel extends BaseViewModel {
         final deltaList = await compute(_htmlToDeltaTask, html);
         if (_disposed ||
             owner != _session.generation ||
-            revision != _session.editRevision)
+            revision != _session.editRevision) {
           return;
+        }
         final document = Document.fromJson(deltaList);
         _publishing = true;
         try {
@@ -477,8 +1279,9 @@ class ContentViewModel extends BaseViewModel {
         _observeRichEdit();
         if (_disposed ||
             owner != _session.generation ||
-            revision != _session.editRevision)
+            revision != _session.editRevision) {
           return;
+        }
         _publishing = true;
         try {
           htmlController.text = html;
@@ -617,9 +1420,12 @@ class ContentViewModel extends BaseViewModel {
   /// Settings commit is the publication boundary. Preparation never consumes
   /// Discard; an unexpected edit during commit retains its exact old reference.
   Future<OperationResult<void>> switchLibrary(String root) async {
+    final jobs = await _resolveOwnerJobs(DraftTransition.library);
+    if (!jobs.isSuccess) return _reportResult(jobs);
     if (_disposed ||
         _libraryResourcesClosing ||
         _librarySwitching ||
+        _deleting ||
         _librarySensitiveJobs != 0 ||
         _activeLoads != 0 ||
         _decisionPending) {
@@ -849,6 +1655,12 @@ class ContentViewModel extends BaseViewModel {
     try {
       await _settings.init();
       if (_disposed) return;
+      if (_usesOwnedMutations) {
+        final pending = await (_fileService as TransactionalNoteFiles)
+            .pendingDeletions();
+        if (_disposed) return;
+        pendingDeletionsNotifier.value = pending;
+      }
       await _initFileWatcher();
       if (_disposed) return;
       await loadRecentFiles();
@@ -976,11 +1788,12 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<OperationResult<void>> loadNote(String fileName) async {
-    if (_disposed)
+    if (_disposed) {
       return const OperationResult.failure(
         OperationOutcome.cancelled,
         'Editor was closed.',
       );
+    }
     if (fileName == _currentFileName && !_loading) {
       return const OperationResult.success();
     }
@@ -1007,17 +1820,19 @@ class ContentViewModel extends BaseViewModel {
           owner != _session.generation) {
         return _cancelledResult();
       }
-      if (content == null)
+      if (content == null) {
         return _reportResult(
           const OperationResult.failure(
             OperationOutcome.ioFailure,
             'The selected note could not be read.',
           ),
         );
+      }
       final prospective = await _decodeNote(content);
       final note = prospective.note;
       final resolvedReference = reference!.withModelId(note.id);
       String? password;
+      String? plainBody;
       var locked = note.isLocked;
       late Document document;
       if (locked) {
@@ -1028,6 +1843,7 @@ class ContentViewModel extends BaseViewModel {
             password: cached,
           );
           if (decrypted.isSuccess) {
+            plainBody = decrypted.value!;
             document = _prepareDocument(decrypted.value!);
             password = cached;
             locked = false;
@@ -1038,6 +1854,7 @@ class ContentViewModel extends BaseViewModel {
           document = Document();
         }
       } else {
+        plainBody = note.content;
         document = _prepareDocument(note.content);
       }
       // Edits made while reading must remain owned by the previous draft.
@@ -1055,6 +1872,7 @@ class ContentViewModel extends BaseViewModel {
         _currentFileName = fileName;
         _currentPassword = password;
         _storedNote = note;
+        _retainedPlainBody = plainBody;
         _noteReference = resolvedReference;
         _retainedMetadata = prospective.metadata;
         _envelopeKind = prospective.kind;
@@ -1092,8 +1910,11 @@ class ContentViewModel extends BaseViewModel {
         ),
       );
     } on FormatException {
-      if (_disposed || request != _loadRequest || owner != _session.generation)
+      if (_disposed ||
+          request != _loadRequest ||
+          owner != _session.generation) {
         return _cancelledResult();
+      }
       return _reportResult(
         const OperationResult.failure(
           OperationOutcome.rejectedInput,
@@ -1101,8 +1922,11 @@ class ContentViewModel extends BaseViewModel {
         ),
       );
     } catch (_) {
-      if (_disposed || request != _loadRequest || owner != _session.generation)
+      if (_disposed ||
+          request != _loadRequest ||
+          owner != _session.generation) {
         return _cancelledResult();
+      }
       return _reportResult(
         const OperationResult.failure(
           OperationOutcome.ioFailure,
@@ -1151,6 +1975,14 @@ class ContentViewModel extends BaseViewModel {
   Future<OperationResult<DraftTransitionPermit>> prepareTransition(
     DraftTransition transition,
   ) async {
+    // Metadata removal and other queued publications must settle before a
+    // navigation decision captures its revision. Preparation is outside this
+    // queue and has its own explicit Cancel & wait decision below.
+    if (_mutationsPending != 0) await _mutationTail;
+    final jobs = await _resolveOwnerJobs(transition);
+    if (!jobs.isSuccess) {
+      return OperationResult.failure(jobs.outcome, jobs.message);
+    }
     if (_librarySwitching &&
         (transition != DraftTransition.library || _libraryCutover)) {
       return const OperationResult.failure(
@@ -1305,28 +2137,56 @@ class ContentViewModel extends BaseViewModel {
   // endregion
 
   // region Password & Locking
-  void setPassword(String password) {
-    if (!ensureExtendedNoteOperations()) return;
-    if (_librarySwitching) return;
-    if (_disposed || !_session.canWrite || _isLocked) return;
+  Future<OperationResult<void>> setPassword(String password) {
+    if (_usesOwnedMutations) {
+      return _libraryTask(
+        () => _changeOwnedProtection(password),
+        _cancelledResult(),
+      );
+    }
+    if (!ensureExtendedNoteOperations() ||
+        _librarySwitching ||
+        _disposed ||
+        !_session.canWrite ||
+        _isLocked) {
+      return Future.value(_cancelledResult());
+    }
     _currentPassword = password;
     _recordEdit(DraftField.protection);
     notifyListeners();
+    return Future.value(const OperationResult.success());
   }
 
-  void clearPassword() {
-    if (!ensureExtendedNoteOperations()) return;
-    if (_librarySwitching) return;
-    if (_disposed || !_session.canWrite || _isLocked) return;
+  Future<OperationResult<void>> clearPassword() {
+    if (_usesOwnedMutations) {
+      return _libraryTask(
+        () => _changeOwnedProtection(null),
+        _cancelledResult(),
+      );
+    }
+    if (!ensureExtendedNoteOperations() ||
+        _librarySwitching ||
+        _disposed ||
+        !_session.canWrite ||
+        _isLocked) {
+      return Future.value(_cancelledResult());
+    }
     _currentPassword = null;
     _recordEdit(DraftField.protection);
     notifyListeners();
+    return Future.value(const OperationResult.success());
   }
 
   /// Removes password protection from the current note.
   /// Decrypts all attachments and saves the note without encryption.
   /// If [password] is provided, it will be used instead of the stored password.
   Future<bool> removePassword({String? password}) async {
+    if (_usesOwnedMutations) {
+      return (await _libraryTask(
+        () => _changeOwnedProtection(null, verifiedOldPassword: password),
+        _cancelledResult(),
+      )).isSuccess;
+    }
     if (!ensureExtendedNoteOperations()) return false;
     return _libraryTask(() => _removePassword(password: password), false);
   }
@@ -1439,8 +2299,9 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<bool> _unlockNote(String password) async {
-    if (_disposed || _currentFileName == null || _storedNote == null)
+    if (_disposed || _currentFileName == null || _storedNote == null) {
       return false;
+    }
     if (!_isLocked) return _currentPassword == password;
     final owner = _session.generation;
     final request = ++_unlockRequest;
@@ -1462,6 +2323,7 @@ class ContentViewModel extends BaseViewModel {
       try {
         _currentPassword = password;
         _sessionPasswords[_currentFileName!] = password;
+        _retainedPlainBody = decryptedContent.value!;
         _session = DraftSession(
           generation: ++_nextSessionGeneration,
           persistedRevision: _session.persistedRevision,
@@ -1517,8 +2379,9 @@ class ContentViewModel extends BaseViewModel {
     if (!resolved.isSuccess) return _reportResult(_transitionFailure(resolved));
     if (_disposed ||
         owner != _session.generation ||
-        !isTransitionPermitCurrent(resolved.value!))
+        !isTransitionPermitCurrent(resolved.value!)) {
       return _cancelledResult();
+    }
     if (resolved.value!.discardChanges && !_session.isPersisted) {
       return reset(discardChanges: true);
     }
@@ -1538,6 +2401,7 @@ class ContentViewModel extends BaseViewModel {
     try {
       _sessionPasswords.remove(_currentFileName);
       _currentPassword = null;
+      _retainedPlainBody = null;
       _isLocked = true;
       _session = DraftSession(
         generation: ++_nextSessionGeneration,
@@ -1568,12 +2432,56 @@ class ContentViewModel extends BaseViewModel {
     String newPassword, {
     String? oldPassword,
   }) async {
-    if (!ensureExtendedNoteOperations())
+    if (_usesOwnedMutations) {
+      if (_currentPassword == null) return 'Error: No active password';
+      final result = await _libraryTask(
+        () => _changeOwnedProtection(
+          newPassword,
+          verifiedOldPassword: oldPassword,
+        ),
+        _cancelledResult(),
+      );
+      _reportResult(result);
+      return result.isSuccess
+          ? 'Password changed successfully'
+          : result.message ?? 'Password change failed.';
+    }
+    if (!ensureExtendedNoteOperations()) {
       return 'Password changes are unavailable in this storage preview.';
+    }
     return _libraryTask(
       () => _changePassword(newPassword, oldPassword: oldPassword),
       'Library switching is in progress.',
     );
+  }
+
+  Future<OperationResult<void>> changePasswordResult(
+    String password, {
+    String? oldPassword,
+  }) async {
+    if (_usesOwnedMutations) {
+      if (_currentPassword == null) {
+        return _reportResult(
+          const OperationResult.failure(
+            OperationOutcome.rejectedInput,
+            'No active password.',
+          ),
+        );
+      }
+      return _reportResult(
+        await _libraryTask(
+          () => _changeOwnedProtection(
+            password,
+            verifiedOldPassword: oldPassword,
+          ),
+          _cancelledResult(),
+        ),
+      );
+    }
+    final message = await changePassword(password, oldPassword: oldPassword);
+    return message == 'Password changed successfully'
+        ? const OperationResult.success()
+        : OperationResult.failure(OperationOutcome.ioFailure, message);
   }
 
   Future<String> _changePassword(
@@ -1766,7 +2674,18 @@ class ContentViewModel extends BaseViewModel {
   // endregion
 
   // region Saving
-  Future<OperationResult<void>> saveNote({bool isAutoSave = false}) {
+  Future<OperationResult<void>> saveNote({
+    bool isAutoSave = false,
+    bool allowEmptyFirstSave = false,
+  }) {
+    if (_deleting) {
+      return Future.value(
+        const OperationResult.failure(
+          OperationOutcome.conflict,
+          'Permanent deletion is in progress.',
+        ),
+      );
+    }
     if (_libraryCutover) {
       return Future.value(
         const OperationResult.failure(
@@ -1796,7 +2715,8 @@ class ContentViewModel extends BaseViewModel {
     // Quill emits document events asynchronously. Observe the actual current
     // Delta before capture so typing followed immediately by Save is included.
     _observeRichEdit();
-    if (!_session.isDirty) {
+    if (!_session.isDirty &&
+        !(allowEmptyFirstSave && !isAutoSave && !_session.isPersisted)) {
       return Future.value(
         _reportResult(
           _session.isPersisted
@@ -1884,7 +2804,9 @@ class ContentViewModel extends BaseViewModel {
         final pending = _pendingSaves.removeAt(0);
         OperationResult<void> result;
         try {
-          result = await _saveSnapshot(pending.snapshot, pending.isAutoSave);
+          result = await _mutate(
+            () => _saveSnapshot(pending.snapshot, pending.isAutoSave),
+          );
         } catch (_) {
           // Settle every accepted caller even if an unexpected callback fails.
           if (_ownsSnapshot(pending.snapshot)) _autoSavePaused = true;
@@ -1909,8 +2831,11 @@ class ContentViewModel extends BaseViewModel {
 
   Future<OperationResult<void>> _saveSnapshot(
     NoteSnapshot snapshot,
-    bool isAutoSave,
-  ) async {
+    bool isAutoSave, {
+    List<PreparedAttachmentFile> prepared = const [],
+    bool generationChange = false,
+    bool changesProtection = false,
+  }) async {
     if (!_ownsSnapshot(snapshot)) return _cancelledResult();
     if (_persistedCredentialGeneration == snapshot.credentialGeneration &&
         _session.persistedRevision != null &&
@@ -1918,7 +2843,8 @@ class ContentViewModel extends BaseViewModel {
       // This queued request is already covered by our own acknowledged write.
       return _reportResult(const OperationResult.success());
     }
-    if (!isAutoSave) setBusy(true);
+    if (!isAutoSave && !_usesOwnedMutations) setBusy(true);
+    isSavingNotifier.value = true;
     if (isAutoSave) isAutoSavingNotifier.value = true;
     try {
       var reference =
@@ -1983,23 +2909,46 @@ class ContentViewModel extends BaseViewModel {
           ? json
           : await _encryptionService.encryptApp(json);
       if (!_ownsSnapshot(snapshot)) return _cancelledResult();
-      final committedReference = await _fileService.writeResolved(
-        reference,
-        encoded,
-      );
+      final committedReference = generationChange
+          ? await (_fileService as TransactionalNoteFiles).commitGeneration(
+              reference,
+              encoded,
+              prepared,
+            )
+          : await _fileService.writeResolved(reference, encoded);
       if (!_ownsSnapshot(snapshot)) return _cancelledResult();
       _currentFileName = committedReference.fileName;
       _noteReference = committedReference.withModelId(snapshot.noteId);
       _storedNote = NoteModel.fromJson(metadata);
+      if (!snapshot.reuseStoredBody) _retainedPlainBody = snapshot.body;
       _retainedMetadata = metadata;
       _persistedCredentialGeneration = snapshot.credentialGeneration;
-      _session = _session.acknowledged(snapshot.editRevision);
+      if (generationChange) {
+        final sameRevision = _session.editRevision == snapshot.editRevision - 1;
+        _session = DraftSession(
+          generation: _session.generation,
+          editRevision: _session.editRevision + 1,
+          persistedRevision: snapshot.editRevision,
+          credentialGeneration:
+              _session.credentialGeneration + (changesProtection ? 1 : 0),
+          dirtyFields: sameRevision ? const {} : _session.dirtyFields,
+        );
+        _persistedCredentialGeneration = _session.credentialGeneration;
+        _attachments = List.of(snapshot.attachments);
+        _currentPassword = snapshot.password;
+        attachmentsNotifier.value = List.of(_attachments);
+        _attachmentCache.clear();
+        isLockedNotifier.value = _isLocked;
+      } else {
+        _session = _session.acknowledged(snapshot.editRevision);
+      }
       if (snapshot.password != null) {
         _sessionPasswords[reference.fileName] = snapshot.password!;
       } else {
         _sessionPasswords.remove(reference.fileName);
       }
       _autoSavePaused = false;
+      if (generationChange) notifyListeners();
       if (_session.isDirty) {
         _scheduleAutoSave();
       } else {
@@ -2027,15 +2976,131 @@ class ContentViewModel extends BaseViewModel {
       );
     } finally {
       if (!_disposed) {
-        if (!isAutoSave) setBusy(false);
+        if (!isAutoSave && !_usesOwnedMutations) setBusy(false);
+        isSavingNotifier.value = false;
         if (isAutoSave) isAutoSavingNotifier.value = false;
       }
     }
   }
 
   Future<void> deleteNote(String fileName) async {
+    if (_usesOwnedMutations) {
+      final reference = await reviewDeletion(fileName);
+      if (reference != null) await deleteReviewedNote(reference);
+      return;
+    }
     if (!ensureExtendedNoteOperations()) return;
     return _libraryTask(() => _deleteNote(fileName), null);
+  }
+
+  Future<NoteReference?> reviewDeletion(String fileName) async {
+    if (!_usesOwnedMutations) return null;
+    for (final reference in pendingDeletionsNotifier.value) {
+      if (reference.fileName == fileName) return reference;
+    }
+    final ready = await _resolveOwnerJobs(DraftTransition.navigation);
+    if (!ready.isSuccess) {
+      _reportResult(ready);
+      return null;
+    }
+    try {
+      final reference = await _fileService.resolveNote(fileName);
+      if (reference == null) return null;
+      final content = await _fileService.readResolved(reference);
+      if (content == null) return null;
+      final decoded = await _decodeNote(content);
+      return reference.withModelId(decoded.note.id);
+    } catch (_) {
+      _reportResult(
+        const OperationResult.failure(
+          OperationOutcome.ioFailure,
+          'The note could not be reviewed for deletion.',
+        ),
+      );
+      return null;
+    }
+  }
+
+  Future<OperationResult<void>> deleteReviewedNote(
+    NoteReference reference,
+  ) async {
+    if (!_usesOwnedMutations ||
+        _disposed ||
+        _deleting ||
+        hasAttachmentJobs ||
+        _librarySwitching ||
+        _libraryResourcesClosing) {
+      return _cancelledResult();
+    }
+    _deleting = true;
+    final selected =
+        _noteReference?.contentPath == reference.contentPath &&
+        _noteReference?.binding.root == reference.binding.root;
+    _deletingCurrent = selected;
+    final wasReadOnly = quillController.readOnly;
+    if (selected) quillController.readOnly = true;
+    notifyListeners();
+    if (selected) _cancelAutoSave();
+    final result = await _mutate(() async {
+      try {
+        final deleted = await (_fileService as TransactionalNoteFiles)
+            .deleteResolved(reference);
+        if (!_disposed) {
+          final retained = pendingDeletionsNotifier.value
+              .where((r) => r.contentPath != reference.contentPath)
+              .toList();
+          if (deleted.outcome == OperationOutcome.recoveryRequired ||
+              (!deleted.isSuccess &&
+                  pendingDeletionsNotifier.value.any(
+                    (r) => r.contentPath == reference.contentPath,
+                  ))) {
+            retained.add(reference);
+          }
+          pendingDeletionsNotifier.value = retained;
+        }
+        if (selected && !_disposed) {
+          if (deleted.isSuccess) {
+            _resetDraft();
+          } else if (deleted.outcome == OperationOutcome.recoveryRequired) {
+            _session = DraftSession(
+              generation: _session.generation,
+              access: DraftAccess.deleted,
+              editRevision: _session.editRevision,
+              persistedRevision: _session.persistedRevision,
+              credentialGeneration: _session.credentialGeneration,
+              dirtyFields: _session.dirtyFields,
+            );
+            notifyListeners();
+          }
+        }
+        if (!_disposed) await loadRecentFiles();
+        final progress = deleted.value;
+        if (deleted.isSuccess) return const OperationResult<void>.success();
+        return OperationResult<void>.failure(
+          deleted.outcome,
+          progress == null
+              ? deleted.message
+              : 'Permanent deletion incomplete: ${progress.removed.length} objects removed, ${progress.pending.length} cleanup items pending. Retry Delete.',
+        );
+      } catch (_) {
+        return const OperationResult<void>.failure(
+          OperationOutcome.ioFailure,
+          'Delete failed; no successful removal is claimed.',
+        );
+      }
+    });
+    _deleting = false;
+    _deletingCurrent = false;
+    if (!_disposed) {
+      quillController.readOnly = selected
+          ? (!_session.canWrite || _isLocked)
+          : wasReadOnly;
+      if (_session.isDirty && _session.canWrite) _scheduleAutoSave();
+      notifyListeners();
+    }
+    return _reportResult(
+      result.isSuccess ? const OperationResult.success() : result,
+    );
   }
 
   Future<void> _deleteNote(String fileName) async {
@@ -2056,6 +3121,57 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<ImportVerificationResult> verifyImportFile(PlatformFile file) async {
+    if (_usesOwnedMutations) {
+      final path = file.path;
+      if (path == null) {
+        return ImportVerificationResult(
+          isValid: false,
+          message: 'A native file is required.',
+        );
+      }
+      try {
+        final input = await File(path).open();
+        Uint8List header;
+        try {
+          header = await input.read(6);
+        } finally {
+          await input.close();
+        }
+        final binary =
+            header.length >= 6 &&
+            header[0] == 0x4e &&
+            header[1] == 0x4f &&
+            header[2] == 0x54 &&
+            header[3] == 0x45;
+        final zip =
+            header.length >= 4 && header[0] == 0x50 && header[1] == 0x4b;
+        final suffix = p.extension(file.name).toLowerCase();
+        if (binary || zip) {
+          return ImportVerificationResult(
+            isValid: true,
+            message: binary ? 'Binary Note Package' : 'ZIP Note Package',
+            isPack: true,
+            isPackEncrypted: binary && header[5] == 1,
+          );
+        }
+        if (!['.txt', '.enc'].contains(suffix) ||
+            await File(path).length() > StreamingPackService.metadataLimit) {
+          return ImportVerificationResult(
+            isValid: false,
+            message: 'Unsupported file or oversized note metadata.',
+          );
+        }
+        return ImportVerificationResult(
+          isValid: true,
+          message: suffix == '.txt' ? 'Plain text note' : 'Encrypted note',
+        );
+      } catch (_) {
+        return ImportVerificationResult(
+          isValid: false,
+          message: 'The import source could not be read.',
+        );
+      }
+    }
     if (file.path == null) {
       return ImportVerificationResult(
         isValid: false,
@@ -2150,9 +3266,29 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
-  Future<void> performImport(PlatformFile file) async {
-    if (!ensureExtendedNoteOperations()) return;
-    return _libraryTask(() => _performImport(file), null);
+  Future<OperationResult<String>> performImport(PlatformFile file) async {
+    if (_usesOwnedMutations) {
+      if (file.path == null) {
+        return const OperationResult.failure(
+          OperationOutcome.rejectedInput,
+          'A native file is required.',
+        );
+      }
+      return _trackOwnedJob(
+        _importOwnedFile(
+          file.path!,
+          plainText: p.extension(file.name).toLowerCase() == '.txt',
+        ),
+      );
+    }
+    if (!ensureExtendedNoteOperations()) {
+      return const OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        'Import unavailable.',
+      );
+    }
+    await _libraryTask(() => _performImport(file), null);
+    return const OperationResult.success();
   }
 
   Future<void> _performImport(PlatformFile file) async {
@@ -2164,15 +3300,33 @@ class ContentViewModel extends BaseViewModel {
 
   /// Export the current note as a pack file (binary or zip) with optional archive password
   /// Note: Content is packed as-is (preserving original encryption), archive password is separate
-  Future<void> exportNotePack({
+  Future<OperationResult<void>> exportNotePack({
     required ExportFormat format,
     String? password,
+    String? fileName,
+    NoteExportCapture? captured,
   }) async {
-    if (!ensureExtendedNoteOperations()) return;
-    return _libraryTask(
+    if (_usesOwnedMutations) {
+      return _trackOwnedJob(
+        _exportOwnedPackage(
+          format: format,
+          password: password,
+          fileName: fileName,
+          captured: captured,
+        ),
+      );
+    }
+    if (!ensureExtendedNoteOperations()) {
+      return const OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        'Export unavailable.',
+      );
+    }
+    await _libraryTask(
       () => _exportNotePack(format: format, password: password),
       null,
     );
+    return const OperationResult.success();
   }
 
   Future<void> _exportNotePack({
@@ -2276,6 +3430,413 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
+  Future<OperationResult<void>> _exportOwnedPackage({
+    required ExportFormat format,
+    String? password,
+    String? fileName,
+    String? destination,
+    NoteExportCapture? captured,
+  }) async {
+    final ready = await _resolveOwnerJobs(DraftTransition.navigation);
+    if (!ready.isSuccess) return ready;
+    if (_bulkAttachmentJob || _librarySwitching || _disposed || _deleting) {
+      return _cancelledResult();
+    }
+    if (captured == null &&
+        (fileName == null || fileName == _currentFileName)) {
+      final transition = await prepareTransition(DraftTransition.navigation);
+      if (!transition.isSuccess) return _transitionFailure(transition);
+    }
+    final owner = _session.generation;
+    _bulkAttachmentJob = true;
+    final files = _fileService as TransactionalNoteFiles;
+    final job = _newAttachmentJob(const Uuid().v4(), 'Export package');
+    final id = job.progress.value.id;
+    Directory? operation;
+    String? candidate;
+    OperationResult<void> result;
+    try {
+      final reference =
+          captured?.reference ??
+          (fileName == null || fileName == _currentFileName
+              ? _noteReference
+              : await _fileService.resolveNote(fileName));
+      if (reference == null) {
+        throw const FormatException('Save the note before exporting.');
+      }
+      final content = await _fileService.readResolved(reference);
+      if (content == null) {
+        throw const FormatException('The captured note is unavailable.');
+      }
+      final decoded = await _decodeNote(content);
+      final resolved = reference.withModelId(decoded.note.id);
+      final attachments = <String, StreamingFileSource>{};
+      for (final attachment in decoded.note.attachments) {
+        attachments[attachment.id] = await files.attachmentSource(
+          resolved,
+          attachment.id,
+        );
+      }
+      final extension = format == ExportFormat.binary ? 'fnote' : 'zip';
+      destination ??= await FilePicker.platform.saveFile(
+        dialogTitle: 'Save Note Package',
+        fileName: 'note.$extension',
+        type: FileType.custom,
+        allowedExtensions: [extension],
+      );
+      if (destination == null) {
+        result = const OperationResult.failure(
+          OperationOutcome.cancelled,
+          'Export cancelled.',
+        );
+      } else {
+        await _verifyExportDestination(destination);
+        final expected = await ExternalFileExport.review(destination);
+        operation = await files.createOperationDirectory(resolved);
+        final cancellation = File(p.join(operation.path, 'cancel'));
+        _packageCancellationFiles[id] = cancellation;
+        candidate = ExternalFileExport.candidatePath(destination);
+        _jobPhase(job, AttachmentJobPhase.preparing);
+        await StreamingPackService().exportPackage(
+          metadata: decoded.metadata,
+          attachments: attachments,
+          format: format,
+          destination: candidate,
+          operationDirectory: operation.path,
+          password: password,
+          cancellationFile: cancellation.path,
+        );
+        if (_disposed ||
+            owner != _session.generation ||
+            _cancelledAttachmentJobs.contains(id)) {
+          result = _cancelledResult();
+        } else {
+          _jobPhase(job, AttachmentJobPhase.verifying);
+          // Parsing checks completeness and CRC using bounded ciphertext files.
+          await StreamingPackService().importPackage(
+            source: candidate,
+            operationDirectory: operation.path,
+            password: password,
+            cancellationFile: cancellation.path,
+          );
+          if (_cancelledAttachmentJobs.contains(id)) {
+            result = _cancelledResult();
+          } else {
+            _jobPhase(job, AttachmentJobPhase.finalizing);
+            result = await ExternalFileExport.publish(
+              candidate: candidate,
+              destination: destination,
+              expected: expected,
+            );
+          }
+        }
+      }
+    } on FileJobCancelled {
+      result = const OperationResult.failure(
+        OperationOutcome.cancelled,
+        'Export cancelled.',
+      );
+    } on FormatException catch (failure) {
+      result = OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        failure.message,
+      );
+    } catch (_) {
+      result = const OperationResult.failure(
+        OperationOutcome.ioFailure,
+        'Export failed; no complete backup is claimed.',
+      );
+    } finally {
+      _packageCancellationFiles.remove(id);
+      if (candidate != null && await File(candidate).exists()) {
+        try {
+          await File(candidate).delete();
+        } catch (_) {
+          /* Retain owned candidate. */
+        }
+      }
+      if (operation != null) {
+        try {
+          await files.removeOperationDirectory(operation);
+        } catch (_) {
+          /* Retain operation. */
+        }
+      }
+      _bulkAttachmentJob = false;
+    }
+    _jobPhase(
+      job,
+      result.isSuccess
+          ? AttachmentJobPhase.completed
+          : result.outcome == OperationOutcome.cancelled
+          ? AttachmentJobPhase.cancelled
+          : AttachmentJobPhase.failed,
+      error: result.message,
+    );
+    return _reportResult(result);
+  }
+
+  Future<OperationResult<void>> exportOwnedPackageTo(
+    String destination, {
+    required ExportFormat format,
+    String? password,
+    String? fileName,
+  }) => _trackOwnedJob(
+    _exportOwnedPackage(
+      format: format,
+      password: password,
+      fileName: fileName,
+      destination: destination,
+    ),
+  );
+
+  Future<OperationResult<String>> importOwnedFile(
+    String source, {
+    String? archivePassword,
+    bool plainText = false,
+  }) => _trackOwnedJob(
+    _importOwnedFile(
+      source,
+      archivePassword: archivePassword,
+      plainText: plainText,
+    ),
+  );
+
+  Future<OperationResult<NoteExportCapture>> captureNoteForExport(
+    String fileName,
+  ) async {
+    if (fileName == _currentFileName) {
+      final transition = await prepareTransition(DraftTransition.navigation);
+      if (!transition.isSuccess) {
+        return OperationResult.failure(transition.outcome, transition.message);
+      }
+    }
+    try {
+      final reference = await _fileService.resolveNote(fileName);
+      if (reference == null) throw const FormatException('Note unavailable.');
+      final content = await _fileService.readResolved(reference);
+      if (content == null) throw const FormatException('Note unavailable.');
+      final decoded = await _decodeNote(content);
+      return OperationResult.success(
+        NoteExportCapture(reference.withModelId(decoded.note.id), decoded),
+      );
+    } catch (_) {
+      return const OperationResult.failure(
+        OperationOutcome.ioFailure,
+        'The note could not be captured for export.',
+      );
+    }
+  }
+
+  bool exportHasVerifiedCredential(NoteExportCapture capture) =>
+      !capture.note.note.isLocked ||
+      (!_isLocked &&
+          _currentPassword != null &&
+          _noteReference?.contentPath == capture.reference.contentPath &&
+          _noteReference?.binding.root == capture.reference.binding.root);
+
+  Future<bool> verifyExportCredential(
+    NoteExportCapture capture,
+    String password,
+  ) async {
+    final result = await _encryptionService.decryptResult(
+      capture.note.note.content,
+      password: password,
+    );
+    if (!result.isSuccess) return false;
+    try {
+      _prepareDocument(result.value!).close();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<OperationResult<String>> _importOwnedFile(
+    String source, {
+    String? archivePassword,
+    bool plainText = false,
+  }) async {
+    final ready = await _resolveOwnerJobs(DraftTransition.navigation);
+    if (!ready.isSuccess) {
+      return OperationResult.failure(ready.outcome, ready.message);
+    }
+    if (!_usesOwnedMutations ||
+        _disposed ||
+        _bulkAttachmentJob ||
+        _librarySwitching ||
+        _deleting) {
+      return const OperationResult.failure(
+        OperationOutcome.conflict,
+        'Finish the active note operation first.',
+      );
+    }
+    _bulkAttachmentJob = true;
+    final owner = _session.generation;
+    final files = _fileService as TransactionalNoteFiles;
+    final job = _newAttachmentJob(const Uuid().v4(), 'Import package');
+    final jobId = job.progress.value.id;
+    Directory? operation;
+    OperationResult<String> result;
+    try {
+      final noteId = const Uuid().v4();
+      final reference = await _fileService.newNoteReference(noteId);
+      operation = await files.createOperationDirectory(reference);
+      final cancellation = File(p.join(operation.path, 'cancel'));
+      _packageCancellationFiles[jobId] = cancellation;
+      _jobPhase(job, AttachmentJobPhase.preparing);
+      FilePackResult imported;
+      final extension = p.extension(source).toLowerCase();
+      if (plainText || extension == '.enc') {
+        if (await File(source).length() > StreamingPackService.metadataLimit) {
+          throw const FormatException('Imported note metadata exceeds limit.');
+        }
+        final text = await File(source).readAsString();
+        DecodedNote decoded;
+        if (plainText) {
+          decoded = NoteCodec.decodeMetadata(
+            jsonEncode({
+              'id': const Uuid().v4(),
+              'title': p.basenameWithoutExtension(source),
+              'content': jsonEncode([
+                {'insert': text.endsWith('\n') ? text : '$text\n'},
+              ]),
+              'timestamp': _nowMilliseconds(),
+              'isLocked': false,
+              'attachments': [],
+            }),
+          );
+        } else {
+          decoded = await _decodeNote(text);
+        }
+        if (decoded.note.attachments.isNotEmpty) {
+          throw const FormatException(
+            'Loose note import is incomplete: attachments are missing.',
+          );
+        }
+        imported = FilePackResult(decoded, const {});
+      } else {
+        imported = await StreamingPackService().importPackage(
+          source: source,
+          operationDirectory: operation.path,
+          password: archivePassword,
+          cancellationFile: cancellation.path,
+        );
+      }
+      if (!imported.note.note.isLocked) {
+        _prepareDocument(imported.note.note.content).close();
+      } else {
+        final parts = imported.note.note.content.split(':');
+        if (parts.length > 2 ||
+            (parts.length == 2 && base64Decode(parts.first).length != 16)) {
+          throw const FormatException(
+            'Imported protected body has invalid framing.',
+          );
+        }
+        final body = base64Decode(parts.last);
+        if (body.isEmpty || body.length % 16 != 0) {
+          throw const FormatException('Imported protected body is incomplete.');
+        }
+      }
+      final prepared = <PreparedAttachmentFile>[];
+      final models = <AttachmentModel>[];
+      final oldFields = imported.note.metadata['attachments'];
+      final preserved = <String, Map<String, dynamic>>{};
+      if (oldFields is List) {
+        for (final fields in oldFields) {
+          if (fields is Map<String, dynamic> && fields['id'] is String) {
+            preserved[fields['id'] as String] = fields;
+          }
+        }
+      }
+      final newFields = <Map<String, dynamic>>[];
+      for (final attachment in imported.note.note.attachments) {
+        final payload = imported.attachments[attachment.id];
+        if (payload == null ||
+            payload.length < 32 ||
+            (payload.length - 16) % 16 != 0) {
+          throw const FormatException(
+            'Imported attachment ciphertext is incomplete.',
+          );
+        }
+        final id = const Uuid().v4();
+        prepared.add(PreparedAttachmentFile(id, payload));
+        final model = AttachmentModel(
+          id: id,
+          fileName: attachment.fileName,
+          size: attachment.size,
+          mimeType: attachment.mimeType,
+        );
+        models.add(model);
+        newFields.add({...?preserved[attachment.id], ...model.toJson()});
+      }
+      final metadata = <String, dynamic>{
+        ...imported.note.metadata,
+        'id': noteId,
+        'attachments':
+            oldFields is List &&
+                oldFields.isNotEmpty &&
+                oldFields.first is String
+            ? models.map((a) => a.id).toList()
+            : newFields,
+      };
+      final encoded = await _encryptionService.encryptApp(jsonEncode(metadata));
+      result = await _mutate(() async {
+        if (_disposed ||
+            owner != _session.generation ||
+            _cancelledAttachmentJobs.contains(jobId)) {
+          return const OperationResult<String>.failure(
+            OperationOutcome.cancelled,
+            'Import cancelled.',
+          );
+        }
+        _jobPhase(job, AttachmentJobPhase.finalizing);
+        final committed = await files.commitGeneration(
+          reference,
+          encoded,
+          prepared,
+        );
+        await loadRecentFiles();
+        return OperationResult<String>.success(committed.fileName);
+      });
+    } on FileJobCancelled {
+      result = const OperationResult.failure(
+        OperationOutcome.cancelled,
+        'Import cancelled.',
+      );
+    } on FormatException catch (failure) {
+      result = OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        failure.message,
+      );
+    } catch (_) {
+      result = const OperationResult.failure(
+        OperationOutcome.ioFailure,
+        'Import failed; no existing note was overwritten.',
+      );
+    } finally {
+      _packageCancellationFiles.remove(jobId);
+      if (operation != null) {
+        try {
+          await files.removeOperationDirectory(operation);
+        } catch (_) {
+          /* Retain operation. */
+        }
+      }
+      _bulkAttachmentJob = false;
+    }
+    _jobPhase(
+      job,
+      result.isSuccess
+          ? AttachmentJobPhase.completed
+          : result.outcome == OperationOutcome.cancelled
+          ? AttachmentJobPhase.cancelled
+          : AttachmentJobPhase.failed,
+      error: result.message,
+    );
+    return result;
+  }
+
   /// Import a note pack file (.fnote or .zip)
   /// Returns the noteId on success, null on failure
   /// archivePassword: password to decrypt the archive itself
@@ -2284,6 +3845,15 @@ class ContentViewModel extends BaseViewModel {
     String filePath, {
     String? archivePassword,
   }) async {
+    if (_usesOwnedMutations) {
+      final result = await _trackOwnedJob(
+        _importOwnedFile(filePath, archivePassword: archivePassword),
+      );
+      if (!result.isSuccess) {
+        _reportResult(OperationResult.failure(result.outcome, result.message));
+      }
+      return result.isSuccess ? result.value : null;
+    }
     if (!ensureExtendedNoteOperations()) return null;
     return _libraryTask(
       () => _importNotePack(filePath, archivePassword: archivePassword),
@@ -2377,7 +3947,13 @@ class ContentViewModel extends BaseViewModel {
   Future<bool> isPackEncrypted(String filePath) async {
     try {
       final file = File(filePath);
-      final data = await file.readAsBytes();
+      final input = await file.open();
+      final Uint8List data;
+      try {
+        data = await input.read(6);
+      } finally {
+        await input.close();
+      }
       final packService = PackService(_encryptionService);
 
       if (packService.isPack(data)) {
@@ -2406,8 +3982,9 @@ class ContentViewModel extends BaseViewModel {
     if (probe.startsWith('[') || probe.startsWith('{')) {
       try {
         final json = jsonDecode(content);
-        if (json is! List)
+        if (json is! List) {
           throw const FormatException('Unsupported body schema.');
+        }
         return Document.fromJson(json);
       } catch (_) {
         throw const FormatException('Invalid structured body.');
@@ -2436,12 +4013,14 @@ class ContentViewModel extends BaseViewModel {
     final owner = _session.generation;
     if (!discardChanges) {
       final resolved = await prepareTransition(DraftTransition.newNote);
-      if (!resolved.isSuccess)
+      if (!resolved.isSuccess) {
         return _reportResult(_transitionFailure(resolved));
+      }
       if (_disposed ||
           owner != _session.generation ||
-          !isTransitionPermitCurrent(resolved.value!))
+          !isTransitionPermitCurrent(resolved.value!)) {
         return _cancelledResult();
+      }
     }
     if (_disposed) return _cancelledResult();
     _resetDraft();
@@ -2449,6 +4028,7 @@ class ContentViewModel extends BaseViewModel {
   }
 
   void _resetDraft() {
+    _retainedPlainBody = null;
     _cancelAutoSave();
     _loadRequest++;
     _unlockRequest++;
@@ -2482,6 +4062,15 @@ class ContentViewModel extends BaseViewModel {
   // region Lifecycle
   @override
   void dispose() {
+    pendingDeletionsNotifier.dispose();
+    for (final transform in _attachmentTransforms.values) {
+      unawaited(transform.cancel());
+    }
+    unawaited(_attachmentWorker.close());
+    for (final job in _ownedJobStates) {
+      job.dispose();
+    }
+    attachmentJobsNotifier.dispose();
     _disposed = true;
     _listingPathRequest++;
     _searchGeneration++;
@@ -2508,6 +4097,7 @@ class ContentViewModel extends BaseViewModel {
     attachmentsNotifier.dispose();
     isLockedNotifier.dispose();
     isAutoSavingNotifier.dispose();
+    isSavingNotifier.dispose();
     progressNotifier.dispose();
     operationResultNotifier.dispose();
     super.dispose();
@@ -2525,38 +4115,77 @@ class ContentViewModel extends BaseViewModel {
         !_session.canWrite ||
         _isLocked ||
         !_session.isDirty ||
-        _autoSavePaused)
+        _autoSavePaused) {
       return;
+    }
     final owner = _session.generation;
     _autoSaveTimer = Timer(const Duration(seconds: 2), () async {
       if (_disposed ||
           owner != _session.generation ||
           !_session.canWrite ||
           _isLocked ||
-          _autoSavePaused)
+          _autoSavePaused) {
         return;
+      }
       await saveNote(isAutoSave: true);
     });
   }
 
   void _cancelAutoSave() => _autoSaveTimer?.cancel();
 
-  Future<Uint8List?> readAttachment(String attachmentId) async {
+  Future<Uint8List?> readAttachment(String attachmentId) {
+    final key =
+        '${_session.generation}:${_session.credentialGeneration}:$attachmentId';
+    final existing = _previewReads[key];
+    if (existing != null) return existing;
+    late final Future<Uint8List?> reading;
+    reading = _readAttachmentPreview(attachmentId).whenComplete(() {
+      if (identical(_previewReads[key], reading)) _previewReads.remove(key);
+    });
+    _previewReads[key] = reading;
+    return reading;
+  }
+
+  Future<Uint8List?> _readAttachmentPreview(String attachmentId) async {
     if (_disposed || _isLocked) return null;
     final owner = _session.generation;
     final password = _currentPassword;
-    if (_currentFileName == null || !_currentFileName!.startsWith('note_'))
+    if (_currentFileName == null ||
+        (!_usesOwnedMutations && !_currentFileName!.startsWith('note_'))) {
       return null;
+    }
     final noteId = _currentFileName!.replaceFirst('note_', '');
 
     if (_attachmentCache.containsKey(attachmentId)) {
       return _attachmentCache[attachmentId];
     }
 
-    final encryptedBytes = await _fileService.readAttachment(
-      noteId,
-      attachmentId,
-    );
+    Uint8List? encryptedBytes;
+    if (_usesOwnedMutations) {
+      final reference = _noteReference;
+      if (reference == null) return null;
+      try {
+        final source = await (_fileService as TransactionalNoteFiles)
+            .attachmentSource(reference, attachmentId);
+        // Large attachments remain stored/exportable and use file cards.
+        if (source.length > 8 * 1024 * 1024 + 32) return null;
+        final input = await File(source.path).open();
+        try {
+          encryptedBytes = await input.read(8 * 1024 * 1024 + 33);
+        } finally {
+          await input.close();
+        }
+        if (encryptedBytes.length != source.length) return null;
+        if (source.sha256Hex != null &&
+            await compute(_previewHash, encryptedBytes) != source.sha256Hex) {
+          return null;
+        }
+      } catch (_) {
+        return null;
+      }
+    } else {
+      encryptedBytes = await _fileService.readAttachment(noteId, attachmentId);
+    }
     if (encryptedBytes == null) return null;
 
     final decrypted = await _encryptionService.decryptBinaryResult(
@@ -2566,15 +4195,26 @@ class ContentViewModel extends BaseViewModel {
     if (_disposed ||
         _isLocked ||
         owner != _session.generation ||
-        password != _currentPassword)
+        password != _currentPassword) {
       return null;
+    }
     if (!decrypted.isSuccess) return null;
     _attachmentCache[attachmentId] = decrypted.value!;
+    var cacheBytes = _attachmentCache.values.fold<int>(
+      0,
+      (n, bytes) => n + bytes.length,
+    );
+    while (cacheBytes > 32 * 1024 * 1024 && _attachmentCache.isNotEmpty) {
+      final oldest = _attachmentCache.keys.first;
+      cacheBytes -= _attachmentCache.remove(oldest)!.length;
+    }
     return decrypted.value!;
   }
 
   // endregion
 }
+
+String _previewHash(Uint8List bytes) => crypto.sha256.convert(bytes).toString();
 
 /// One not-yet-started Save. Coalescing cannot cross a session, credential or
 /// captured-object boundary. The active Save is removed from this collection.
@@ -2616,6 +4256,12 @@ class ImportVerificationResult {
     this.isPack = false,
     this.isPackEncrypted = false,
   });
+}
+
+class NoteExportCapture {
+  const NoteExportCapture(this.reference, this.note);
+  final NoteReference reference;
+  final DecodedNote note;
 }
 
 Future<List<dynamic>> _htmlToDeltaTask(String html) async {

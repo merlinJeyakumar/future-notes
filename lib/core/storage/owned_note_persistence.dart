@@ -6,6 +6,9 @@ import 'package:path/path.dart' as p;
 
 import '../operations/operation_result.dart';
 import 'note_reference.dart';
+import 'commit_record.dart';
+import 'native_storage_primitives.dart';
+import 'streaming_file_cipher.dart';
 import 'recoverable_store.dart';
 import 'storage_environment.dart';
 import 'storage_owner_worker.dart';
@@ -90,6 +93,15 @@ class OwnedNotePersistence {
   }
 
   Future<void> prepareLibrary(String root) => _run(() async {
+    if (environment.isRecoverable && !environment.permitsOwnerRoot(root)) {
+      if (owner is! LibraryStorageOwner) {
+        throw const NotePersistenceFailure(OperationOutcome.rejectedInput);
+      }
+      final admitted = await (owner as LibraryStorageOwner)
+          .admitSelectedLibrary(root);
+      if (!admitted.isSuccess) throw NotePersistenceFailure(admitted.outcome);
+      await environment.admitSelectedLibrary(root);
+    }
     await _root(root);
   });
 
@@ -138,6 +150,35 @@ class OwnedNotePersistence {
     }
   }
 
+  Future<List<NoteReference>> pendingDeletions(StorageBinding binding) =>
+      _run(() async {
+        final root = await _root(binding.root);
+        return (owner.recoveryFor(root)?.pendingDeletions ?? []).map((intent) {
+          final parts = p.posix.split(intent.target);
+          final folder = parts.length > 1 ? parts.first : null;
+          final attachmentTargets = intent.objects.where(
+            (object) =>
+                object != intent.target &&
+                p.posix.basename(p.posix.dirname(object)) == 'attachments',
+          );
+          return NoteReference(
+            binding: binding,
+            fileName: folder ?? intent.target,
+            format: folder == null
+                ? NoteStorageFormat.legacyFile
+                : NoteStorageFormat.folder,
+            contentPath: binding.child(intent.target),
+            attachmentLocation: binding.child(
+              attachmentTargets.isEmpty
+                  ? '${folder ?? 'note_pending'}/attachments'
+                  : p.posix.dirname(attachmentTargets.first),
+            ),
+            storageRevision: intent.files[intent.target],
+            storageOwner: root,
+          );
+        }).toList();
+      });
+
   Future<StorageOwnerRoot> _capturedOwner(NoteReference reference) async {
     final root = await _root(reference.binding.root);
     final captured = reference.storageOwner;
@@ -151,6 +192,77 @@ class OwnedNotePersistence {
     _requireWritable(root, _target(reference));
     return root;
   }
+
+  String attachmentTarget(NoteReference reference, String id) {
+    if (!RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(id) ||
+        !p.isWithin(reference.binding.root, reference.attachmentLocation)) {
+      throw const NotePersistenceFailure(OperationOutcome.rejectedInput);
+    }
+    return p.posix.joinAll(
+      p.split(
+        p.relative(
+          p.join(reference.attachmentLocation, '$id.med'),
+          from: reference.binding.root,
+        ),
+      ),
+    );
+  }
+
+  Future<StreamingFileSource> attachmentSource(
+    NoteReference reference,
+    String id,
+  ) => _run(() async {
+    final root = await _capturedOwner(reference);
+    final target = attachmentTarget(reference, id);
+    final revision = await owner.revision(root, target);
+    if (!revision.isSuccess) throw NotePersistenceFailure(revision.outcome);
+    if (!revision.value!.exists) {
+      throw const NotePersistenceFailure(OperationOutcome.ioFailure);
+    }
+    return StreamingFileSource(
+      reference.binding.child(target),
+      revision.value!.length!,
+      sha256Hex: revision.value!.sha256Hex,
+      modifiedMicros: revision.value!.modifiedMicros,
+    );
+  });
+
+  Future<bool> needsDeletionOwnershipCheck(NoteReference reference) =>
+      _run(() async {
+        final root = await _root(reference.binding.root);
+        final target = _target(reference);
+        for (final intent in owner.recoveryFor(root)?.pendingDeletions ?? []) {
+          if (intent.target == target)
+            return intent.objects.any((object) => object != target);
+        }
+        return true;
+      });
+
+  Future<OperationResult<DeletionReport>> delete(NoteReference reference) =>
+      _run(() async {
+        final root = await _root(reference.binding.root);
+        final capability = reference.storageOwner;
+        if (capability == null ||
+            capability.identity != root.identity ||
+            capability.generation != root.generation ||
+            reference.storageRevision == null) {
+          throw const NotePersistenceFailure(OperationOutcome.rejectedInput);
+        }
+        final directory = p.posix.joinAll(
+          p.split(
+            p.relative(
+              reference.attachmentLocation,
+              from: reference.binding.root,
+            ),
+          ),
+        );
+        return owner.delete(
+          root,
+          target: _target(reference),
+          expected: reference.storageRevision!,
+          attachmentDirectory: directory,
+        );
+      });
 
   Future<NoteReference> capture(
     NoteReference reference, {
@@ -194,41 +306,66 @@ class OwnedNotePersistence {
     return content;
   });
 
-  Future<NoteReference> commit(NoteReference reference, String content) =>
-      _run(() async {
-        final root = await _capturedOwner(reference);
-        Directory? operation;
-        try {
-          await environment.verifyLocation(
-            environment.operationRoot,
-            allowRunRoot: true,
-          );
-          final sources = Directory(environment.operationRoot);
-          await sources.create(recursive: true);
-          await environment.verifyLocation(sources.path, allowRunRoot: true);
-          operation = await sources.createTemp('note-operation-');
-          _sources.add(operation);
-          final file = File(p.join(operation.path, 'candidate.enc'));
-          await environment.verifyLocation(file.path);
-          await file.create(exclusive: true);
-          final bytes = utf8.encode(content);
-          await file.writeAsBytes(bytes, flush: true);
-          final result = await owner.commit(
-            root,
-            target: _target(reference),
-            expected: reference.storageRevision!,
-            source: CommitFileSource(file.path, bytes.length),
-          );
-          if (!result.isSuccess) {
-            throw NotePersistenceFailure(result.outcome);
-          }
-          return reference.withStorageRevision(result.value!, root);
-        } finally {
-          if (operation != null) {
-            await _cleanup(operation);
-          }
-        }
-      });
+  Future<NoteReference> commit(
+    NoteReference reference,
+    String content, {
+    List<PreparedAttachmentFile> attachments = const [],
+  }) => _run(() async {
+    final root = await _capturedOwner(reference);
+    final current = await owner.revision(root, _target(reference));
+    if (!current.isSuccess ||
+        !reference.storageRevision!.matches(current.value!)) {
+      throw const NotePersistenceFailure(OperationOutcome.conflict);
+    }
+    final ids = <String>{};
+    for (final attachment in attachments) {
+      if (!ids.add(attachment.id)) {
+        throw const NotePersistenceFailure(OperationOutcome.rejectedInput);
+      }
+      final result = await owner.commit(
+        root,
+        target: attachmentTarget(reference, attachment.id),
+        expected: const StorageRevision.missing(),
+        source: CommitFileSource(
+          attachment.source.path,
+          attachment.source.length,
+        ),
+      );
+      if (!result.isSuccess) throw NotePersistenceFailure(result.outcome);
+    }
+    Directory? operation;
+    try {
+      final sources = Directory(
+        reference.binding.child(
+          '.future-notes-storage/sources/${CommitRecord.objectIdentity(_target(reference))}',
+        ),
+      );
+      await environment.verifyLocation(sources.path);
+      await sources.create(recursive: true);
+      await environment.verifyLocation(sources.path, allowRunRoot: true);
+      operation = await sources.createTemp('note-operation-');
+      _sources.add(operation);
+      final file = File(p.join(operation.path, 'candidate.enc'));
+      await environment.verifyLocation(file.path);
+      await file.create(exclusive: true);
+      final bytes = utf8.encode(content);
+      await file.writeAsBytes(bytes, flush: true);
+      final result = await owner.commit(
+        root,
+        target: _target(reference),
+        expected: reference.storageRevision!,
+        source: CommitFileSource(file.path, bytes.length),
+      );
+      if (!result.isSuccess) {
+        throw NotePersistenceFailure(result.outcome);
+      }
+      return reference.withStorageRevision(result.value!, root);
+    } finally {
+      if (operation != null) {
+        await _cleanup(operation);
+      }
+    }
+  });
 
   Future<void> _cleanup(Directory operation) async {
     try {
@@ -280,6 +417,13 @@ class OwnedNotePersistence {
       throw const NotePersistenceFailure(OperationOutcome.recoveryRequired);
     }
   }
+}
+
+/// Prepared ciphertext, never plaintext or an in-memory attachment payload.
+class PreparedAttachmentFile {
+  const PreparedAttachmentFile(this.id, this.source);
+  final String id;
+  final StreamingFileSource source;
 }
 
 class NotePersistenceFailure implements Exception {

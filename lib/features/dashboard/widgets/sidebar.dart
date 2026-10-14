@@ -209,6 +209,15 @@ class Sidebar extends StatelessWidget {
                               ),
                           ],
                         ),
+                        subtitle: file.created == null
+                            ? null
+                            : Text(
+                                'Note date ${_formatDate(file.created!)}',
+                                style: TextStyle(
+                                  color: theme.appSubtleGray,
+                                  fontSize: 11,
+                                ),
+                              ),
                         onTap: () => onFileSelected(file.path),
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 24,
@@ -229,6 +238,24 @@ class Sidebar extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _formatDate(DateTime value) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${value.day} ${months[value.month - 1]} ${value.year}';
   }
 
   Widget _buildSectionHeader(BuildContext context, String title) {

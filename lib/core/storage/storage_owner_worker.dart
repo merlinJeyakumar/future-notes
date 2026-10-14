@@ -8,8 +8,10 @@ import 'package:path/path.dart' as p;
 import '../operations/operation_result.dart';
 import 'commit_record.dart';
 import 'native_storage_primitives.dart';
+import 'permanent_deletion.dart';
 import 'recoverable_store.dart';
 import 'storage_environment.dart';
+export 'permanent_deletion.dart' show DeletionReport;
 
 class StorageWorkerStart {
   const StorageWorkerStart(this.replies, this.environment, this.generation);
@@ -33,6 +35,10 @@ class StorageOwnerRoot {
   final String generation;
 }
 
+abstract interface class LibraryStorageOwner {
+  Future<OperationResult<void>> admitSelectedLibrary(String root);
+}
+
 /// Injectable storage owner interface; no controllers or attachment bytes cross
 /// its boundary. Application adoption is a separate validation gate.
 abstract class StorageOwner {
@@ -48,11 +54,22 @@ abstract class StorageOwner {
     required CommitFileSource source,
   });
   RecoveryReport? recoveryFor(StorageOwnerRoot owner);
+  Future<OperationResult<DeletionReport>> delete(
+    StorageOwnerRoot owner, {
+    required String target,
+    required StorageRevision expected,
+    String? attachmentDirectory,
+  }) => Future.value(
+    const OperationResult.failure(
+      OperationOutcome.rejectedInput,
+      'Deletion is unsupported by this owner.',
+    ),
+  );
   Future<OperationResult<void>> releaseRoot(StorageOwnerRoot owner);
   Future<OperationResult<void>> close();
 }
 
-class StorageOwnerWorker implements StorageOwner {
+class StorageOwnerWorker implements StorageOwner, LibraryStorageOwner {
   StorageOwnerWorker._(this._environment, this._generation) {
     _replies.listen(_receive);
   }
@@ -198,6 +215,7 @@ class StorageOwnerWorker implements StorageOwner {
         null,
         null,
         null,
+        null,
       ),
     );
     _ended = true;
@@ -229,6 +247,7 @@ class StorageOwnerWorker implements StorageOwner {
     String? target,
     StorageRevision? expected,
     CommitFileSource? source,
+    String? attachmentDirectory,
   }) {
     if (_ended ||
         _commands == null ||
@@ -262,6 +281,7 @@ class StorageOwnerWorker implements StorageOwner {
         target,
         expected,
         source,
+        attachmentDirectory,
       ),
     );
     return waiter.future;
@@ -287,6 +307,14 @@ class StorageOwnerWorker implements StorageOwner {
     }
     _roots[value.identity] = value;
     return OperationResult.success(value);
+  }
+
+  @override
+  Future<OperationResult<void>> admitSelectedLibrary(String root) async {
+    final result = await _ask(_Kind.admit, root: root);
+    return result.isSuccess
+        ? const OperationResult.success()
+        : OperationResult.failure(result.outcome, result.message);
   }
 
   @override
@@ -330,6 +358,32 @@ class StorageOwnerWorker implements StorageOwner {
       OperationOutcome.recoveryRequired,
       'Invalid storage revision response.',
     );
+  }
+
+  @override
+  Future<OperationResult<DeletionReport>> delete(
+    StorageOwnerRoot owner, {
+    required String target,
+    required StorageRevision expected,
+    String? attachmentDirectory,
+  }) async {
+    final result = await _ask(
+      _Kind.delete,
+      owner: owner,
+      target: target,
+      expected: expected,
+      attachmentDirectory: attachmentDirectory,
+    );
+    if (result.value is DeletionReport) {
+      return result.isSuccess
+          ? OperationResult.success(result.value as DeletionReport)
+          : OperationResult.partial(
+              result.outcome,
+              result.message,
+              result.value as DeletionReport,
+            );
+    }
+    return OperationResult.failure(result.outcome, result.message);
   }
 
   @override
@@ -389,7 +443,10 @@ class StorageOwnerWorker implements StorageOwner {
         RecoveryReport? report;
         var shutdown = false;
         try {
-          if (message.kind == _Kind.open) {
+          if (message.kind == _Kind.admit) {
+            await start.environment.admitSelectedLibrary(message.root!);
+            result = const OperationResult.success();
+          } else if (message.kind == _Kind.open) {
             if (!start.environment.permitsOwnerRoot(message.root!)) {
               throw const FormatException('Unadmitted storage root.');
             }
@@ -447,6 +504,13 @@ class StorageOwnerWorker implements StorageOwner {
                 source: message.source!,
               );
               report = store.recovery;
+            } else if (message.kind == _Kind.delete) {
+              result = await store.delete(
+                target: message.target!,
+                expected: message.expected!,
+                attachmentDirectory: message.attachmentDirectory,
+              );
+              report = store.recovery;
             } else {
               final valid = CommitRecord(
                 transactionId: '0' * 32,
@@ -497,7 +561,7 @@ class StorageOwnerWorker implements StorageOwner {
   }
 }
 
-enum _Kind { open, revision, commit, release, shutdown }
+enum _Kind { admit, open, revision, commit, delete, release, shutdown }
 
 class _Hello {
   const _Hello(this.commands, this.generation, this.isolateIdentity);
@@ -516,6 +580,7 @@ class _Request {
     this.target,
     this.expected,
     this.source,
+    this.attachmentDirectory,
   );
   final int identity;
   final String generation;
@@ -525,6 +590,7 @@ class _Request {
   final String? target;
   final StorageRevision? expected;
   final CommitFileSource? source;
+  final String? attachmentDirectory;
 }
 
 class _Reply {

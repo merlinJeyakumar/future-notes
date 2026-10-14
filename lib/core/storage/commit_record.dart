@@ -28,9 +28,10 @@ class CommitRecord {
   final StorageRevision expected;
   final StorageRevision staged;
 
-  String get objectId => sha256
+  static String objectIdentity(String target) => sha256
       .convert(utf8.encode(p.separator == '\\' ? target.toLowerCase() : target))
       .toString();
+  String get objectId => objectIdentity(target);
   String get stagePath => '.future-notes-storage/staging/$transactionId.staged';
   String get previousPath =>
       '.future-notes-storage/recovery/$objectId/$transactionId.previous';

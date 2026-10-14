@@ -7,12 +7,16 @@ class PasswordDialog extends StatefulWidget {
   final PasswordMode mode;
   final Function(String) onConfirm;
   final Future<bool> Function(String)? onVerifyCurrent;
+  final String? title;
+  final String? description;
 
   const PasswordDialog({
     super.key,
     this.mode = PasswordMode.unlock,
     required this.onConfirm,
     this.onVerifyCurrent,
+    this.title,
+    this.description,
   });
 
   @override
@@ -49,6 +53,7 @@ class _PasswordDialogState extends State<PasswordDialog> {
           final isValid = await widget.onVerifyCurrent!(
             _currentController.text,
           );
+          if (!mounted) return;
           if (!isValid) {
             setState(() {
               _errorText = "Incorrect current password";
@@ -62,6 +67,7 @@ class _PasswordDialogState extends State<PasswordDialog> {
           final isValid = await widget.onVerifyCurrent!(
             _passwordController.text,
           );
+          if (!mounted) return;
           if (!isValid) {
             setState(() {
               _errorText = "Incorrect password";
@@ -107,6 +113,7 @@ class _PasswordDialogState extends State<PasswordDialog> {
   }
 
   String get _title {
+    if (widget.title != null) return widget.title!;
     switch (widget.mode) {
       case PasswordMode.unlock:
         return 'Unlock Note';
@@ -118,6 +125,7 @@ class _PasswordDialogState extends State<PasswordDialog> {
   }
 
   String get _description {
+    if (widget.description != null) return widget.description!;
     switch (widget.mode) {
       case PasswordMode.unlock:
         return 'Enter password to unlock this note.';

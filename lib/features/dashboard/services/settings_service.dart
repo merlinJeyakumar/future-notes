@@ -48,8 +48,7 @@ class SettingsService {
   bool get isValidationMode => _storage.isValidation;
   StorageEnvironment get storageEnvironment => _storage;
   bool get settingsCleanupPending => _ownedPersistence?.cleanupPending ?? false;
-  bool get supportsRecoverableLibrarySwitch =>
-      _storageOwner != null && !_storage.isRecoverable;
+  bool get supportsRecoverableLibrarySwitch => _storageOwner != null;
 
   void configureStorage(StorageEnvironment storage) {
     if (_initialization != null) {
@@ -130,13 +129,26 @@ class SettingsService {
         _themeMode = theme == null
             ? ThemeMode.dark
             : ThemeMode.values[theme as int];
-        // Validation overrides copied paths; native preview must agree with the
-        // recovered setting so opting in never silently selects another library.
+        // Verified settings rollback can restore the previous selection after
+        // bootstrap captured the interrupted replacement's new selection.
+        // Ordinary JSON mismatches cannot broaden root capabilities.
         final storedPath = metadata['customDataPath'] as String?;
         if (_storage.isRecoverable) {
           final selected = storedPath == null || storedPath.isEmpty
               ? p.dirname(_storage.settingsFile!)
               : storedPath;
+          if (!p.equals(selected, _storage.dataRoot!) &&
+              persistence.settingsRestored) {
+            if (_storageOwner is! LibraryStorageOwner)
+              throw const SettingsPersistenceFailure(
+                OperationOutcome.recoveryRequired,
+              );
+            final admitted = await (_storageOwner as LibraryStorageOwner)
+                .admitSelectedLibrary(selected);
+            if (!admitted.isSuccess)
+              throw SettingsPersistenceFailure(admitted.outcome);
+            await _storage.admitSelectedLibrary(selected);
+          }
           _storage.validateLibraryPath(selected);
         }
         _customDataPath = _storage.isValidation ? null : storedPath;

@@ -1,5 +1,19 @@
 # Repair implementation status
 
+## Windows Release delivery — 2026-10-14
+
+Canonical Windows Release `1.0.0+1` compiled successfully. The final integration suite passed 440 tests with two previously validated opt-in checks skipped. The complete 16-file ZIP was verified against build output. See [WINDOWS_RELEASE.md](WINDOWS_RELEASE.md) for commands, package hash and validation limits. Release runtime has not been exercised; no app was launched for this delivery.
+
+## Current Windows backend delivery — 2026-10-14
+
+This entry supersedes earlier preview restrictions and pending date/startup notes below. On `integration/recoverable-storage`, canonical `lib/main.dart` now resolves existing settings and the selected library, initializes recoverable persistence and exposes the transactional attachment/password, import/export, Delete and library-switch adapters. The preview banner and temporary unrestricted entry point are removed.
+
+Required synthetic regressions, copied-library recovery, real 4 GiB/10 GiB streaming and independent ZIP64 reading passed. The retained original library/backup hashes match. One Windows Debug build and startup passed; native inspection confirms one visible app window in the user's desktop session. The previous executable remains retained. The user confirmed all presented full-app manual checks passed on 2026-10-14. Measured native UI performance is not claimed.
+
+Subsequent locked-note UI report: Save/File Settings and attachment-job details are now hidden while locked, and the breadcrumb says Locked. Desktop/compact unlock/relock and standalone job-panel regressions passed; the existing session-safety tests passed. Windows Debug compilation passed after normal app closure; the previous 17-file executable bundle was retained and hash-verified. Manual runtime verification of this UI correction remains pending; the app was not restarted. See [LOCKED_NOTE_UI_RESULTS.md](LOCKED_NOTE_UI_RESULTS.md).
+
+See [FULL_BACKEND_RESULTS.md](FULL_BACKEND_RESULTS.md) for exact gates, failures/corrections, overlapping test counts and limits, and [FULL_BACKEND_FLOW.md](FULL_BACKEND_FLOW.md) for code flow. Historical stage entries below are retained as evidence, not current feature policy. This delivery does not close unrelated findings or encryption redesign.
+
 Baseline: development, a9f6d247d7e27322d4afe542aa27240c72af031e.
 
 2026-10-13 integration candidate: branch `integration/recoverable-storage`, based
@@ -802,3 +816,66 @@ No diagnostic source patch or speculative native exit fix was applied. The
 user's sandbox hypothesis is recorded as unconfirmed. Automated validation is
 stopped at the user's request; broader runtime/performance and real-library
 activation remain pending. See SHUTDOWN_FIX_RESULTS.md for the evidence boundary.
+# Current activation preparation — 2026-10-13
+
+On `integration/recoverable-storage`, the user requested verified backups,
+recovery rehearsal on a copy and explicit activation for existing notes, with
+manual app testing. Native discovery and the user's normal close are verified;
+zero project processes were observed afterward. No original-note payload was
+read or written in preparation. Two note objects were discovered; settings and
+recovery directories were absent.
+
+The manual two-click close report is open. A candidate keeps the original exit
+request waiting through slow cleanup instead of cancelling and issuing another
+request. Three close-wait regressions and Debug handoff labels are prepared.
+This is not a confirmed fix for the historical fast-cleanup/window-retention
+failure. No agent-driven application interaction is proposed.
+
+Backup scripts and an opt-in copied-note recovery rehearsal are prepared.
+Formatting, script parsing, whitespace and static analysis passed (101 existing
+diagnostics: 99 info, two warnings, no errors). Backup execution, tests,
+rehearsal, Windows build/launch and manual close acceptance remain pending.
+Real-note activation remains off until the exact execution gate is approved
+and its preceding checks pass. See [STORAGE_ACTIVATION_GATE.md](STORAGE_ACTIVATION_GATE.md).
+
+## Activation evidence after approval
+
+The retained backup verified three library files and 17 prior-executable files.
+Both notes passed compatible worker commits and four interruption/recovery
+checks on the separate disposable copy. The initial required suite stopped at
+317 passed/eight failed. After user-approved native error-capture and independent
+lease-probe corrections, the single affected suite passed all 130 tests; static
+analysis retained the 101-diagnostic baseline. Original failure evidence is
+preserved in [STORAGE_ACTIVATION_RESULTS.md](STORAGE_ACTIVATION_RESULTS.md).
+
+Original/backup inventories still matched immediately before the approved
+single build/launch. Windows Debug compilation passed (37.3 seconds). Exactly
+one owned process/window was observed, with clean startup logs and the original
+library writer-lock object present. The admitted executable enables the new
+backend; unconfigured builds retain the old writer. No agent-driven edits or
+destructive tests on original notes occurred. Backup and previous executable
+remain retained.
+
+Existing-note visibility, editing/Save/reopen and one-click Close await the user's
+manual confirmation. No runtime performance or continuous-use claim is made.
+Extended workflow guards and the separate R01 migration limit remain in place.
+## Closing-screen removal candidate
+
+After the manual close failure and read-only lifetime analysis, the user asked
+to fix closing and remove the screen. DashboardScreen now retains its mounted
+editor/listeners while blocking input during cleanup, with no replacement
+shutdown screen. Six real-binding widget regressions are prepared but unrun.
+The user approved a launch-only check: Windows Debug compiled in 31.2 seconds,
+and the user confirmed one-click closing without the shutdown screen. Captured
+logs show cleanup in 51 ms followed by WM_DESTROY. The run used a disposable
+empty library; original notes were not enabled. Formatting, lint and automated
+tests remain pending. Existing backups and the prior executable remain retained;
+no storage or encryption format changed.
+
+The same manual run exposed unclear blank-draft UX and absent visible dates.
+The disposable library contained no saved note. A follow-up code candidate shows
+“Not saved” until first Save, renders retained note dates after Save and in the
+sidebar, labels filesystem modification separately, and makes New Note await its
+draft transition before focusing the editor and explaining the explicit first
+Save. Eight dashboard/exit tests and two sidebar-date tests are prepared but
+unrun. These follow-up changes have not been compiled or launched.

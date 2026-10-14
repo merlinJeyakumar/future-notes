@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import 'dart:typed_data';
 import '../viewmodels/content_viewmodel.dart';
+import 'attachment_job_panel.dart';
 import '../models/note_model.dart';
+import '../models/attachment_job.dart';
 import 'password_dialog.dart';
 import '../../../core/theme/app_theme.dart';
 
@@ -108,6 +110,29 @@ class _ContentAreaState extends State<ContentArea> {
                 // Spacious Editor Area
                 Expanded(child: _buildInputArea(context)),
 
+                AttachmentJobPanel(viewModel: viewModel),
+                ValueListenableBuilder(
+                  valueListenable: viewModel.pendingDeletionsNotifier,
+                  builder: (context, pending, _) => Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final reference in pending)
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Text('Permanent deletion is incomplete.'),
+                            ),
+                            TextButton(
+                              onPressed: () =>
+                                  viewModel.deleteReviewedNote(reference),
+                              child: const Text('Retry cleanup'),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+
                 // Attachments Bar
                 ValueListenableBuilder<bool>(
                   valueListenable: viewModel.isLockedNotifier,
@@ -148,15 +173,22 @@ class _ContentAreaState extends State<ContentArea> {
           // Secondary actions (right side)
           _buildSecondaryActions(context),
 
-          SizedBox(width: isMobile ? 8 : 16),
-
-          // HTML/Rich Text Toggle Button
-          if (!viewModel.isLocked) _buildModeToggleButton(),
-
-          SizedBox(width: isMobile ? 8 : 12),
-
-          // Save Button - Prominent pill style
-          _buildSaveButton(isMobile),
+          if (!viewModel.isLocked) ...[
+            SizedBox(width: isMobile ? 8 : 16),
+            _buildModeToggleButton(),
+            SizedBox(width: isMobile ? 8 : 12),
+            // Save status belongs to the editable session.
+            ValueListenableBuilder<bool>(
+              valueListenable: viewModel.isSavingNotifier,
+              builder: (context, saving, _) => saving
+                  ? const Padding(
+                      padding: EdgeInsets.only(right: 10),
+                      child: Text('Saving…', style: TextStyle(fontSize: 12)),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+            _buildSaveButton(isMobile),
+          ],
         ],
       ),
     );
@@ -167,11 +199,15 @@ class _ContentAreaState extends State<ContentArea> {
     return Row(
       // mainAxisSize.min removed to allow Expanded child to work naturally
       children: [
-        Icon(Icons.edit_note_rounded, size: 18, color: colors.accent),
+        Icon(
+          viewModel.isLocked ? Icons.lock_rounded : Icons.edit_note_rounded,
+          size: 18,
+          color: colors.accent,
+        ),
         const SizedBox(width: 8),
         if (!isMobile) ...[
           Text(
-            'Editing',
+            viewModel.isLocked ? 'Locked' : 'Editing',
             style: TextStyle(
               color: colors.subtleGray,
               fontSize: 13,
@@ -190,7 +226,11 @@ class _ContentAreaState extends State<ContentArea> {
         Expanded(
           child: TextField(
             controller: viewModel.titleController,
-            readOnly: viewModel.isLibraryCutover,
+            readOnly:
+                viewModel.isLibraryCutover ||
+                viewModel.isDeletingCurrent ||
+                viewModel.isLocked ||
+                !viewModel.draftSession.canWrite,
             style: TextStyle(
               color: colors.textPrimary,
               fontWeight: FontWeight.w600,
@@ -214,8 +254,35 @@ class _ContentAreaState extends State<ContentArea> {
             ),
           ),
         ),
+        if (!isMobile) ...[
+          const SizedBox(width: 12),
+          Text(
+            viewModel.currentNoteDate == null
+                ? 'Not saved'
+                : 'Note date ${_formatDate(viewModel.currentNoteDate!)}',
+            style: TextStyle(color: colors.subtleGray, fontSize: 12),
+          ),
+        ],
       ],
     );
+  }
+
+  String _formatDate(DateTime value) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${value.day} ${months[value.month - 1]} ${value.year}';
   }
 
   /// Secondary action icons (link, lock, settings)
@@ -236,11 +303,12 @@ class _ContentAreaState extends State<ContentArea> {
             onPressed: () => _handleLockAction(context),
             isActive: true,
           ),
-        _buildSubtleIconButton(
-          Icons.settings_outlined,
-          'Settings',
-          onPressed: () => _showSettingsMenu(context),
-        ),
+        if (!viewModel.isLocked)
+          _buildSubtleIconButton(
+            Icons.settings_outlined,
+            'Settings',
+            onPressed: () => _showSettingsMenu(context),
+          ),
       ],
     );
   }
@@ -275,33 +343,42 @@ class _ContentAreaState extends State<ContentArea> {
 
   /// Prominent pill-shaped Save button
   Widget _buildSaveButton(bool isMobile) {
-    return ElevatedButton(
-      onPressed: viewModel.isBusy ? null : () => viewModel.saveNote(),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: colors.saveButton,
-        foregroundColor: Colors.white,
-        disabledBackgroundColor: colors.saveButton.withOpacity(0.5),
-        shape: isMobile ? const CircleBorder() : const StadiumBorder(),
-        padding: isMobile
-            ? const EdgeInsets.all(12)
-            : const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-        elevation: 0,
+    return ValueListenableBuilder<bool>(
+      valueListenable: viewModel.isSavingNotifier,
+      builder: (context, saving, _) => ElevatedButton(
+        onPressed:
+            viewModel.isBusy || saving || !viewModel.draftSession.canWrite
+            ? null
+            : () => viewModel.saveNote(),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: colors.saveButton,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: colors.saveButton.withOpacity(0.5),
+          shape: isMobile ? const CircleBorder() : const StadiumBorder(),
+          padding: isMobile
+              ? const EdgeInsets.all(12)
+              : const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          elevation: 0,
+        ),
+        child: viewModel.isBusy || saving
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : (isMobile
+                  ? Icon(Icons.save_rounded, size: 18)
+                  : Text(
+                      'Save Note',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    )),
       ),
-      child: viewModel.isBusy
-          ? const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white,
-              ),
-            )
-          : (isMobile
-                ? Icon(Icons.save_rounded, size: 18)
-                : Text(
-                    'Save Note',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                  )),
     );
   }
 
@@ -652,8 +729,10 @@ class _ContentAreaState extends State<ContentArea> {
         mode: PasswordMode.set,
       );
       if (password != null && password.isNotEmpty) {
-        viewModel.setPassword(password);
-        _promptSave(context);
+        final result = await viewModel.setPassword(password);
+        if (!mounted || !result.isSuccess) return;
+        if (!viewModel.usesOwnedStorage || !viewModel.draftSession.isPersisted)
+          _promptSave(this.context);
       }
     }
   }
@@ -746,7 +825,9 @@ class _ContentAreaState extends State<ContentArea> {
                 child: SingleChildScrollView(
                   child: CodeField(
                     controller: viewModel.htmlController,
-                    readOnly: viewModel.isLibraryCutover,
+                    readOnly:
+                        viewModel.isLibraryCutover ||
+                        viewModel.isDeletingCurrent,
                     textStyle: TextStyle(
                       fontFamily: 'monospace',
                       fontSize: 14,
@@ -852,29 +933,37 @@ class _ContentAreaState extends State<ContentArea> {
                   );
                   if (newPassword == null || newPassword.isEmpty) return;
 
-                  // Show progress dialog
+                  // Legacy operations retain their existing modal; owned
+                  // preparation uses the nonblocking per-file/batch channels.
                   if (!mounted) return;
-                  showDialog(
-                    context: stateContext,
-                    barrierDismissible: false,
-                    builder: (ctx) => _ProgressDialog(viewModel: viewModel),
-                  );
+                  if (!viewModel.usesOwnedStorage)
+                    showDialog(
+                      context: stateContext,
+                      barrierDismissible: false,
+                      builder: (ctx) => _ProgressDialog(viewModel: viewModel),
+                    );
 
-                  final result = await viewModel.changePassword(
+                  final result = await viewModel.changePasswordResult(
                     newPassword,
                     oldPassword: currentPassword,
                   );
 
                   // Close progress dialog using root navigator
-                  if (mounted) {
+                  if (mounted && !viewModel.usesOwnedStorage) {
                     Navigator.of(stateContext, rootNavigator: true).pop();
                   }
 
                   if (mounted) {
                     ScaffoldMessenger.of(stateContext).showSnackBar(
                       SnackBar(
-                        content: Text(result),
-                        backgroundColor: Colors.green,
+                        content: Text(
+                          result.isSuccess
+                              ? 'Password changed successfully'
+                              : result.message ?? 'Password change failed.',
+                        ),
+                        backgroundColor: result.isSuccess
+                            ? Colors.green
+                            : Colors.red,
                       ),
                     );
                   }
@@ -884,8 +973,13 @@ class _ContentAreaState extends State<ContentArea> {
                     mode: PasswordMode.set,
                   );
                   if (password != null && password.isNotEmpty) {
-                    viewModel.setPassword(password);
-                    if (mounted) _promptSave(stateContext);
+                    final saved = await viewModel.setPassword(password);
+                    if (mounted &&
+                        saved.isSuccess &&
+                        (!viewModel.usesOwnedStorage ||
+                            !viewModel.draftSession.isPersisted)) {
+                      _promptSave(this.context);
+                    }
                   }
                 }
               },
@@ -929,18 +1023,19 @@ class _ContentAreaState extends State<ContentArea> {
 
                   // Show progress dialog
                   if (!mounted) return;
-                  showDialog(
-                    context: stateContext,
-                    barrierDismissible: false,
-                    builder: (ctx) => _ProgressDialog(viewModel: viewModel),
-                  );
+                  if (!viewModel.usesOwnedStorage)
+                    showDialog(
+                      context: stateContext,
+                      barrierDismissible: false,
+                      builder: (ctx) => _ProgressDialog(viewModel: viewModel),
+                    );
 
                   final success = await viewModel.removePassword(
                     password: password,
                   );
 
                   // Close progress dialog using root navigator
-                  if (mounted) {
+                  if (mounted && !viewModel.usesOwnedStorage) {
                     Navigator.of(stateContext, rootNavigator: true).pop();
                   }
 
@@ -1003,8 +1098,9 @@ class _ContentAreaState extends State<ContentArea> {
     );
   }
 
-  void _promptSave(BuildContext context) {
-    viewModel.saveNote();
+  Future<void> _promptSave(BuildContext context) async {
+    final result = await viewModel.saveNote();
+    if (!context.mounted || !result.isSuccess) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text("Note saved"),
@@ -1013,9 +1109,17 @@ class _ContentAreaState extends State<ContentArea> {
     );
   }
 
-  void _confirmDelete(BuildContext context) {
-    if (!viewModel.ensureExtendedNoteOperations()) return;
+  Future<void> _confirmDelete(BuildContext context) async {
+    if (!viewModel.usesOwnedStorage &&
+        !viewModel.ensureExtendedNoteOperations())
+      return;
     if (viewModel.currentFileName == null) return;
+    final fileName = viewModel.currentFileName!;
+    final reference = viewModel.usesOwnedStorage
+        ? await viewModel.reviewDeletion(fileName)
+        : null;
+    if (!context.mounted || (viewModel.usesOwnedStorage && reference == null))
+      return;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1036,7 +1140,11 @@ class _ContentAreaState extends State<ContentArea> {
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
-              viewModel.deleteNote(viewModel.currentFileName!);
+              if (reference != null) {
+                viewModel.deleteReviewedNote(reference);
+              } else {
+                viewModel.deleteNote(fileName);
+              }
             },
             child: Text("Delete", style: TextStyle(color: Colors.redAccent)),
           ),
@@ -1199,6 +1307,54 @@ class _AttachmentBarState extends State<AttachmentBar> {
   Widget _buildAttachmentItem(
     BuildContext context,
     AttachmentModel attachment,
+  ) => ValueListenableBuilder<List<AttachmentJobState>>(
+    valueListenable: viewModel.attachmentJobsNotifier,
+    builder: (context, jobs, _) {
+      final matching = jobs
+          .where(
+            (job) => job.progress.value.originalAttachmentId == attachment.id,
+          )
+          .toList();
+      final preview = _buildCommittedAttachmentItem(context, attachment);
+      if (matching.isEmpty) return preview;
+      return ValueListenableBuilder<AttachmentJobSnapshot>(
+        valueListenable: matching.last.progress,
+        child: preview,
+        builder: (context, state, child) => Stack(
+          children: [
+            child!,
+            if (state.active || state.phase == AttachmentJobPhase.failed)
+              Positioned(
+                top: 0,
+                right: 0,
+                child: Tooltip(
+                  message: state.error ?? state.phase.name,
+                  child: Container(
+                    color: colors.toolbarIsland,
+                    padding: const EdgeInsets.all(3),
+                    child: state.active
+                        ? const SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(
+                            Icons.error_outline,
+                            size: 16,
+                            color: Colors.redAccent,
+                          ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    },
+  );
+
+  Widget _buildCommittedAttachmentItem(
+    BuildContext context,
+    AttachmentModel attachment,
   ) {
     // 1. Loading State
     if (attachment.isLoading) {
@@ -1227,7 +1383,9 @@ class _AttachmentBarState extends State<AttachmentBar> {
     }
 
     final ext = attachment.fileName.split('.').last.toLowerCase();
-    final isImg = ['jpg', 'jpeg', 'png', 'webp', 'heic'].contains(ext);
+    final isImg =
+        ['jpg', 'jpeg', 'png', 'webp', 'heic'].contains(ext) &&
+        attachment.size <= 8 * 1024 * 1024;
 
     return GestureDetector(
       onTap: () => _viewAttachment(context, attachment),
@@ -1262,6 +1420,8 @@ class _AttachmentBarState extends State<AttachmentBar> {
                             borderRadius: BorderRadius.circular(7),
                             child: Image.memory(
                               snapshot.data!,
+                              cacheWidth: 120,
+                              cacheHeight: 120,
                               fit: BoxFit.cover,
                               errorBuilder: (c, e, s) => Icon(
                                 Icons.broken_image,

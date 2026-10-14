@@ -5,6 +5,67 @@ import 'package:flutter_application_1/core/operations/operation_result.dart';
 import 'package:flutter_application_1/core/operations/shutdown_sequence.dart';
 
 void main() {
+  testWidgets('slow cleanup completes the original exit wait without retry', (
+    tester,
+  ) async {
+    final storage = Completer<OperationResult<void>>();
+    var warnings = 0;
+    var calls = 0;
+    OperationResult<void>? response;
+    final sequence = ShutdownSequence(
+      closeWatchers: () async {},
+      closeStorage: () {
+        calls++;
+        return storage.future;
+      },
+    );
+    sequence.closeForExit(onSlow: () => warnings++).then((result) {
+      response = result;
+    });
+    await tester.pump(const Duration(seconds: 11));
+    expect(warnings, 1);
+    expect(response, isNull);
+    expect(calls, 1);
+    storage.complete(const OperationResult.success());
+    await tester.pump();
+    expect(response?.isSuccess, isTrue);
+    await tester.pump(const Duration(seconds: 11));
+    expect(warnings, 1);
+    expect(calls, 1);
+  });
+
+  testWidgets('fast cleanup cancels latency warning', (tester) async {
+    var warnings = 0;
+    final sequence = ShutdownSequence(
+      closeWatchers: () async {},
+      closeStorage: () async => const OperationResult.success(),
+    );
+    final closing = sequence.closeForExit(onSlow: () => warnings++);
+    await tester.pump();
+    expect((await closing).isSuccess, isTrue);
+    await tester.pump(const Duration(seconds: 11));
+    expect(warnings, 0);
+  });
+
+  testWidgets('failed exit wait retains failure for a deliberate retry', (
+    tester,
+  ) async {
+    var warnings = 0;
+    final sequence = ShutdownSequence(
+      closeWatchers: () async {},
+      closeStorage: () async => const OperationResult.failure(
+        OperationOutcome.recoveryRequired,
+        'Synthetic cleanup failure',
+      ),
+    );
+    final closing = sequence.closeForExit(onSlow: () => warnings++);
+    await tester.pump();
+    expect((await closing).outcome, OperationOutcome.recoveryRequired);
+    await tester.pump(const Duration(seconds: 11));
+    expect(warnings, 0);
+    expect(sequence.phase, ShutdownPhase.failed);
+  });
+
   test('storage cannot release before watcher cleanup acknowledges', () async {
     final watchers = Completer<void>();
     var storageCloses = 0;

@@ -4,13 +4,19 @@ import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import '../models/note_model.dart';
 import 'encryption_service.dart';
+import 'note_codec.dart';
 
 /// Result of extracting a pack file
 class PackResult {
   final NoteModel note;
   final Map<String, Uint8List> attachments;
+  final Map<String, dynamic> metadata;
 
-  PackResult({required this.note, required this.attachments});
+  PackResult({
+    required this.note,
+    required this.attachments,
+    required this.metadata,
+  });
 }
 
 /// Export format options
@@ -31,6 +37,7 @@ class PackService {
     NoteModel note,
     Map<String, Uint8List> attachments, {
     String? password,
+    Map<String, dynamic>? noteMetadata,
   }) async {
     final builder = BytesBuilder();
 
@@ -38,7 +45,7 @@ class PackService {
     final payloadBuilder = BytesBuilder();
 
     // Metadata (note JSON without embedded attachment data)
-    final noteJson = json.encode(note.toJson());
+    final noteJson = _noteJson(note, noteMetadata);
     final noteBytes = utf8.encode(noteJson);
     payloadBuilder.add(_int32ToBytes(noteBytes.length));
     payloadBuilder.add(noteBytes);
@@ -111,7 +118,8 @@ class PackService {
         payload.sublist(offset, offset + noteLength),
       );
       offset += noteLength;
-      final note = NoteModel.fromJson(json.decode(noteJson));
+      final decoded = NoteCodec.decodeMetadata(noteJson);
+      final note = decoded.note;
 
       // Read attachments
       final attachmentCount = _bytesToInt32(payload, offset);
@@ -134,7 +142,11 @@ class PackService {
         attachments[id] = data;
       }
 
-      return PackResult(note: note, attachments: attachments);
+      return PackResult(
+        note: note,
+        attachments: attachments,
+        metadata: decoded.metadata,
+      );
     } catch (e) {
       print('Error extracting pack: $e');
       return null;
@@ -146,11 +158,12 @@ class PackService {
     NoteModel note,
     Map<String, Uint8List> attachments, {
     String? password,
+    Map<String, dynamic>? noteMetadata,
   }) async {
     final archive = Archive();
 
     // Add note.json
-    final noteJson = json.encode(note.toJson());
+    final noteJson = _noteJson(note, noteMetadata);
     var noteBytes = utf8.encode(noteJson);
 
     // If password, encrypt the note JSON
@@ -231,7 +244,8 @@ class PackService {
       }
 
       final noteJson = utf8.decode(noteBytes);
-      final note = NoteModel.fromJson(json.decode(noteJson));
+      final decoded = NoteCodec.decodeMetadata(noteJson);
+      final note = decoded.note;
 
       // Find metadata.json for attachment mapping
       Map<String, String> idToFilename = {};
@@ -280,11 +294,26 @@ class PackService {
         }
       }
 
-      return PackResult(note: note, attachments: attachments);
+      return PackResult(
+        note: note,
+        attachments: attachments,
+        metadata: decoded.metadata,
+      );
     } catch (e) {
       print('Error extracting ZIP pack: $e');
       return null;
     }
+  }
+
+  /// Preserve unknown fields and legacy representation, validating known fields
+  /// against the model used for attachment framing before creating an archive.
+  String _noteJson(NoteModel note, Map<String, dynamic>? metadata) {
+    final encoded = json.encode(metadata ?? note.toJson());
+    final decoded = NoteCodec.decodeMetadata(encoded);
+    if (json.encode(decoded.note.toJson()) != json.encode(note.toJson())) {
+      throw const FormatException('Package metadata does not match the note.');
+    }
+    return encoded;
   }
 
   /// Check if data is a binary pack file

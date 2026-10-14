@@ -5,9 +5,12 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Flutter",
+            "name": "Future Notes (Windows Debug)",
             "request": "launch",
-            "type": "dart"
+            "type": "dart",
+            "program": "lib/main.dart",
+            "deviceId": "windows",
+            "flutterMode": "debug"
         },
         {
             "type": "chrome",

@@ -1,27 +1,84 @@
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'features/dashboard/views/dashboard_screen.dart';
 import 'features/dashboard/services/settings_service.dart';
 import 'core/theme/app_theme.dart';
+import 'core/storage/storage_environment.dart';
+import 'core/storage/owned_app_services.dart';
+import 'core/storage/storage_startup_failure.dart';
+import 'core/storage/windows_storage_bootstrap.dart';
 
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SettingsService().init();
-  runApp(const MyApp());
+  OwnedAppServices? services;
+  try {
+    var environment = StorageEnvironment.fromDefines();
+    if (!kIsWeb && Platform.isWindows && !environment.hasOwnedStorage) {
+      environment = await WindowsStorageBootstrap.resolve();
+    }
+    SettingsService().configureStorage(environment);
+    if (environment.hasOwnedStorage) {
+      final runtime = OwnedAppServices(environment: environment);
+      services = runtime;
+      final initialized = await runtime.initialize();
+      if (!initialized.isSuccess) {
+        if (kDebugMode)
+          debugPrint(
+            'Future Notes startup failed (${initialized.outcome.name}).',
+          );
+        runApp(StorageStartupFailure(services: runtime));
+        return;
+      }
+      if (kDebugMode) {
+        debugPrint(
+          'Future Notes startup: owned storage ready; canonical main editor selected.',
+        );
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) =>
+              debugPrint('Future Notes startup: first editor frame delivered.'),
+        );
+      }
+      runApp(
+        MyApp(
+          settings: runtime.settings,
+          home: DashboardScreen(
+            settings: runtime.settings,
+            fileService: runtime.files,
+            onClose: runtime.close,
+          ),
+        ),
+      );
+      return;
+    }
+    await SettingsService().init();
+    runApp(const MyApp());
+  } catch (_) {
+    if (kDebugMode)
+      debugPrint(
+        'Future Notes startup failed (configuration or storage admission).',
+      );
+    // A bad opt-in configuration must never select the old writer as fallback.
+    runApp(StorageStartupFailure(services: services));
+  }
 }
 
 class MyApp extends StatefulWidget {
-  const MyApp({super.key});
+  const MyApp({super.key, this.settings, this.home});
+
+  final SettingsService? settings;
+  final Widget? home;
 
   @override
   State<MyApp> createState() => _MyAppState();
 }
 
 class _MyAppState extends State<MyApp> {
-  final _settings = SettingsService();
+  late final _settings = widget.settings ?? SettingsService();
 
   @override
   void initState() {
@@ -74,7 +131,7 @@ class _MyAppState extends State<MyApp> {
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: _settings.themeMode,
-      home: const DashboardScreen(),
+      home: widget.home ?? const DashboardScreen(),
     );
   }
 }

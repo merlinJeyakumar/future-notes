@@ -12,7 +12,7 @@ $rehearsalRoot = Join-Path $workspace ".validation/future-notes-validation-activ
 $phase = 'admission'
 
 function Assert-NoApp {
-    if (@(Get-Process -Name flutter_application_1 -ErrorAction SilentlyContinue).Count -ne 0) {
+    if (@(Get-Process -Name FutureNotes,flutter_application_1 -ErrorAction SilentlyContinue).Count -ne 0) {
         throw 'A project app is running.'
     }
 }

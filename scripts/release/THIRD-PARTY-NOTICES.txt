@@ -1,0 +1,15 @@
+Flutter and Dart package license notices are included in data/flutter_assets/NOTICES.Z.
+
+Microsoft Visual C++ Release runtime DLLs are distributed unmodified from the
+Visual Studio redistributable directory. They are Microsoft components subject
+to their applicable Microsoft license terms, not Future Notes source code.
+Redistribution reference:
+https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution
+Deployment reference:
+https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files
+
+Media Kit Windows native playback includes mpv and its associated libraries.
+Upstream notices, source/build references and licensing information:
+https://github.com/media-kit/media-kit
+https://github.com/media-kit/libmpv-win32-video-build
+https://github.com/mpv-player/mpv/blob/master/Copyright

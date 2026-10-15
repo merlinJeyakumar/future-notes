@@ -54,7 +54,7 @@ if ($receipt.version -ne 1 -or $receipt.exitCode -ne 0 -or
 # Recheck the original and immutable backup immediately before activation.
 & (Join-Path $PSScriptRoot 'Prepare-StorageActivation.ps1') -Mode Verify
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-if (@(Get-Process -Name flutter_application_1 -ErrorAction SilentlyContinue).Count -ne 0) {
+if (@(Get-Process -Name FutureNotes,flutter_application_1 -ErrorAction SilentlyContinue).Count -ne 0) {
     throw 'A project app is running; a second instance will not be launched.'
 }
 if (-not (Test-Path -LiteralPath $definesPath)) {

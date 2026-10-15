@@ -158,7 +158,7 @@ class _PasswordDialogState extends State<PasswordDialog> {
           children: [
             Text(
               _description,
-              style: TextStyle(color: theme.appTextSecondary, fontSize: 13),
+              style: TextStyle(color: theme.appTextSecondary, fontSize: 11.232),
             ),
             const SizedBox(height: 16),
             if (_errorText != null)
@@ -166,7 +166,10 @@ class _PasswordDialogState extends State<PasswordDialog> {
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
                   _errorText!,
-                  style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                  style: const TextStyle(
+                    color: Colors.redAccent,
+                    fontSize: 11.232,
+                  ),
                 ),
               ),
 

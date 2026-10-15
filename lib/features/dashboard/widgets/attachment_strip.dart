@@ -4,6 +4,7 @@ import '../models/attachment_job.dart';
 import '../models/note_model.dart';
 import '../viewmodels/content_viewmodel.dart';
 import 'attachment_viewer.dart';
+import 'attachment_presentation.dart';
 
 class AttachmentStrip extends StatefulWidget {
   const AttachmentStrip({
@@ -19,15 +20,38 @@ class AttachmentStrip extends StatefulWidget {
 
 class _AttachmentStripState extends State<AttachmentStrip> {
   bool expanded = true;
+  final _openIntents = <String>{};
   ContentViewModel get model => widget.viewModel;
+
   Future<void> _action(
     AttachmentAction action,
     AttachmentModel attachment,
+    FocusNode focus,
   ) async {
-    switch (action) {
-      case AttachmentAction.open:
-        final result = await model.openAttachment(attachment);
-        if (!mounted || !result.isSuccess || model.isLocked) return;
+    final owner = model.draftSession.generation;
+    final credential = model.draftSession.credentialGeneration;
+    final path = model.currentContentPath;
+    final key = '$owner/$credential/$path/${attachment.id}';
+    bool current() =>
+        mounted &&
+        !model.isLocked &&
+        owner == model.draftSession.generation &&
+        credential == model.draftSession.credentialGeneration &&
+        path == model.currentContentPath &&
+        model.attachments.any((a) => a.id == attachment.id);
+    if (action == AttachmentAction.open || action == AttachmentAction.system) {
+      if (!_openIntents.add(key)) return;
+      try {
+        final result = await model.openAttachment(
+          attachment,
+          system: action == AttachmentAction.system,
+        );
+        if (!mounted ||
+            !current() ||
+            !result.isSuccess ||
+            action == AttachmentAction.system) {
+          return;
+        }
         await showDialog<void>(
           context: context,
           builder: (_) => AttachmentViewer(
@@ -37,19 +61,23 @@ class _AttachmentStripState extends State<AttachmentStrip> {
             playerFactory: widget.playerFactory,
           ),
         );
-      case AttachmentAction.system:
-        await model.openAttachment(attachment, system: true);
-      case AttachmentAction.save:
-        await model.exportAttachment(attachment);
-      case AttachmentAction.remove:
-        await model.removeAttachment(attachment.id);
+        if (current() && focus.context != null && focus.canRequestFocus) {
+          focus.requestFocus();
+        }
+      } finally {
+        _openIntents.remove(key);
+      }
+    } else if (action == AttachmentAction.save) {
+      await model.exportAttachment(attachment);
+    } else {
+      await model.removeAttachment(attachment.id);
     }
   }
 
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<bool>(
     valueListenable: model.isLockedNotifier,
-    builder: (_, locked, child) => locked
+    builder: (_, locked, _) => locked
         ? const SizedBox.shrink()
         : ListenableBuilder(
             listenable: Listenable.merge([
@@ -61,42 +89,41 @@ class _AttachmentStripState extends State<AttachmentStrip> {
               final attachments = model.attachmentsNotifier.value;
               final jobs = model.attachmentJobsNotifier.value
                   .where(
-                    (job) =>
-                        job.progress.value.owner ==
-                        model.draftSession.generation,
+                    (j) =>
+                        j.progress.value.owner == model.draftSession.generation,
                   )
                   .toList();
+              final latest = <String, AttachmentJobState>{};
+              for (final job in jobs) {
+                final id = job.progress.value.originalAttachmentId;
+                if (id != null) latest[id] = job;
+              }
+              final ids = attachments.map((a) => a.id).toSet();
               final pending = jobs
                   .where(
-                    (job) =>
-                        job.progress.value.operation ==
+                    (j) =>
+                        j.progress.value.operation ==
                             AttachmentJobOperation.add &&
-                        !attachments.any(
-                          (a) => a.id == job.progress.value.id,
-                        ) &&
-                        job.progress.value.phase !=
-                            AttachmentJobPhase.completed &&
-                        job.progress.value.phase !=
-                            AttachmentJobPhase.cancelled,
+                        !ids.contains(j.progress.value.id) &&
+                        (j.progress.value.active ||
+                            j.progress.value.phase ==
+                                AttachmentJobPhase.failed),
                   )
                   .toList();
-              if (attachments.isEmpty && pending.isEmpty) {
+              if (attachments.isEmpty && pending.isEmpty)
                 return const SizedBox.shrink();
-              }
+              final scale = MediaQuery.textScalerOf(context).scale(1);
               return Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     ListenableBuilder(
-                      listenable: Listenable.merge(jobs.map((j) => j.progress)),
+                      listenable: Listenable.merge(jobs.map((j) => j.phase)),
                       builder: (context, _) {
                         final active = jobs
-                            .where((job) => job.progress.value.active)
+                            .where((j) => j.progress.value.active)
                             .length;
                         return TextButton.icon(
                           onPressed: () => setState(() => expanded = !expanded),
@@ -111,33 +138,42 @@ class _AttachmentStripState extends State<AttachmentStrip> {
                     ),
                     if (expanded)
                       SizedBox(
-                        height: 180 * MediaQuery.textScalerOf(context).scale(1),
+                        height:
+                            (jobs.any(
+                                  (j) =>
+                                      j.progress.value.phase ==
+                                      AttachmentJobPhase.failed,
+                                )
+                                ? 200
+                                : jobs.any(
+                                    (j) =>
+                                        j.progress.value.active ||
+                                        j.progress.value.phase ==
+                                            AttachmentJobPhase.failed,
+                                  )
+                                ? 154
+                                : 110) *
+                            scale,
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
                           itemCount: attachments.length + pending.length,
-                          separatorBuilder: (_, index) =>
-                              const SizedBox(width: 8),
+                          separatorBuilder: (_, _) => const SizedBox(width: 8),
                           itemBuilder: (context, index) {
-                            if (index >= attachments.length) {
-                              return _pending(
-                                pending[index - attachments.length],
-                              );
-                            }
-                            final attachment = attachments[index];
-                            final matching = jobs
-                                .where(
-                                  (j) =>
-                                      j.progress.value.originalAttachmentId ==
-                                      attachment.id,
-                                )
-                                .toList();
-                            return matching.isEmpty
-                                ? _card(attachment, null)
-                                : ValueListenableBuilder<AttachmentJobSnapshot>(
-                                    valueListenable: matching.last.progress,
-                                    builder: (_, state, child) =>
-                                        _card(attachment, state),
-                                  );
+                            final attachment = index < attachments.length
+                                ? attachments[index]
+                                : null;
+                            final job = attachment == null
+                                ? pending[index - attachments.length]
+                                : latest[attachment.id];
+                            final key =
+                                '${model.draftSession.generation}/${attachment?.id ?? job!.progress.value.id}';
+                            return _AttachmentTile(
+                              key: ValueKey(key),
+                              model: model,
+                              attachment: attachment,
+                              job: job,
+                              onAction: _action,
+                            );
                           },
                         ),
                       ),
@@ -147,168 +183,179 @@ class _AttachmentStripState extends State<AttachmentStrip> {
             },
           ),
   );
-  Widget _progress(AttachmentJobSnapshot state) {
-    final label = switch (state.phase) {
-      AttachmentJobPhase.queued => 'Queued',
-      AttachmentJobPhase.preparing => 'Preparing',
-      AttachmentJobPhase.decrypting => 'Decrypting',
-      AttachmentJobPhase.encrypting => 'Encrypting',
-      AttachmentJobPhase.verifying => 'Verifying',
-      AttachmentJobPhase.finalizing => 'Finalizing',
-      AttachmentJobPhase.completed => 'Ready',
-      AttachmentJobPhase.cancelled => 'Cancelled',
-      AttachmentJobPhase.failed => 'Failed',
+}
+
+class _AttachmentTile extends StatefulWidget {
+  const _AttachmentTile({
+    super.key,
+    required this.model,
+    required this.attachment,
+    required this.job,
+    required this.onAction,
+  });
+  final ContentViewModel model;
+  final AttachmentModel? attachment;
+  final AttachmentJobState? job;
+  final Future<void> Function(AttachmentAction, AttachmentModel, FocusNode)
+  onAction;
+  @override
+  State<_AttachmentTile> createState() => _AttachmentTileState();
+}
+
+class _AttachmentTileState extends State<_AttachmentTile> {
+  final _focus = FocusNode();
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.job == null
+      ? _card(context, null)
+      : ValueListenableBuilder<AttachmentJobSnapshot>(
+          valueListenable: widget.job!.progress,
+          builder: (context, state, _) => _card(context, state),
+        );
+
+  Widget _card(BuildContext context, AttachmentJobSnapshot? state) {
+    final attachment = widget.attachment;
+    final name = attachment?.fileName ?? state!.fileName;
+    final kind = attachmentVisualKind(name);
+    final cached = attachment == null
+        ? null
+        : widget.model.cachedAttachment(attachment.id);
+    final active = state?.active ?? false;
+    final waiting =
+        state?.phase == AttachmentJobPhase.finalizing ||
+        state?.phase == AttachmentJobPhase.cancelling;
+    final total = state?.total;
+    final fraction = !waiting && total != null && total > 0
+        ? (state!.bytes / total).clamp(0.0, 1.0)
+        : null;
+    final icon = switch (kind) {
+      AttachmentVisualKind.image => Icons.image_outlined,
+      AttachmentVisualKind.video => Icons.play_circle_outline,
+      AttachmentVisualKind.audio => Icons.audio_file_outlined,
+      AttachmentVisualKind.document => Icons.description_outlined,
+      AttachmentVisualKind.file => Icons.insert_drive_file_outlined,
     };
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: Theme.of(context).textTheme.labelSmall),
-        if (state.active)
-          LinearProgressIndicator(
-            value:
-                state.phase == AttachmentJobPhase.finalizing ||
-                    state.total == null ||
-                    state.total == 0
-                ? null
-                : (state.bytes / state.total!).clamp(0, 1),
-          ),
-        if (state.total != null && state.active)
-          Text(
-            '${state.bytes} / ${state.total} bytes',
-            style: Theme.of(context).textTheme.labelSmall,
-          ),
-        if (state.error != null)
-          Tooltip(
-            message: state.error!,
-            child: Text(
-              state.error!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-      ],
-    );
-  }
+    void action(AttachmentAction action) {
+      if (attachment != null) widget.onAction(action, attachment, _focus);
+    }
 
-  Widget _container(List<Widget> children) => SizedBox(
-    width: 240,
-    child: Card(
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: children,
-        ),
-      ),
-    ),
-  );
-  Widget _card(AttachmentModel attachment, AttachmentJobSnapshot? state) {
-    final cached = model.cachedAttachment(attachment.id);
-    final extension = attachment.fileName.split('.').last.toLowerCase();
-    final image =
-        cached != null &&
-        ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'].contains(extension);
-    return _container([
-      Row(
-        children: [
-          Expanded(
-            child: Text(
-              attachment.fileName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          AttachmentMoreButton(
-            onSelected: (action) => _action(action, attachment),
-            enabled: state?.active != true,
-            canRemove: !model.hasAttachmentJobs,
-          ),
-        ],
-      ),
-      Expanded(
-        child: InkWell(
-          onTap: state?.active == true
-              ? null
-              : () => _action(AttachmentAction.open, attachment),
-          child: Center(
-            child: image
-                ? Image.file(
-                    File(cached.path),
-                    cacheWidth: 120,
-                    cacheHeight: 120,
-                    errorBuilder: (_, error, stack) =>
-                        const Icon(Icons.insert_drive_file),
-                  )
-                : Icon(
-                    extension == 'mp4'
-                        ? Icons.play_circle_outline
-                        : Icons.insert_drive_file,
-                    size: 32,
-                  ),
-          ),
-        ),
-      ),
-      if (state != null &&
-          (state.active || state.phase == AttachmentJobPhase.failed))
-        _progress(state),
-      if (state?.cancellable == true)
-        TextButton(
-          onPressed: () => model.cancelAttachmentJob(state!.id),
-          child: const Text('Cancel'),
-        ),
-    ]);
-  }
-
-  Widget _pending(AttachmentJobState job) =>
-      ValueListenableBuilder<AttachmentJobSnapshot>(
-        valueListenable: job.progress,
-        builder: (_, state, child) => _container([
-          Row(
+    return SizedBox(
+      width: 276,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  state.fileName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+              Row(
+                children: [
+                  if (cached != null && kind == AttachmentVisualKind.image)
+                    Image.file(
+                      File(cached.path),
+                      width: 24,
+                      height: 24,
+                      cacheWidth: 120,
+                      cacheHeight: 120,
+                      errorBuilder: (_, _, _) => Icon(icon, size: 24),
+                    )
+                  else
+                    IconButton(
+                      tooltip: 'Open $name',
+                      onPressed: attachment == null || active
+                          ? null
+                          : () => action(AttachmentAction.open),
+                      icon: Icon(icon, size: 24),
+                    ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Tooltip(
+                      message: name,
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  if (attachment != null)
+                    TextButton(
+                      focusNode: _focus,
+                      onPressed: active
+                          ? null
+                          : () => action(AttachmentAction.open),
+                      child: Text('Open', semanticsLabel: 'Open $name'),
+                    ),
+                  AttachmentMoreButton(
+                    fileName: name,
+                    enabled: attachment != null && !active,
+                    canRemove:
+                        attachment != null && !widget.model.hasAttachmentJobs,
+                    onSelected: action,
+                  ),
+                ],
               ),
-              AttachmentMoreButton(
-                enabled: false,
-                canRemove: state.phase != AttachmentJobPhase.finalizing,
-                onSelected: (action) async {
-                  if (action == AttachmentAction.remove) {
-                    await model.cancelAttachmentJob(state.id);
-                    model.removePendingAttachmentJob(state.id);
-                  }
-                },
+              if (active || state?.phase == AttachmentJobPhase.failed) ...[
+                Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    attachmentPhaseLabel(state!.phase),
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ),
+                if (active) LinearProgressIndicator(value: fraction),
+                if (state.error != null)
+                  Tooltip(
+                    message: state.error!,
+                    child: Text(
+                      state.error!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  )
+                else if (total != null && !waiting)
+                  Text(
+                    '${formatAttachmentBytes(state.bytes)} / ${formatAttachmentBytes(total)}${fraction == null ? '' : ' · ${(fraction * 100).floor()}%'}',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+              ] else
+                Text(
+                  '${kind.name} · ${formatAttachmentBytes(attachment?.size ?? 0)}',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              const Spacer(),
+              Wrap(
+                children: [
+                  if (state?.cancellable ?? false)
+                    TextButton(
+                      onPressed: () =>
+                          widget.model.cancelAttachmentJob(state!.id),
+                      child: const Text('Cancel'),
+                    ),
+                  if (attachment == null &&
+                      state?.phase == AttachmentJobPhase.failed) ...[
+                    TextButton(
+                      onPressed: () =>
+                          widget.model.retryAttachmentJob(state!.id),
+                      child: const Text('Retry'),
+                    ),
+                    TextButton(
+                      onPressed: () =>
+                          widget.model.removePendingAttachmentJob(state!.id),
+                      child: const Text('Remove pending'),
+                    ),
+                  ],
+                ],
               ),
             ],
           ),
-          _progress(state),
-          const Spacer(),
-          if (state.cancellable)
-            TextButton(
-              onPressed: () => model.cancelAttachmentJob(state.id),
-              child: const Text('Cancel'),
-            ),
-          if (state.phase == AttachmentJobPhase.failed)
-            Row(
-              children: [
-                Flexible(
-                  child: TextButton(
-                    onPressed: () => model.retryAttachmentJob(state.id),
-                    child: const Text('Retry'),
-                  ),
-                ),
-                Flexible(
-                  child: TextButton(
-                    onPressed: () => model.removePendingAttachmentJob(state.id),
-                    child: const Text('Remove pending'),
-                  ),
-                ),
-              ],
-            ),
-        ]),
-      );
+        ),
+      ),
+    );
+  }
 }

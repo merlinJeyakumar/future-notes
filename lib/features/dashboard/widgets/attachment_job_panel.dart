@@ -1,3 +1,4 @@
+import 'attachment_presentation.dart';
 import 'package:flutter/material.dart';
 
 import '../models/attachment_job.dart';
@@ -50,7 +51,7 @@ class _AttachmentJobPanelState extends State<AttachmentJobPanel> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ListenableBuilder(
-              listenable: Listenable.merge(jobs.map((job) => job.progress)),
+              listenable: Listenable.merge(jobs.map((job) => job.phase)),
               builder: (context, _) {
                 final active = jobs
                     .where((job) => job.progress.value.active)
@@ -58,7 +59,24 @@ class _AttachmentJobPanelState extends State<AttachmentJobPanel> {
                 final batch = active
                     .where((job) => job.progress.value.batch)
                     .toList();
-                return Row(
+                final operation = jobs.any((job) => job.progress.value.batch)
+                    ? 'Password change'
+                    : jobs.every(
+                        (job) =>
+                            job.progress.value.operation ==
+                            AttachmentJobOperation.export,
+                      )
+                    ? 'Export'
+                    : jobs.every(
+                        (job) =>
+                            job.progress.value.operation ==
+                            AttachmentJobOperation.import,
+                      )
+                    ? 'Import'
+                    : 'Background operations';
+                return Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     TextButton.icon(
                       onPressed: () => setState(() => expanded = !expanded),
@@ -66,12 +84,11 @@ class _AttachmentJobPanelState extends State<AttachmentJobPanel> {
                         expanded ? Icons.expand_less : Icons.expand_more,
                       ),
                       label: Text(
-                        batch.isNotEmpty
-                            ? 'Password change: ${jobs.where((j) => j.progress.value.batch && j.progress.value.originalAttachmentId != null).length} files'
-                            : 'Attachments: ${active.length} active operations',
+                        active.isEmpty
+                            ? operation
+                            : '$operation: ${active.length} active',
                       ),
                     ),
-                    const Spacer(),
                     if (batch.any((job) => job.progress.value.cancellable))
                       TextButton(
                         onPressed: () => widget.viewModel.cancelAttachmentJob(
@@ -112,100 +129,92 @@ class _JobCard extends StatelessWidget {
   final AttachmentJobState job;
   final ContentViewModel viewModel;
   @override
-  Widget build(BuildContext context) =>
-      ValueListenableBuilder<AttachmentJobSnapshot>(
-        valueListenable: job.progress,
-        builder: (context, state, _) {
-          final label = switch (state.phase) {
-            AttachmentJobPhase.queued => 'Queued',
-            AttachmentJobPhase.preparing => 'Preparing',
-            AttachmentJobPhase.decrypting => 'Decrypting',
-            AttachmentJobPhase.encrypting => 'Encrypting',
-            AttachmentJobPhase.verifying => 'Verifying',
-            AttachmentJobPhase.finalizing => 'Finalizing',
-            AttachmentJobPhase.completed => 'Completed',
-            AttachmentJobPhase.cancelled => 'Cancelled',
-            AttachmentJobPhase.failed => 'Failed',
-          };
-          final total = state.total;
-          final fraction = total != null && total > 0
-              ? (state.bytes / total).clamp(0.0, 1.0)
-              : null;
-          return SizedBox(
-            width: 246,
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      state.fileName,
+  Widget build(
+    BuildContext context,
+  ) => ValueListenableBuilder<AttachmentJobSnapshot>(
+    valueListenable: job.progress,
+    builder: (context, state, _) {
+      final label = attachmentPhaseLabel(state.phase);
+      final total = state.total;
+      final fraction = total != null && total > 0
+          ? (state.bytes / total).clamp(0.0, 1.0)
+          : null;
+      return SizedBox(
+        width: 246,
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  state.fileName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(label, style: Theme.of(context).textTheme.labelSmall),
+                if (state.error != null)
+                  Tooltip(
+                    message: state.error!,
+                    child: Text(
+                      state.error!,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall,
                     ),
-                    Text(label, style: Theme.of(context).textTheme.labelSmall),
-                    if (state.error != null)
-                      Tooltip(
-                        message: state.error!,
-                        child: Text(
-                          state.error!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                      ),
-                    if (state.active) ...[
-                      const SizedBox(height: 6),
-                      LinearProgressIndicator(
-                        value: state.phase == AttachmentJobPhase.finalizing
-                            ? null
-                            : fraction,
-                      ),
-                      if (total != null)
-                        Text(
-                          '${state.bytes} / $total bytes',
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                    ],
-                    const Spacer(),
-                    if (state.phase == AttachmentJobPhase.failed)
-                      Row(
-                        children: [
-                          if (!state.batch)
-                            Flexible(
-                              child: TextButton(
-                                onPressed: () =>
-                                    viewModel.retryAttachmentJob(state.id),
-                                child: const Text('Retry'),
-                              ),
-                            ),
-                          Flexible(
-                            child: TextButton(
-                              onPressed: () => viewModel
-                                  .removePendingAttachmentJob(state.id),
-                              child: const Text('Remove pending'),
-                            ),
+                  ),
+                if (state.active) ...[
+                  const SizedBox(height: 6),
+                  LinearProgressIndicator(
+                    value:
+                        (state.phase == AttachmentJobPhase.finalizing ||
+                            state.phase == AttachmentJobPhase.cancelling)
+                        ? null
+                        : fraction,
+                  ),
+                  if (total != null)
+                    Text(
+                      '${formatAttachmentBytes(state.bytes)} / ${formatAttachmentBytes(total)}',
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                ],
+                const Spacer(),
+                if (state.phase == AttachmentJobPhase.failed)
+                  Row(
+                    children: [
+                      if (!state.batch)
+                        Flexible(
+                          child: TextButton(
+                            onPressed: () =>
+                                viewModel.retryAttachmentJob(state.id),
+                            child: const Text('Retry'),
                           ),
-                        ],
-                      )
-                    else if (state.cancellable)
-                      TextButton(
-                        onPressed: () =>
-                            viewModel.cancelAttachmentJob(state.id),
-                        child: const Text('Cancel'),
-                      )
-                    else if (!state.active)
-                      TextButton(
-                        onPressed: () =>
-                            viewModel.removePendingAttachmentJob(state.id),
-                        child: const Text('Dismiss'),
+                        ),
+                      Flexible(
+                        child: TextButton(
+                          onPressed: () =>
+                              viewModel.removePendingAttachmentJob(state.id),
+                          child: const Text('Remove pending'),
+                        ),
                       ),
-                  ],
-                ),
-              ),
+                    ],
+                  )
+                else if (state.cancellable)
+                  TextButton(
+                    onPressed: () => viewModel.cancelAttachmentJob(state.id),
+                    child: const Text('Cancel'),
+                  )
+                else if (!state.active)
+                  TextButton(
+                    onPressed: () =>
+                        viewModel.removePendingAttachmentJob(state.id),
+                    child: const Text('Dismiss'),
+                  ),
+              ],
             ),
-          );
-        },
+          ),
+        ),
       );
+    },
+  );
 }

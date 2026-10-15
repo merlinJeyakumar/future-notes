@@ -47,14 +47,19 @@ class AttachmentTransformWorker {
     }
     _tail = _tail.then((_) async {
       if (job._cancelled) {
-        job._completed.complete(
-          const OperationResult.failure(
-            OperationOutcome.cancelled,
-            'Attachment preparation cancelled.',
-          ),
-        );
+        if (!job._completed.isCompleted) {
+          job._completed.complete(
+            const OperationResult.failure(
+              OperationOutcome.cancelled,
+              'Attachment preparation cancelled.',
+            ),
+          );
+        }
         return;
       }
+      // No await before marking ownership: cancellation can settle immediately
+      // only while no isolate or file handle has been acquired.
+      job._started = true;
       final events = ReceivePort();
       final result = Completer<OperationResult<CipherFileResult>>();
       final ended = Completer<void>();
@@ -165,10 +170,19 @@ class FileTransformJob {
   FileTransformJob._();
   final _completed = Completer<OperationResult<CipherFileResult>>();
   bool _cancelled = false;
+  bool _started = false;
   SendPort? _cancelPort;
   Future<OperationResult<CipherFileResult>> get result => _completed.future;
   Future<OperationResult<CipherFileResult>> cancel() {
     _cancelled = true;
+    if (!_started && !_completed.isCompleted) {
+      _completed.complete(
+        const OperationResult.failure(
+          OperationOutcome.cancelled,
+          'Attachment preparation cancelled.',
+        ),
+      );
+    }
     _cancelPort?.send(true);
     return result;
   }

@@ -9,6 +9,7 @@ import 'core/storage/storage_environment.dart';
 import 'core/storage/owned_app_services.dart';
 import 'core/storage/storage_startup_failure.dart';
 import 'core/storage/windows_storage_bootstrap.dart';
+import 'core/platform/windows_navigation_shortcuts.dart';
 
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart';
@@ -121,6 +122,8 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Future Notes',
+      builder: (context, child) =>
+          WindowsNavigationShortcuts(child: child ?? const SizedBox.shrink()),
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,

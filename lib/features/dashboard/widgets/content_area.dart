@@ -1,3 +1,4 @@
+import '../models/save_ui_state.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
@@ -98,7 +99,9 @@ class _ContentAreaState extends State<ContentArea> {
                 ValueListenableBuilder<bool>(
                   valueListenable: viewModel.isLockedNotifier,
                   builder: (context, isLocked, child) {
-                    if (isLocked) return const SizedBox.shrink();
+                    if (isLocked || viewModel.isHtmlMode) {
+                      return const SizedBox.shrink();
+                    }
                     return IgnorePointer(
                       ignoring: viewModel.isLibraryCutover,
                       child: _buildFloatingToolbar(isMobile),
@@ -153,117 +156,144 @@ class _ContentAreaState extends State<ContentArea> {
     );
   }
 
-  /// Clean, minimal top strip with breadcrumb and secondary actions
+  /// Compact Stitch header; secondary actions reflow without taking title space.
   Widget _buildTopStrip(BuildContext context, bool isMobile) {
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: isMobile ? 12 : 20,
-        vertical: 12,
-      ),
-      // Clip hard edge to prevent pixel overflow if content is slightly too wide
-      clipBehavior: Clip.hardEdge,
-      decoration: const BoxDecoration(),
-      child: Row(
-        children: [
-          // Breadcrumb-style indicator
-          Expanded(child: _buildBreadcrumb(isMobile)),
-
-          // Secondary actions (right side)
-          _buildSecondaryActions(context),
-
-          if (!viewModel.isLocked) ...[
-            SizedBox(width: isMobile ? 8 : 16),
-            _buildModeToggleButton(),
-            SizedBox(width: isMobile ? 8 : 12),
-            // Save status belongs to the editable session.
-            ValueListenableBuilder<bool>(
-              valueListenable: viewModel.isSavingNotifier,
-              builder: (context, saving, _) => saving
-                  ? const Padding(
-                      padding: EdgeInsets.only(right: 10),
-                      child: Text('Saving…', style: TextStyle(fontSize: 12)),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-            _buildSaveButton(isMobile),
-          ],
-        ],
-      ),
+    final scale = MediaQuery.textScalerOf(context).scale(1);
+    final date = Text(
+      viewModel.currentNoteDate == null
+          ? 'Not saved'
+          : 'Note date ${_formatDate(viewModel.currentNoteDate!)}',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(color: colors.textSecondary, fontSize: 9.504),
     );
-  }
-
-  /// Breadcrumb indicator: "Editing > [title]"
-  Widget _buildBreadcrumb(bool isMobile) {
-    return Row(
-      // mainAxisSize.min removed to allow Expanded child to work naturally
-      children: [
-        Icon(
-          viewModel.isLocked ? Icons.lock_rounded : Icons.edit_note_rounded,
-          size: 18,
-          color: colors.accent,
-        ),
-        const SizedBox(width: 8),
-        if (!isMobile) ...[
-          Text(
-            viewModel.isLocked ? 'Locked' : 'Editing',
-            style: TextStyle(
-              color: colors.subtleGray,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Icon(
-            Icons.chevron_right_rounded,
-            size: 16,
-            color: colors.subtleGray.withOpacity(0.6),
-          ),
-          const SizedBox(width: 6),
-        ],
-        // Editable title
-        Expanded(
-          child: TextField(
-            controller: viewModel.titleController,
-            readOnly:
-                viewModel.isLibraryCutover ||
-                viewModel.isDeletingCurrent ||
-                viewModel.isLocked ||
-                !viewModel.draftSession.canWrite,
-            style: TextStyle(
-              color: colors.textPrimary,
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-            ),
-            decoration: InputDecoration(
-              hintText: 'Untitled note',
-              hintStyle: TextStyle(
-                color: colors.subtleGray,
-                fontWeight: FontWeight.w400,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final wide = constraints.maxWidth >= 1000 * scale;
+          if (wide) {
+            return Row(
+              children: [
+                Expanded(child: _buildHeaderTitle()),
+                const SizedBox(width: 16),
+                date,
+                if (!viewModel.isLocked) ...[
+                  const SizedBox(width: 12),
+                  _buildModeToggleButton(),
+                ],
+                const SizedBox(width: 8),
+                _buildSecondaryActions(context),
+                if (!viewModel.isLocked) ...[
+                  const SizedBox(width: 8),
+                  _buildSaveButton(false),
+                ],
+              ],
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: _buildHeaderTitle()),
+                  const SizedBox(width: 12),
+                  Flexible(
+                    child: Align(alignment: Alignment.centerRight, child: date),
+                  ),
+                ],
               ),
-              filled: false,
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              disabledBorder: InputBorder.none,
-              errorBorder: InputBorder.none,
-              focusedErrorBorder: InputBorder.none,
-              isDense: true,
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
-        ),
-        if (!isMobile) ...[
-          const SizedBox(width: 12),
-          Text(
-            viewModel.currentNoteDate == null
-                ? 'Not saved'
-                : 'Note date ${_formatDate(viewModel.currentNoteDate!)}',
-            style: TextStyle(color: colors.subtleGray, fontSize: 12),
-          ),
-        ],
-      ],
+              if (!viewModel.isLocked)
+                if (constraints.maxWidth >= 600 * scale)
+                  Row(
+                    children: [
+                      _buildModeToggleButton(),
+                      const Spacer(),
+                      _buildSecondaryActions(context),
+                      const SizedBox(width: 8),
+                      _buildSaveButton(false),
+                    ],
+                  )
+                else
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: _buildModeToggleButton(),
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Wrap(
+                          alignment: WrapAlignment.end,
+                          spacing: 8,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            _buildSecondaryActions(context),
+                            _buildSaveButton(false),
+                          ],
+                        ),
+                      ),
+                    ],
+                  )
+              else
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: _buildSecondaryActions(context),
+                ),
+            ],
+          );
+        },
+      ),
     );
   }
+
+  Widget _buildHeaderTitle() => Row(
+    children: [
+      Icon(
+        viewModel.isLocked ? Icons.lock_outline : Icons.edit_note_rounded,
+        size: 18,
+        color: colors.accent,
+      ),
+      const SizedBox(width: 8),
+      Expanded(
+        child: viewModel.isLocked
+            ? Text(
+                viewModel.titleController.text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colors.textPrimary,
+                  fontSize: 11.232,
+                  fontWeight: FontWeight.w600,
+                ),
+              )
+            : TextField(
+                controller: viewModel.titleController,
+                readOnly:
+                    viewModel.isLibraryCutover ||
+                    viewModel.isDeletingCurrent ||
+                    !viewModel.draftSession.canWrite,
+                style: TextStyle(
+                  color: colors.textPrimary,
+                  fontSize: 11.232,
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Untitled note',
+                  hintStyle: TextStyle(color: colors.subtleGray),
+                  filled: false,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  disabledBorder: InputBorder.none,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+      ),
+    ],
+  );
 
   String _formatDate(DateTime value) {
     const months = [
@@ -304,7 +334,7 @@ class _ContentAreaState extends State<ContentArea> {
         if (!viewModel.isLocked)
           _buildSubtleIconButton(
             Icons.settings_outlined,
-            'Settings',
+            'Note actions',
             onPressed: () => _showSettingsMenu(context),
           ),
       ],
@@ -319,66 +349,49 @@ class _ContentAreaState extends State<ContentArea> {
     bool isActive = false,
     Color? color,
   }) {
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            child: Icon(
-              icon,
-              size: 18,
-              color: color ?? (isActive ? colors.accent : colors.subtleGray),
-            ),
-          ),
-        ),
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+      icon: Icon(
+        icon,
+        size: 20,
+        color: color ?? (isActive ? colors.accent : colors.subtleGray),
       ),
     );
   }
 
-  /// Prominent pill-shaped Save button
-  Widget _buildSaveButton(bool isMobile) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: viewModel.isSavingNotifier,
-      builder: (context, saving, _) => ElevatedButton(
-        onPressed:
-            viewModel.isBusy || saving || !viewModel.draftSession.canWrite
-            ? null
-            : () => viewModel.saveNote(),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: colors.saveButton,
-          foregroundColor: Colors.white,
-          disabledBackgroundColor: colors.saveButton.withOpacity(0.5),
-          shape: isMobile ? const CircleBorder() : const StadiumBorder(),
-          padding: isMobile
-              ? const EdgeInsets.all(12)
-              : const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          elevation: 0,
+  Widget _buildSaveButton(bool isMobile) => ValueListenableBuilder<SaveUiState>(
+    valueListenable: viewModel.saveStateNotifier,
+    builder: (context, state, _) => ElevatedButton(
+      onPressed:
+          viewModel.isBusy ||
+              !state.hasChanges ||
+              state.phase == SavePhase.saving ||
+              !viewModel.draftSession.canWrite
+          ? null
+          : () => viewModel.saveNote(),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: colors.saveButton,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: colors.saveButton.withValues(alpha: .5),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        textStyle: const TextStyle(
+          fontSize: 10.368,
+          fontWeight: FontWeight.w600,
         ),
-        child: viewModel.isBusy || saving
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              )
-            : (isMobile
-                  ? Icon(Icons.save_rounded, size: 18)
-                  : Text(
-                      'Save Note',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
-                    )),
+        elevation: 0,
       ),
-    );
-  }
+      child: Text(
+        state.phase == SavePhase.saving
+            ? 'Saving…'
+            : state.canRetry
+            ? 'Retry Save'
+            : 'Save Note',
+      ),
+    ),
+  );
 
   /// Floating toolbar "island" with grouped formatting tools
   Widget _buildFloatingToolbar(bool isMobile) {
@@ -444,6 +457,7 @@ class _ContentAreaState extends State<ContentArea> {
             controller: viewModel.quillController,
             isUndo: true,
             options: QuillToolbarHistoryButtonOptions(
+              afterButtonPressed: _restoreEditorFocus,
               iconTheme: _getIconTheme(),
             ),
           ),
@@ -451,6 +465,7 @@ class _ContentAreaState extends State<ContentArea> {
             controller: viewModel.quillController,
             isUndo: false,
             options: QuillToolbarHistoryButtonOptions(
+              afterButtonPressed: _restoreEditorFocus,
               iconTheme: _getIconTheme(),
             ),
           ),
@@ -460,7 +475,8 @@ class _ContentAreaState extends State<ContentArea> {
           QuillToolbarFontSizeButton(
             controller: viewModel.quillController,
             options: QuillToolbarFontSizeButtonOptions(
-              style: TextStyle(color: colors.textSecondary, fontSize: 12),
+              afterButtonPressed: _restoreEditorFocus,
+              style: TextStyle(color: colors.textSecondary, fontSize: 9.504),
             ),
           ),
           _buildVerticalDivider(),
@@ -520,6 +536,7 @@ class _ContentAreaState extends State<ContentArea> {
           QuillToolbarClearFormatButton(
             controller: viewModel.quillController,
             options: QuillToolbarClearFormatButtonOptions(
+              afterButtonPressed: _restoreEditorFocus,
               iconTheme: _getIconTheme(),
             ),
           ),
@@ -552,6 +569,7 @@ class _ContentAreaState extends State<ContentArea> {
           QuillToolbarSelectHeaderStyleDropdownButton(
             controller: viewModel.quillController,
             options: QuillToolbarSelectHeaderStyleDropdownButtonOptions(
+              afterButtonPressed: _restoreEditorFocus,
               textStyle: TextStyle(color: colors.textSecondary),
             ),
           ),
@@ -580,6 +598,7 @@ class _ContentAreaState extends State<ContentArea> {
           QuillToolbarToggleCheckListButton(
             controller: viewModel.quillController,
             options: QuillToolbarToggleCheckListButtonOptions(
+              afterButtonPressed: _restoreEditorFocus,
               iconTheme: _getIconTheme(),
             ),
           ),
@@ -606,6 +625,7 @@ class _ContentAreaState extends State<ContentArea> {
             controller: viewModel.quillController,
             isIncrease: true,
             options: QuillToolbarIndentButtonOptions(
+              afterButtonPressed: _restoreEditorFocus,
               iconTheme: _getIconTheme(),
             ),
           ),
@@ -613,6 +633,7 @@ class _ContentAreaState extends State<ContentArea> {
             controller: viewModel.quillController,
             isIncrease: false,
             options: QuillToolbarIndentButtonOptions(
+              afterButtonPressed: _restoreEditorFocus,
               iconTheme: _getIconTheme(),
             ),
           ),
@@ -630,48 +651,59 @@ class _ContentAreaState extends State<ContentArea> {
     );
   }
 
-  /// Toggle button for Rich Text / HTML
-  Widget _buildModeToggleButton() {
-    final isHtml = viewModel.isHtmlMode;
-    return Container(
+  /// Small segmented mode control following the Stitch header refinement.
+  Widget _buildModeToggleButton() => ValueListenableBuilder<bool>(
+    valueListenable: viewModel.isConvertingNotifier,
+    builder: (context, converting, _) => DecoratedBox(
       decoration: BoxDecoration(
-        color: colors.accent.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: colors.accent.withOpacity(0.5)),
+        color: colors.toolbarIsland,
+        border: Border.all(color: colors.divider),
+        borderRadius: BorderRadius.circular(8),
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            viewModel.toggleEditorMode();
-          },
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  isHtml ? Icons.auto_awesome_rounded : Icons.code_rounded,
-                  size: 14,
-                  color: colors.accent,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  isHtml ? 'Rich Text' : 'HTML',
-                  style: TextStyle(
-                    color: colors.accent,
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          for (final mode in EditorMode.values)
+            Semantics(
+              selected: viewModel.editorMode == mode,
+              child: TextButton(
+                onPressed: converting || !viewModel.draftSession.canWrite
+                    ? null
+                    : () => viewModel.setEditorMode(mode),
+                style: TextButton.styleFrom(
+                  foregroundColor: colors.textPrimary,
+                  backgroundColor: viewModel.editorMode == mode
+                      ? colors.accent.withValues(alpha: .16)
+                      : Colors.transparent,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  minimumSize: const Size(64, 32),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 9.504,
                     fontWeight: FontWeight.w600,
-                    fontSize: 12,
                   ),
                 ),
-              ],
+                child: Text(mode == EditorMode.html ? 'HTML' : 'Rich text'),
+              ),
             ),
-          ),
-        ),
+          if (converting)
+            const Padding(
+              padding: EdgeInsets.all(8),
+              child: SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+        ],
       ),
-    );
-  }
+    ),
+  );
 
   Widget _buildVerticalDivider() {
     return Container(
@@ -683,7 +715,20 @@ class _ContentAreaState extends State<ContentArea> {
   }
 
   QuillToolbarToggleStyleButtonOptions _getButtonOptions() {
-    return QuillToolbarToggleStyleButtonOptions(iconTheme: _getIconTheme());
+    return QuillToolbarToggleStyleButtonOptions(
+      iconTheme: _getIconTheme(),
+      afterButtonPressed: _restoreEditorFocus,
+    );
+  }
+
+  void _restoreEditorFocus() {
+    if (!mounted ||
+        viewModel.isLocked ||
+        viewModel.isHtmlMode ||
+        !viewModel.draftSession.canWrite) {
+      return;
+    }
+    _focusNode.requestFocus();
   }
 
   QuillToolbarColorButtonOptions _getColorButtonOptions() {
@@ -779,7 +824,7 @@ class _ContentAreaState extends State<ContentArea> {
               'This note is locked',
               style: TextStyle(
                 color: colors.textSecondary,
-                fontSize: 16,
+                fontSize: 12.096,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -865,15 +910,18 @@ class _ContentAreaState extends State<ContentArea> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'File Settings',
-              style: TextStyle(color: colors.textPrimary, fontSize: 18),
+              'Note actions',
+              style: TextStyle(color: colors.textPrimary, fontSize: 13.824),
             ),
             if (viewModel.currentFileName != null)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
                   viewModel.currentFileName!,
-                  style: TextStyle(color: colors.textSecondary, fontSize: 12),
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    fontSize: 9.504,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1183,7 +1231,7 @@ class _ProgressDialog extends StatelessWidget {
                 const SizedBox(height: 20),
                 Text(
                   progress ?? 'Processing...',
-                  style: TextStyle(color: colors.textPrimary, fontSize: 14),
+                  style: TextStyle(color: colors.textPrimary, fontSize: 11.232),
                   textAlign: TextAlign.center,
                 ),
               ],

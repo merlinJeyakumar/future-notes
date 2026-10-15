@@ -43,6 +43,7 @@ void main() {
   late ContentViewModel editor;
   late PausedEncryption cipher;
   bool editorClosed = false;
+  DraftDecisionHandler? decisions;
   setUp(() async {
     run = await Directory.systemTemp.createTemp('future-notes-validation-');
     app = OwnedAppServices(
@@ -55,12 +56,14 @@ void main() {
     expect((await app.initialize()).isSuccess, isTrue);
     cipher = PausedEncryption();
     editorClosed = false;
+    decisions = null;
     editor = ContentViewModel(
       fileService: app.files,
       settings: app.settings,
       encryptionService: cipher,
       startBackgroundServices: false,
-      onDraftDecision: (_) async => DraftDecision.discard,
+      onDraftDecision: (request) async =>
+          decisions == null ? DraftDecision.discard : await decisions!(request),
     );
   });
   tearDown(() async {
@@ -116,6 +119,36 @@ void main() {
         await editor.readAttachment(editor.attachments.single.id),
         isEmpty,
       );
+    },
+  );
+
+  test(
+    'publication that starts during confirmation cannot be cancelled',
+    () async {
+      await save();
+      final source = await input('synthetic bytes');
+      final decision = Completer<DraftDecision>();
+      final asked = Completer<void>();
+      decisions = (_) {
+        if (!asked.isCompleted) asked.complete();
+        return decision.future;
+      };
+      final (reached, release) = cipher.pause();
+      final adding = editor.addOwnedAttachment(source.path, 'race.txt');
+      final exiting = editor.prepareToExit();
+      await asked.future.timeout(const Duration(seconds: 15));
+      await reached.timeout(const Duration(seconds: 15));
+      final job = editor.attachmentJobsNotifier.value.last;
+      expect(job.progress.value.phase, AttachmentJobPhase.finalizing);
+      decision.complete(DraftDecision.discard);
+      await Future<void>.delayed(Duration.zero);
+      await editor.cancelAttachmentJob(job.progress.value.id);
+      expect(job.progress.value.phase, AttachmentJobPhase.finalizing);
+      release.complete();
+      expect((await adding).isSuccess, isTrue);
+      expect((await exiting).isSuccess, isTrue);
+      expect(editor.attachments.single.fileName, 'race.txt');
+      expect(job.progress.value.phase, AttachmentJobPhase.completed);
     },
   );
 

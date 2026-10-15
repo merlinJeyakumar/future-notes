@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_application_1/core/operations/operation_result.dart';
 import 'package:flutter_application_1/features/dashboard/views/dashboard_screen.dart';
 import 'package:flutter_application_1/features/dashboard/widgets/content_area.dart';
+import 'package:flutter_application_1/features/dashboard/widgets/sidebar.dart';
 import 'package:flutter_application_1/main.dart';
 
 import 'support/editor_harness.dart';
@@ -41,6 +43,7 @@ void main() {
           MyApp(
             settings: harness.settings,
             home: DashboardScreen(
+              confirmExit: () async => true,
               settings: harness.settings,
               fileService: harness.files,
               startBackgroundServices: false,
@@ -71,6 +74,53 @@ void main() {
     expect(find.byType(ContentArea), findsOneWidget);
     expect(find.text('Storage closed. Closing window…'), findsNothing);
   }
+
+  scenario(
+    'bottom sidebar button preserves the editor and search when toggled',
+    (tester, fixture) async {
+      final area = tester.widget<ContentArea>(find.byType(ContentArea));
+      final areaState = tester.state(find.byType(ContentArea));
+      area.viewModel.titleController.text = 'Synthetic draft retained';
+      final search = find.descendant(
+        of: find.byType(Sidebar),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(search, 'synthetic query');
+      final hide = find.byTooltip('Hide notes');
+      expect(tester.getRect(hide).bottom, 1000);
+      expect(
+        tester.getRect(find.byType(ContentArea)).bottom,
+        lessThanOrEqualTo(tester.getRect(hide).top),
+      );
+      expect(find.byIcon(Icons.view_sidebar_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.chevron_left), findsNothing);
+      await tester.tap(hide);
+      await tester.pump();
+      expect(find.byType(Sidebar), findsNothing);
+      expect(tester.getRect(find.byTooltip('Show notes')).bottom, 1000);
+      expect(tester.state(find.byType(ContentArea)), same(areaState));
+      expect(area.viewModel.titleController.text, 'Synthetic draft retained');
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byTooltip('Hide notes'), findsOneWidget);
+      final field = tester.widget<TextField>(
+        find.descendant(
+          of: find.byType(Sidebar),
+          matching: find.byType(TextField),
+        ),
+      );
+      expect(field.controller!.text, 'synthetic query');
+      expect(field.focusNode!.hasFocus, isTrue);
+      expect(fixture.harness.files.writeAttempts, 0);
+      tester.view.physicalSize = const Size(700, 1000);
+      await tester.pump();
+      expect(find.byIcon(Icons.view_sidebar_outlined), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   scenario('real exit aggregation retains text listeners through cleanup', (
     tester,
@@ -236,7 +286,7 @@ void main() {
     fixture,
   ) async {
     expect(find.text('Not saved'), findsOneWidget);
-    await tester.tap(find.widgetWithText(ElevatedButton, 'New Note'));
+    await tester.tap(find.widgetWithText(FilledButton, 'New Note'));
     await tester.pump();
     expect(
       find.text(

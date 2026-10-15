@@ -85,13 +85,13 @@ void main() {
           ),
         );
         await tester.pump();
-        expect(find.text('Finalizing'), findsOneWidget);
+        expect(find.text('Finishing safely…'), findsOneWidget);
         expect(find.text('Completed'), findsNothing);
         expect(find.text('Cancel'), findsNothing);
-        await tester.tap(find.text('Attachments: 1 active operations'));
+        await tester.tap(find.text('Background operations: 1 active'));
         await tester.pump();
         expect(find.text('Finishing'), findsOneWidget);
-        expect(find.text('Finalizing'), findsNothing);
+        expect(find.text('Finishing safely…'), findsNothing);
       } finally {
         harness.disposeEditor();
         await tester.pumpWidget(const SizedBox.shrink());

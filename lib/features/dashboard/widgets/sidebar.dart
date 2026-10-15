@@ -1,23 +1,11 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 import '../models/note_model.dart';
+import '../models/note_list_ui_state.dart';
 import 'file_details_dialog.dart';
 import '../../../core/theme/app_theme.dart';
 
 class Sidebar extends StatelessWidget {
-  final List<RecentFile> recentFiles;
-
-  final Function(String) onFileSelected;
-  final Function(RecentFile) onOpenFolder;
-  final Function(RecentFile) onDelete;
-  final VoidCallback onNewNote;
-  final VoidCallback? onImportNote;
-  final VoidCallback? onSettings;
-  final VoidCallback? onRefresh;
-  final Function(String)? onSearchChanged;
-  final Function(RecentFile)? onExportPack;
-
   const Sidebar({
     super.key,
     this.recentFiles = const [],
@@ -30,211 +18,214 @@ class Sidebar extends StatelessWidget {
     this.onRefresh,
     this.onSearchChanged,
     this.onExportPack,
+    this.listState,
+    this.searchController,
+    this.searchFocusNode,
+    this.onRecentFileSelected,
+    this.onRetrySearch,
   });
+  final List<RecentFile> recentFiles;
+  final ValueChanged<String> onFileSelected;
+  final ValueChanged<RecentFile> onOpenFolder;
+  final ValueChanged<RecentFile> onDelete;
+  final VoidCallback onNewNote;
+  final VoidCallback? onImportNote;
+  final VoidCallback? onSettings;
+  final VoidCallback? onRefresh;
+  final ValueChanged<String>? onSearchChanged;
+  final ValueChanged<RecentFile>? onExportPack;
+  final NoteListUiState? listState;
+  final TextEditingController? searchController;
+  final FocusNode? searchFocusNode;
+  final ValueChanged<RecentFile>? onRecentFileSelected;
+  final VoidCallback? onRetrySearch;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
+    final state = listState;
+    final files = state?.files ?? recentFiles;
     return Container(
       width: 280,
       color: theme.appSidebar,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Logo Area
-          Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Row(
-              children: [
-                Icon(Icons.inbox, color: theme.colorScheme.primary, size: 32),
-                const SizedBox(width: 12),
-                Text(
-                  'Notes',
-                  style: TextStyle(
-                    color: theme.appTextPrimary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // New Note & Settings Button
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: IntrinsicHeight(
-              child: Row(
+      child: CustomScrollView(
+        key: const PageStorageKey('notes-sidebar'),
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.all(16),
+            sliver: SliverToBoxAdapter(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: onNewNote,
-                      icon: const Icon(Icons.add),
-                      label: const Text('New Note'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: theme.colorScheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                  Row(
+                    children: [
+                      Icon(Icons.inbox, color: theme.colorScheme.primary),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'Notes',
+                          style: TextStyle(
+                            fontSize: 15.552,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
+                      if (onSettings != null)
+                        IconButton(
+                          tooltip: 'App settings',
+                          onPressed: onSettings,
+                          icon: const Icon(Icons.settings_outlined),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: onNewNote,
+                    icon: const Icon(Icons.add),
+                    label: const Text('New Note'),
+                  ),
+                  TextButton.icon(
+                    onPressed: onImportNote,
+                    icon: const Icon(Icons.file_upload_outlined),
+                    label: const Text('Import Note'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: searchController,
+                    focusNode: searchFocusNode,
+                    onChanged: onSearchChanged,
+                    decoration: InputDecoration(
+                      labelText: 'Search notes',
+                      hintText: 'Search…',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon:
+                          (state?.query.isNotEmpty ??
+                              searchController?.text.isNotEmpty ??
+                              false)
+                          ? IconButton(
+                              tooltip: 'Clear search',
+                              icon: const Icon(Icons.close),
+                              onPressed: () {
+                                searchController?.clear();
+                                onSearchChanged?.call('');
+                              },
+                            )
+                          : null,
+                      border: const OutlineInputBorder(),
                     ),
                   ),
-                  if (onSettings != null) ...[
-                    const SizedBox(width: 8),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: theme.appSurfaceVariant,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: theme.appBorder),
-                      ),
-                      child: IconButton(
-                        onPressed: onSettings,
-                        icon: Icon(
-                          Icons.settings,
-                          color: theme.appTextSecondary,
+                  Row(
+                    children: [
+                      const Expanded(child: Text('FILES')),
+                      if (onRefresh != null)
+                        IconButton(
+                          tooltip: 'Refresh notes',
+                          onPressed: onRefresh,
+                          icon: const Icon(Icons.refresh),
                         ),
-                        tooltip: 'Settings',
-                        splashRadius: 24,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                    ],
+                  ),
+                  if (state?.updating ?? false) ...[
+                    const LinearProgressIndicator(),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        state!.isFiltering ? 'Searching…' : 'Updating notes…',
+                        style: theme.textTheme.labelSmall,
                       ),
                     ),
                   ],
+                  if (state?.error != null)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          state!.error!,
+                          style: TextStyle(color: theme.colorScheme.error),
+                        ),
+                        TextButton(
+                          onPressed: state.query.isEmpty
+                              ? onRefresh
+                              : onRetrySearch,
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
                 ],
               ),
             ),
           ),
-          // Import Note button
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16.0, 8.0, 16.0, 0),
-            child: SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: onImportNote,
-                icon: const Icon(Icons.file_upload),
-                label: const Text('Import Note'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: theme.appTextSecondary,
-                  side: BorderSide(color: theme.appBorder),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+          if (files.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Text(
+                    state?.updating == true
+                        ? 'Loading notes…'
+                        : state?.error != null
+                        ? 'Notes unavailable'
+                        : state?.query.isNotEmpty == true
+                        ? 'No matching notes'
+                        : 'No notes yet. Create a new note.',
                   ),
                 ),
               ),
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          // Search Bar
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: TextField(
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: theme.appSurfaceVariant,
-                hintText: 'Search...',
-                hintStyle: TextStyle(color: theme.appSubtleGray),
-                prefixIcon: Icon(Icons.search, color: theme.appSubtleGray),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: theme.appBorder),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: theme.appBorder),
-                ),
-              ),
-              style: TextStyle(color: theme.appTextPrimary),
-              onChanged: onSearchChanged,
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          _buildSectionHeader(context, 'FILES'),
-          Expanded(
-            child: recentFiles.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.search_off,
-                          color: theme.appSubtleGray.withOpacity(0.5),
-                          size: 48,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No files found',
-                          style: TextStyle(
-                            color: theme.appSubtleGray.withOpacity(0.5),
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
+            )
+          else
+            SliverList.builder(
+              itemCount: files.length,
+              itemBuilder: (context, index) {
+                final file = files[index];
+                final selected =
+                    state?.selectedContentPath != null &&
+                    p.equals(state!.selectedContentPath!, file.fullPath);
+                return ListTile(
+                  key: ValueKey(file.fullPath),
+                  selected: selected,
+                  selectedTileColor: theme.colorScheme.primary.withValues(
+                    alpha: .12,
+                  ),
+                  leading: Icon(
+                    file.isLocked
+                        ? Icons.lock_outline
+                        : Icons.description_outlined,
+                  ),
+                  title: Tooltip(
+                    message: file.title,
+                    child: Text(
+                      file.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  )
-                : ListView.builder(
-                    itemCount: recentFiles.length,
-                    itemBuilder: (context, index) {
-                      final file = recentFiles[index];
-                      return ListTile(
-                        leading: Icon(
-                          Icons.description,
-                          color: theme.appTextSecondary,
-                          size: 20,
-                        ),
-                        title: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                file.title,
-                                style: TextStyle(color: theme.appTextSecondary),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            if (file.isLocked)
-                              const Padding(
-                                padding: EdgeInsets.only(left: 8),
-                                child: Icon(
-                                  Icons.lock_outline,
-                                  color: Colors.amberAccent,
-                                  size: 14,
-                                ),
-                              ),
-                          ],
-                        ),
-                        subtitle: file.created == null
-                            ? null
-                            : Text(
-                                'Note date ${_formatDate(file.created!)}',
-                                style: TextStyle(
-                                  color: theme.appSubtleGray,
-                                  fontSize: 11,
-                                ),
-                              ),
-                        onTap: () => onFileSelected(file.path),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 24,
-                        ),
-                        dense: true,
-                        trailing: IconButton(
-                          icon: Icon(
-                            Icons.more_vert,
-                            color: theme.appTextSecondary,
-                            size: 20,
-                          ),
-                          onPressed: () => _showFileDetails(context, file),
-                        ),
-                      );
-                    },
                   ),
-          ),
+                  subtitle: file.created == null
+                      ? null
+                      : Text('Note date ${_formatDate(file.created!)}'),
+                  onTap: () {
+                    if (onRecentFileSelected != null) {
+                      onRecentFileSelected!(file);
+                    } else {
+                      onFileSelected(file.path);
+                    }
+                  },
+                  trailing: IconButton(
+                    tooltip: 'More actions for ${file.title}',
+                    icon: const Icon(Icons.more_vert),
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (_) => FileDetailsDialog(
+                        file: file,
+                        onOpenFolder: onOpenFolder,
+                        onDelete: onDelete,
+                        onExportPack: onExportPack,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
         ],
       ),
     );
@@ -256,51 +247,5 @@ class Sidebar extends StatelessWidget {
       'Dec',
     ];
     return '${value.day} ${months[value.month - 1]} ${value.year}';
-  }
-
-  Widget _buildSectionHeader(BuildContext context, String title) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              color: theme.appSubtleGray,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.2,
-            ),
-          ),
-          if (onRefresh != null)
-            SizedBox(
-              height: 24,
-              width: 24,
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: Icon(Icons.refresh, color: theme.appSubtleGray, size: 16),
-                onPressed: onRefresh,
-                tooltip: 'Refresh',
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  void _showFileDetails(BuildContext context, RecentFile file) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return FileDetailsDialog(
-          file: file,
-          onOpenFolder: onOpenFolder,
-          onDelete: onDelete,
-          onExportPack: onExportPack,
-        );
-      },
-    );
   }
 }

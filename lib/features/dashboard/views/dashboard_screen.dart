@@ -1,3 +1,5 @@
+import '../models/note_list_ui_state.dart';
+import '../widgets/app_settings_dialog.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show AppExitResponse, AppExitType;
@@ -32,6 +34,7 @@ class DashboardScreen extends StatefulWidget {
     this.desktopActions,
     this.attachmentOpenCache,
     this.requestApplicationExit,
+    this.confirmExit,
   });
 
   final SettingsService? settings;
@@ -41,6 +44,7 @@ class DashboardScreen extends StatefulWidget {
   final DesktopActions? desktopActions;
   final AttachmentOpenCache? attachmentOpenCache;
   final Future<AppExitResponse> Function()? requestApplicationExit;
+  final Future<bool> Function()? confirmExit;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -57,6 +61,99 @@ class _DashboardScreenState extends State<DashboardScreen> {
   DesktopActions? _desktop;
   StreamSubscription<String>? _desktopEvents;
   bool _exitFromTray = false;
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+  final _searchController = TextEditingController();
+  final _desktopSearchFocus = FocusNode();
+  final _drawerSearchFocus = FocusNode();
+  final _sidebarToggleFocus = FocusNode(debugLabel: 'sidebar-toggle');
+  int _navigationRequest = 0;
+
+  void _queryChanged() => _viewModel.setSearchQuery(_searchController.text);
+
+  Widget _buildSidebarToggle(ThemeData theme) => Container(
+    height: 48,
+    color: theme.appSidebar,
+    alignment: Alignment.centerLeft,
+    padding: const EdgeInsets.symmetric(horizontal: 8),
+    child: IconButton(
+      focusNode: _sidebarToggleFocus,
+      tooltip: _isSidebarVisible ? 'Hide notes' : 'Show notes',
+      isSelected: _isSidebarVisible,
+      onPressed: () {
+        setState(() => _isSidebarVisible = !_isSidebarVisible);
+        // Hiding a focused search removes its node. Keep focus inside the
+        // dashboard shortcut scope so Ctrl+F can reveal it again.
+        _sidebarToggleFocus.requestFocus();
+      },
+      style: IconButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        minimumSize: const Size(48, 48),
+      ),
+      icon: Icon(
+        Icons.view_sidebar_outlined,
+        size: 18,
+        color: theme.appTextSecondary,
+      ),
+    ),
+  );
+
+  void _focusSearch() {
+    final desktop = MediaQuery.sizeOf(context).width > 800;
+    if (desktop) {
+      setState(() => _isSidebarVisible = true);
+    } else {
+      _scaffoldKey.currentState?.openDrawer();
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _shutdownStarted) return;
+      final focus = desktop ? _desktopSearchFocus : _drawerSearchFocus;
+      if (focus.context != null) focus.requestFocus();
+    });
+  }
+
+  Future<void> _handleFileSelected(
+    RecentFile file,
+    NoteListUiState inventory,
+    bool drawer,
+  ) async {
+    final request = ++_navigationRequest;
+    final result = await _viewModel.openListedNote(
+      file,
+      inventory.libraryEpoch,
+    );
+    if (!mounted ||
+        request != _navigationRequest ||
+        !result.isSuccess ||
+        _viewModel.currentContentPath != file.fullPath) {
+      return;
+    }
+    if (drawer && (_scaffoldKey.currentState?.isDrawerOpen ?? false)) {
+      Navigator.pop(context);
+    }
+    _viewModel.focusNode.requestFocus();
+  }
+
+  Widget _buildSidebar({required bool drawer}) =>
+      ValueListenableBuilder<NoteListUiState>(
+        valueListenable: _viewModel.noteListStateNotifier,
+        builder: (context, inventory, _) => Sidebar(
+          listState: inventory,
+          searchController: _searchController,
+          searchFocusNode: drawer ? _drawerSearchFocus : _desktopSearchFocus,
+          onSearchChanged: _viewModel.setSearchQuery,
+          onRetrySearch: _viewModel.retrySearch,
+          onFileSelected: (_) {},
+          onRecentFileSelected: (file) =>
+              _handleFileSelected(file, inventory, drawer),
+          onOpenFolder: _handleOpenFolder,
+          onDelete: _handleDelete,
+          onNewNote: () => unawaited(_handleNewNote(closeDrawer: drawer)),
+          onImportNote: _handleImport,
+          onSettings: () => _showMasterSettings(context),
+          onRefresh: _viewModel.loadRecentFiles,
+          onExportPack: _handleExportPack,
+        ),
+      );
 
   @override
   void initState() {
@@ -94,6 +191,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
     unawaited(_viewModel.initializeAttachmentCache());
     _viewModel.operationResultNotifier.addListener(_showOperationFailure);
+    _searchController.addListener(_queryChanged);
   }
 
   Future<DraftDecision> _showDraftDecision(DraftDecisionRequest request) async {
@@ -136,21 +234,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<AppExitResponse> _resolveExit() async {
     try {
-      if (!_shutdownStarted &&
-          !_exitFromTray &&
-          _desktop != null &&
-          _viewModel.settings.minimizeToTrayOnClose) {
-        final hidden = await _desktop!.minimizeToTray();
-        if (hidden.isSuccess)
-          await _viewModel.pauseAttachmentViewers();
-        else if (mounted)
-          _showShutdownNotice(
-            hidden.message ??
-                'Could not minimize to tray. The window remains open.',
-          );
-        return AppExitResponse.cancel;
-      }
       if (!_shutdownStarted) {
+        final confirmed = await (widget.confirmExit?.call() ?? _confirmExit());
+        if (!mounted || !confirmed) return AppExitResponse.cancel;
         final result = await _viewModel.prepareToExit();
         if (!mounted || !result.isSuccess) {
           return AppExitResponse.cancel;
@@ -195,6 +281,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return AppExitResponse.cancel;
   }
 
+  Future<bool> _confirmExit() async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Exit Future Notes?'),
+          content: const Text(
+            'Exit the app completely? Unsaved changes and active attachment '
+            'operations will be handled before closing.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Keep open'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Exit'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
   void _showShutdownNotice(String message) {
     ScaffoldMessenger.maybeOf(
       context,
@@ -235,6 +344,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _lifecycle.dispose();
     _viewModel.operationResultNotifier.removeListener(_showOperationFailure);
     _viewModel.dispose();
+    _searchController.dispose();
+    _desktopSearchFocus.dispose();
+    _drawerSearchFocus.dispose();
+    _sidebarToggleFocus.dispose();
     super.dispose();
   }
 
@@ -698,224 +811,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return result;
   }
 
-  Future<void> _persistSetting(
-    Future<void> Function() update,
-    BuildContext dialogContext,
-    StateSetter refresh,
-  ) async {
-    try {
-      await update();
-      if (mounted && dialogContext.mounted) refresh(() {});
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Settings could not be saved. The previous value was retained.',
-          ),
-        ),
-      );
-    }
-  }
-
   void _showMasterSettings(BuildContext context) {
-    final theme = Theme.of(context);
-    showDialog(
+    showDialog<void>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) {
-          final settings = _viewModel.settings;
-          return AlertDialog(
-            backgroundColor: theme.appSurface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            title: Text(
-              'Settings',
-              style: TextStyle(color: theme.appTextPrimary),
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Theme Setting
-                if (Platform.isWindows)
-                  SwitchListTile(
-                    title: const Text('Minimize to tray on Close'),
-                    subtitle: const Text(
-                      'Keep attachment operations running in the background.',
-                    ),
-                    value: settings.minimizeToTrayOnClose,
-                    onChanged: (enabled) => _persistSetting(
-                      () => settings.setMinimizeToTrayOnClose(enabled),
-                      context,
-                      setState,
-                    ),
-                  ),
-                ListTile(
-                  leading: Icon(
-                    Icons.color_lens_outlined,
-                    color: theme.appTextSecondary,
-                  ),
-                  title: Text(
-                    'Theme',
-                    style: TextStyle(color: theme.appTextPrimary),
-                  ),
-                  subtitle: DropdownButton<ThemeMode>(
-                    value: settings.themeMode,
-                    dropdownColor: theme.appSurface,
-                    style: TextStyle(color: theme.appTextPrimary),
-                    underline: Container(
-                      height: 1,
-                      color: theme.colorScheme.primary,
-                    ),
-                    isExpanded: true,
-                    icon: Icon(
-                      Icons.arrow_drop_down,
-                      color: theme.appTextSecondary,
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: ThemeMode.light,
-                        child: Text('Light'),
-                      ),
-                      DropdownMenuItem(
-                        value: ThemeMode.dark,
-                        child: Text('Dark'),
-                      ),
-                      DropdownMenuItem(
-                        value: ThemeMode.system,
-                        child: Text('System'),
-                      ),
-                    ],
-                    onChanged: (ThemeMode? newValue) {
-                      if (newValue != null) {
-                        unawaited(
-                          _persistSetting(
-                            () => settings.setThemeMode(newValue),
-                            context,
-                            setState,
-                          ),
-                        );
-                      }
-                    },
-                  ),
-                ),
-                Divider(color: theme.appDivider),
-                // File Compression Setting
-                ListTile(
-                  leading: Icon(Icons.compress, color: theme.appTextSecondary),
-                  title: Text(
-                    'File Compression',
-                    style: TextStyle(color: theme.appTextPrimary),
-                  ),
-                  subtitle: DropdownButton<CompressionLevel>(
-                    value: settings.compressionLevel,
-                    dropdownColor: theme.appSurface,
-                    style: TextStyle(color: theme.appTextPrimary),
-                    underline: Container(
-                      height: 1,
-                      color: theme.colorScheme.primary,
-                    ),
-                    isExpanded: true,
-                    icon: Icon(
-                      Icons.arrow_drop_down,
-                      color: theme.appTextSecondary,
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: CompressionLevel.high,
-                        child: Text('High (Max Compression)'),
-                      ),
-                      DropdownMenuItem(
-                        value: CompressionLevel.medium,
-                        child: Text('Medium (Half Size)'),
-                      ),
-                      DropdownMenuItem(
-                        value: CompressionLevel.none,
-                        child: Text('None (Full Size)'),
-                      ),
-                    ],
-                    onChanged: (CompressionLevel? newValue) {
-                      if (newValue != null) {
-                        unawaited(
-                          _persistSetting(
-                            () => settings.setCompressionLevel(newValue),
-                            context,
-                            setState,
-                          ),
-                        );
-                      }
-                    },
-                  ),
-                ),
-                if (!Platform.isAndroid && !Platform.isIOS) ...[
-                  Divider(color: theme.appDivider),
-                  ListTile(
-                    leading: Icon(
-                      Icons.folder_open,
-                      color: theme.appTextSecondary,
-                    ),
-                    title: Text(
-                      'App Data Folder',
-                      style: TextStyle(color: theme.appTextPrimary),
-                    ),
-                    subtitle: FutureBuilder<String>(
-                      future: settings.getUserDataPath(),
-                      builder: (context, snapshot) {
-                        return Text(
-                          snapshot.data ?? 'Loading...',
-                          style: TextStyle(
-                            color: theme.appSubtleGray,
-                            fontSize: 12,
-                          ),
-                        );
-                      },
-                    ),
-                    trailing: IconButton(
-                      icon: Icon(Icons.edit, color: theme.colorScheme.primary),
-                      onPressed: () async {
-                        final String? selectedDirectory = await FilePicker
-                            .platform
-                            .getDirectoryPath();
-                        if (selectedDirectory != null &&
-                            mounted &&
-                            context.mounted) {
-                          await _viewModel.switchLibrary(selectedDirectory);
-                          if (mounted && context.mounted) setState(() {});
-                        }
-                      },
-                    ),
-                  ),
-                ],
-                Divider(color: theme.appDivider),
-                ListTile(
-                  leading: Icon(
-                    Icons.info_outline,
-                    color: theme.appTextSecondary,
-                  ),
-                  title: Text(
-                    'About',
-                    style: TextStyle(color: theme.appTextPrimary),
-                  ),
-                  subtitle: Text(
-                    'AntiGravity Notes v1.0',
-                    style: TextStyle(color: theme.appSubtleGray),
-                  ),
-                  onTap: () {},
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(
-                  'Close',
-                  style: TextStyle(color: theme.colorScheme.primary),
-                ),
-              ),
-            ],
-          );
-        },
+      builder: (_) => AppSettingsDialog(
+        settings: _viewModel.settings,
+        pickLibrary: () => FilePicker.platform.getDirectoryPath(),
+        openLibrary: _viewModel.switchLibrary,
       ),
     );
   }
@@ -940,6 +842,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       builder: (context, _) {
         return CallbackShortcuts(
           bindings: {
+            const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+                _focusSearch,
             SingleActivator(LogicalKeyboardKey.keyS, control: true): () {
               if (!_shutdownStarted) {
                 _viewModel.saveNote();
@@ -947,7 +851,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             },
             SingleActivator(LogicalKeyboardKey.keyN, control: true): () {
               if (!_shutdownStarted) {
-                _viewModel.reset();
+                unawaited(_handleNewNote());
               }
             },
           },
@@ -955,6 +859,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             builder: (context, constraints) {
               final isDesktop = constraints.maxWidth > 800;
               return Scaffold(
+                key: _scaffoldKey,
                 resizeToAvoidBottomInset: true,
                 appBar: isDesktop
                     ? null
@@ -967,7 +872,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         iconTheme: IconThemeData(color: theme.appTextPrimary),
                         titleTextStyle: TextStyle(
                           color: theme.appTextPrimary,
-                          fontSize: 18,
+                          fontSize: 15.552,
                         ),
                         actions: [
                           IconButton(
@@ -978,94 +883,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                 drawer: isDesktop
                     ? null
-                    : Sidebar(
-                        recentFiles: _viewModel.recentFiles,
-                        onFileSelected: (path) {
-                          _viewModel.loadNote(path);
-                          Navigator.pop(context); // Close drawer
-                        },
-                        onOpenFolder: _handleOpenFolder,
-                        onDelete: _handleDelete,
-                        onNewNote: () =>
-                            unawaited(_handleNewNote(closeDrawer: true)),
-                        onImportNote: _handleImport,
-                        onSettings: () {
-                          Navigator.pop(context);
-                          _showMasterSettings(context);
-                        },
-                        onRefresh: _viewModel.loadRecentFiles,
-                        onSearchChanged: _viewModel.setSearchQuery,
-                        onExportPack: (file) {
-                          Navigator.pop(context);
-                          _handleExportPack(file);
-                        },
-                      ),
+                    : Drawer(child: _buildSidebar(drawer: true)),
                 body: Stack(
                   children: [
-                    Row(
+                    Column(
                       children: [
-                        if (isDesktop && _isSidebarVisible)
-                          Sidebar(
-                            recentFiles: _viewModel.recentFiles,
-                            onFileSelected: (path) => _viewModel.loadNote(path),
-                            onOpenFolder: _handleOpenFolder,
-                            onDelete: _handleDelete,
-                            onNewNote: () => unawaited(_handleNewNote()),
-                            onImportNote: _handleImport,
-                            onSettings: () => _showMasterSettings(context),
-                            onRefresh: _viewModel.loadRecentFiles,
-                            onSearchChanged: _viewModel.setSearchQuery,
-                            onExportPack: _handleExportPack,
-                          ),
                         Expanded(
-                          child: Stack(
+                          child: Row(
                             children: [
-                              ContentArea(viewModel: _viewModel),
-                              // Sidebar toggle button (desktop only)
-                              if (isDesktop)
-                                Positioned(
-                                  left: 0,
-                                  top: 0,
-                                  bottom: 0,
-                                  child: Center(
-                                    child: MouseRegion(
-                                      cursor: SystemMouseCursors.click,
-                                      child: GestureDetector(
-                                        onTap: () => setState(
-                                          () => _isSidebarVisible =
-                                              !_isSidebarVisible,
-                                        ),
-                                        child: Container(
-                                          width: 24,
-                                          height: 48,
-                                          decoration: BoxDecoration(
-                                            color: theme.appSurfaceVariant,
-                                            borderRadius:
-                                                const BorderRadius.only(
-                                                  topRight: Radius.circular(8),
-                                                  bottomRight: Radius.circular(
-                                                    8,
-                                                  ),
-                                                ),
-                                            border: Border.all(
-                                              color: theme.appBorder,
-                                            ),
-                                          ),
-                                          child: Icon(
-                                            _isSidebarVisible
-                                                ? Icons.chevron_left
-                                                : Icons.chevron_right,
-                                            color: theme.appTextSecondary,
-                                            size: 20,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                              if (isDesktop && _isSidebarVisible)
+                                _buildSidebar(drawer: false),
+                              Expanded(
+                                child: ContentArea(viewModel: _viewModel),
+                              ),
                             ],
                           ),
                         ),
+                        if (isDesktop) _buildSidebarToggle(theme),
                       ],
                     ),
                     if (_viewModel.isBusy)
@@ -1083,7 +917,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 "Processing...",
                                 style: TextStyle(
                                   color: Colors.white,
-                                  fontSize: 16,
+                                  fontSize: 13.824,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),

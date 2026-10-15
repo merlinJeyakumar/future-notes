@@ -82,7 +82,7 @@ class FileDetailsDialog extends StatelessWidget {
             ),
             subtitle: Text(
               "Export with attachments",
-              style: TextStyle(color: theme.appTextSecondary, fontSize: 11),
+              style: TextStyle(color: theme.appTextSecondary, fontSize: 9.504),
             ),
             onTap: () {
               Navigator.pop(context);

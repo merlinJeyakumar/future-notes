@@ -8,11 +8,11 @@ class AppColors {
   static const darkSurface = Color(0xFF2D3748);
   static const darkSurfaceVariant = Color(0xFF1E293B);
   static const darkSidebar = Color(0xFF161E2D);
-  static const darkPrimary = Color(0xFF4299E1);
+  static const darkPrimary = Color(0xFF60A5FA);
   static const darkAccent = Color(0xFF48BB78);
   static const darkTextPrimary = Color(0xFFE2E8F0);
   static const darkTextSecondary = Color(0xFFA0AEC0);
-  static const darkSubtleGray = Color(0xFF718096);
+  static const darkSubtleGray = Color(0xFF94A3B8);
   static const darkDivider = Color(0xFF4A5568);
   static const darkBorder = Color(0xFF334155);
 
@@ -21,11 +21,11 @@ class AppColors {
   static const lightSurface = Color(0xFFFFFFFF);
   static const lightSurfaceVariant = Color(0xFFF1F5F9);
   static const lightSidebar = Color(0xFFEDF2F7);
-  static const lightPrimary = Color(0xFF3182CE);
+  static const lightPrimary = Color(0xFF2563A6);
   static const lightAccent = Color(0xFF38A169);
   static const lightTextPrimary = Color(0xFF1A202C);
-  static const lightTextSecondary = Color(0xFF718096);
-  static const lightSubtleGray = Color(0xFFA0AEC0);
+  static const lightTextSecondary = Color(0xFF4A5568);
+  static const lightSubtleGray = Color(0xFF526175);
   static const lightDivider = Color(0xFFE2E8F0);
   static const lightBorder = Color(0xFFCBD5E0);
 }
@@ -60,13 +60,21 @@ extension AppThemeExtension on ThemeData {
 /// Main theme configuration class
 class AppTheme {
   static ThemeData get darkTheme {
-    return ThemeData.dark().copyWith(
+    final base = ThemeData.dark();
+    return base.copyWith(
+      // Resolve Material's size geometry before scaling inherited color styles.
+      textTheme: base.typography.englishLike
+          .merge(base.textTheme)
+          .apply(fontSizeFactor: .7776),
+      primaryTextTheme: base.typography.englishLike
+          .merge(base.primaryTextTheme)
+          .apply(fontSizeFactor: .7776),
       scaffoldBackgroundColor: AppColors.darkBackground,
       colorScheme: const ColorScheme.dark(
         primary: AppColors.darkPrimary,
         secondary: AppColors.darkAccent,
         surface: AppColors.darkSurface,
-        onPrimary: Colors.white,
+        onPrimary: AppColors.darkBackground,
         onSecondary: Colors.white,
         onSurface: AppColors.darkTextPrimary,
       ),
@@ -147,7 +155,14 @@ class AppTheme {
   }
 
   static ThemeData get lightTheme {
-    return ThemeData.light().copyWith(
+    final base = ThemeData.light();
+    return base.copyWith(
+      textTheme: base.typography.englishLike
+          .merge(base.textTheme)
+          .apply(fontSizeFactor: .7776),
+      primaryTextTheme: base.typography.englishLike
+          .merge(base.primaryTextTheme)
+          .apply(fontSizeFactor: .7776),
       scaffoldBackgroundColor: AppColors.lightBackground,
       colorScheme: const ColorScheme.light(
         primary: AppColors.lightPrimary,

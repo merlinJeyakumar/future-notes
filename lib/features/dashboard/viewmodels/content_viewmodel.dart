@@ -28,6 +28,8 @@ import '../services/streaming_pack_service.dart';
 import '../../../core/storage/external_file_export.dart';
 import '../../../core/operations/operation_result.dart';
 import '../models/draft_session.dart';
+import '../models/save_ui_state.dart';
+import '../models/note_list_ui_state.dart';
 import '../models/draft_transition.dart';
 import '../models/note_envelope.dart' show DecodedNote;
 import '../services/note_codec.dart';
@@ -52,6 +54,130 @@ class ContentViewModel extends BaseViewModel {
   final int Function() _nowMilliseconds;
   final DraftDecisionHandler? _onDraftDecision;
   final RecentFileFilter _filterRecentFiles;
+  final Future<List<dynamic>> Function(String) _htmlToDelta;
+  final Future<String> Function(List<dynamic>) _deltaToHtml;
+  final saveStateNotifier = ValueNotifier(
+    const SaveUiState(SavePhase.unsavedDraft),
+  );
+  final noteListStateNotifier = ValueNotifier(const NoteListUiState());
+  final isConvertingNotifier = ValueNotifier(false);
+  bool _saveWriting = false;
+  OperationOutcome? _saveFailure;
+  int? _saveFailureOwner;
+  int? _saveFailureCredential;
+  int _conversionRequest = 0;
+  int _libraryEpoch = 0;
+  String? _listError;
+  String _displayedQuery = '';
+  bool _isScanning = false;
+  bool _isFiltering = false;
+  _SearchTicket? _activeSearch;
+  _SearchTicket? _pendingSearch;
+  StorageBinding? _postCommitRefreshBinding;
+  DiscoveryRequest? _refreshInFlight;
+  bool _refreshAgain = false;
+  bool _refreshDispatching = false;
+  bool _committedRefreshScheduled = false;
+  String? _inventoryRoot;
+
+  String get searchQuery => _searchQuery;
+  int get libraryEpoch => _libraryEpoch;
+  String? get currentContentPath => _noteReference?.contentPath;
+  bool get isConvertingEditor => isConvertingNotifier.value;
+  EditorMode get editorMode =>
+      _isHtmlMode ? EditorMode.html : EditorMode.richText;
+
+  void _publishSaveState() {
+    if (_disposed) return;
+    if (_saveFailureOwner != _session.generation ||
+        _saveFailureCredential != _session.credentialGeneration) {
+      _saveFailure = null;
+    }
+    final writing = _saveWriting || _pendingSaves.isNotEmpty;
+    final phase = writing
+        ? SavePhase.saving
+        : _saveFailure != null
+        ? SavePhase.failed
+        : !_session.isPersisted
+        ? SavePhase.unsavedDraft
+        : _session.isDirty
+        ? SavePhase.dirty
+        : SavePhase.saved;
+    saveStateNotifier.value = SaveUiState(
+      phase,
+      hasChanges: _session.isDirty,
+      canRetry:
+          !writing && _session.canWrite && !_isLocked && _saveFailure != null,
+      failure: phase == SavePhase.failed ? _saveFailure : null,
+    );
+  }
+
+  OperationResult<void> _saveResult(OperationResult<void> result) {
+    if (!_disposed) {
+      _saveFailure =
+          result.isSuccess || result.outcome == OperationOutcome.cancelled
+          ? null
+          : result.outcome;
+      _saveFailureOwner = _session.generation;
+      _saveFailureCredential = _session.credentialGeneration;
+      _publishSaveState();
+    }
+    return result;
+  }
+
+  Future<OperationResult<void>> retrySave() => saveNote();
+
+  void _publishNoteList() {
+    if (_disposed) return;
+    noteListStateNotifier.value = NoteListUiState(
+      files: recentFiles,
+      query: _searchQuery,
+      displayedQuery: _displayedQuery,
+      isScanning: _isScanning,
+      isFiltering: _isFiltering,
+      error: _listError,
+      selectedContentPath: currentContentPath,
+      libraryEpoch: _libraryEpoch,
+    );
+  }
+
+  @override
+  void notifyListeners() {
+    _publishSaveState();
+    _publishNoteList();
+    _retireTerminalOpenJobs();
+    super.notifyListeners();
+  }
+
+  void _markCommittedRefresh(StorageBinding binding) {
+    _postCommitRefreshBinding = binding;
+  }
+
+  void _flushCommittedRefresh() {
+    if (_disposed ||
+        _libraryResourcesClosing ||
+        _drainingSaves ||
+        _mutationsPending != 0 ||
+        _committedRefreshScheduled) {
+      return;
+    }
+    final binding = _postCommitRefreshBinding;
+    if (binding == null) return;
+    _postCommitRefreshBinding = null;
+    _committedRefreshScheduled = true;
+    scheduleMicrotask(() {
+      _committedRefreshScheduled = false;
+      if (!_disposed &&
+          !_libraryResourcesClosing &&
+          p.equals(
+            _noteReference?.binding.root ?? _inventoryRoot ?? '',
+            binding.root,
+          )) {
+        unawaited(_requestBackgroundRefresh());
+      }
+    });
+  }
+
   bool _decisionPending = false;
   bool _librarySwitching = false;
   bool _libraryCutover = false;
@@ -303,6 +429,48 @@ class ContentViewModel extends BaseViewModel {
   final Set<String> _cancelledAttachmentJobs = {};
   final Set<Future<void>> _activeOwnedJobs = {};
   final Set<AttachmentJobState> _ownedJobStates = {};
+  final Set<AttachmentJobState> _retiredJobStates = {};
+  bool _jobRetirementScheduled = false;
+
+  void _retireTerminalOpenJobs() {
+    if (_disposed) return;
+    final latest = <String, AttachmentJobState>{};
+    for (final job in attachmentJobsNotifier.value) {
+      final state = job.progress.value;
+      if (state.operation == AttachmentJobOperation.open) {
+        latest['${state.owner}/${state.originalAttachmentId}'] = job;
+      }
+    }
+    final retiring = attachmentJobsNotifier.value.where((job) {
+      final state = job.progress.value;
+      return !state.active &&
+          state.operation == AttachmentJobOperation.open &&
+          (state.owner != _session.generation ||
+              !identical(
+                latest['${state.owner}/${state.originalAttachmentId}'],
+                job,
+              ));
+    }).toSet();
+    if (retiring.isEmpty) return;
+    attachmentJobsNotifier.value = List.unmodifiable(
+      attachmentJobsNotifier.value.where((job) => !retiring.contains(job)),
+    );
+    for (final job in retiring) {
+      _ownedJobStates.remove(job);
+      _cancelledAttachmentJobs.remove(job.progress.value.id);
+      _retiredJobStates.add(job);
+    }
+    if (_jobRetirementScheduled) return;
+    _jobRetirementScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _jobRetirementScheduled = false;
+      for (final job in _retiredJobStates.toList()) {
+        job.dispose();
+      }
+      _retiredJobStates.clear();
+    });
+  }
+
   bool _bulkAttachmentJob = false;
   bool _deleting = false;
   bool _deletingCurrent = false;
@@ -327,9 +495,11 @@ class ContentViewModel extends BaseViewModel {
     _mutationTail = result.then<void>(
       (_) {
         _mutationsPending--;
+        _flushCommittedRefresh();
       },
       onError: (Object _, StackTrace __) {
         _mutationsPending--;
+        _flushCommittedRefresh();
       },
     );
     return result;
@@ -366,25 +536,23 @@ class ContentViewModel extends BaseViewModel {
       DraftDecisionRequest(DraftDecisionKind.activeAttachments, transition),
     );
     if (decision != DraftDecision.discard) return _cancelledResult();
-    for (final job in attachmentJobsNotifier.value) {
-      if (job.progress.value.active) {
-        _cancelledAttachmentJobs.add(job.progress.value.id);
-        await _packageCancellationFiles[job.progress.value.id]?.writeAsString(
-          'cancel',
-          flush: true,
+    // A commit can begin while the decision dialog is open.
+    if (attachmentJobsNotifier.value.any(
+      (job) => job.progress.value.phase == AttachmentJobPhase.finalizing,
+    )) {
+      if (transition != DraftTransition.exit) {
+        return const OperationResult.failure(
+          OperationOutcome.conflict,
+          'Finishing attachment commit. Wait before continuing.',
         );
-        await _attachmentTransforms[job.progress.value.id]?.cancel();
-        if (job.progress.value.operation == AttachmentJobOperation.open &&
-            _noteReference != null &&
-            job.progress.value.originalAttachmentId != null) {
-          await _attachmentOpenCache?.cancel(
-            _noteReference!,
-            job.progress.value.originalAttachmentId!,
-            _session.credentialGeneration,
-          );
-        }
       }
+      await Future.wait(accepted);
+      return const OperationResult.success();
     }
+    final cancelling = attachmentJobsNotifier.value
+        .where(_latchCancellation)
+        .toList();
+    await Future.wait(cancelling.map(_signalCancellation));
     await Future.wait(accepted);
     return const OperationResult.success();
   }
@@ -499,6 +667,7 @@ class ContentViewModel extends BaseViewModel {
     );
     _ownedJobStates.add(job);
     attachmentJobsNotifier.value = [...attachmentJobsNotifier.value, job];
+    _retireTerminalOpenJobs();
     return job;
   }
 
@@ -509,8 +678,18 @@ class ContentViewModel extends BaseViewModel {
     int? total,
     String? error,
   }) {
-    if (_disposed) return;
+    if (_disposed || !_ownedJobStates.contains(job)) return;
     final previous = job.progress.value;
+    if (!previous.active) return;
+    if ((previous.phase == AttachmentJobPhase.cancelling ||
+            previous.phase == AttachmentJobPhase.finalizing) &&
+        ![
+          AttachmentJobPhase.completed,
+          AttachmentJobPhase.cancelled,
+          AttachmentJobPhase.failed,
+        ].contains(phase)) {
+      return;
+    }
     job.update(
       AttachmentJobSnapshot(
         id: previous.id,
@@ -525,17 +704,71 @@ class ContentViewModel extends BaseViewModel {
         operation: previous.operation,
       ),
     );
+    if (!job.progress.value.active && previous.active) {
+      attachmentJobsNotifier.value = List.of(attachmentJobsNotifier.value);
+    }
   }
 
   Future<void> cancelAttachmentJob(String id) async {
     final jobs = attachmentJobsNotifier.value.where(
       (j) => j.progress.value.id == id,
     );
-    if (jobs.isEmpty || !jobs.first.progress.value.cancellable) return;
-    if (jobs.first.progress.value.operation == AttachmentJobOperation.open) {
-      _cancelledAttachmentJobs.add(id);
+    if (jobs.isEmpty) return;
+    final job = jobs.first;
+    final group = job.progress.value.batch
+        ? attachmentJobsNotifier.value
+              .where(
+                (j) =>
+                    j.progress.value.batch &&
+                    j.progress.value.owner == job.progress.value.owner,
+              )
+              .toList()
+        : [job];
+    if (group.any(
+      (j) => j.progress.value.phase == AttachmentJobPhase.finalizing,
+    )) {
+      return;
+    }
+    final cancelling = group.where(_latchCancellation).toList();
+    await Future.wait(cancelling.map(_signalCancellation));
+  }
+
+  bool _latchCancellation(AttachmentJobState job) {
+    final state = job.progress.value;
+    if (!state.cancellable || !_ownedJobStates.contains(job)) return false;
+    _cancelledAttachmentJobs.add(state.id);
+    _jobPhase(
+      job,
+      AttachmentJobPhase.cancelling,
+      bytes: state.bytes,
+      total: state.total,
+    );
+    return true;
+  }
+
+  bool _tryBeginFinalization(Iterable<AttachmentJobState> jobs) {
+    final group = jobs.toList();
+    if (_disposed ||
+        group.any(
+          (job) =>
+              job.progress.value.owner != _session.generation ||
+              !job.progress.value.cancellable ||
+              _cancelledAttachmentJobs.contains(job.progress.value.id),
+        )) {
+      return false;
+    }
+    for (final job in group) {
+      _jobPhase(job, AttachmentJobPhase.finalizing);
+    }
+    return true;
+  }
+
+  Future<void> _signalCancellation(AttachmentJobState job) async {
+    final state = job.progress.value;
+    final id = state.id;
+    if (state.operation == AttachmentJobOperation.open) {
       final reference = _noteReference;
-      final attachment = jobs.first.progress.value.originalAttachmentId;
+      final attachment = state.originalAttachmentId;
       if (reference != null && attachment != null)
         await _attachmentOpenCache?.cancel(
           reference,
@@ -544,16 +777,6 @@ class ContentViewModel extends BaseViewModel {
         );
       return;
     }
-    if (jobs.first.progress.value.batch) {
-      for (final job in attachmentJobsNotifier.value.where(
-        (j) => j.progress.value.batch && j.progress.value.active,
-      )) {
-        _cancelledAttachmentJobs.add(job.progress.value.id);
-        await _attachmentTransforms[job.progress.value.id]?.cancel();
-      }
-      return;
-    }
-    _cancelledAttachmentJobs.add(id);
     await _packageCancellationFiles[id]?.writeAsString('cancel', flush: true);
     await _attachmentTransforms[id]?.cancel();
   }
@@ -717,7 +940,7 @@ class ContentViewModel extends BaseViewModel {
               _cancelledAttachmentJobs.contains(id)) {
             return _cancelledResult();
           }
-          _jobPhase(job, AttachmentJobPhase.finalizing);
+          if (!_tryBeginFinalization([job])) return _cancelledResult();
           final attachment = AttachmentModel(
             id: id,
             fileName: fileName,
@@ -907,9 +1130,7 @@ class ContentViewModel extends BaseViewModel {
               )) {
             return _cancelledResult();
           }
-          for (final job in jobs) {
-            _jobPhase(job, AttachmentJobPhase.finalizing);
-          }
+          if (!_tryBeginFinalization(jobs)) return _cancelledResult();
           final metadata = <String, dynamic>{..._retainedMetadata};
           final oldFields = metadata['attachments'];
           if (oldFields is List &&
@@ -1218,8 +1439,9 @@ class ContentViewModel extends BaseViewModel {
           );
         } else if (_cancelledAttachmentJobs.contains(id)) {
           result = _cancelledResult();
+        } else if (!_tryBeginFinalization([job])) {
+          result = _cancelledResult();
         } else {
-          _jobPhase(job, AttachmentJobPhase.finalizing);
           result = await ExternalFileExport.publish(
             candidate: candidate,
             destination: destination,
@@ -1368,6 +1590,8 @@ class ContentViewModel extends BaseViewModel {
     DraftDecisionHandler? onDraftDecision,
     BackgroundService? backgroundService,
     RecentFileFilter? filterRecentFiles,
+    Future<List<dynamic>> Function(String)? htmlToDelta,
+    Future<String> Function(List<dynamic>)? deltaToHtml,
     AttachmentOpenCache? attachmentOpenCache,
     DesktopActions? desktopActions,
   }) : _fileService = fileService,
@@ -1376,6 +1600,10 @@ class ContentViewModel extends BaseViewModel {
        _nowMilliseconds = nowMilliseconds ?? _systemMilliseconds,
        _onDraftDecision = onDraftDecision,
        _filterRecentFiles = filterRecentFiles ?? _defaultFilterRecentFiles,
+       _htmlToDelta =
+           htmlToDelta ?? ((html) => compute(_htmlToDeltaTask, html)),
+       _deltaToHtml =
+           deltaToHtml ?? ((delta) => compute(_deltaToHtmlTask, delta)),
        _attachmentOpenCache = attachmentOpenCache,
        _desktopActions = desktopActions,
        _backgroundService = startBackgroundServices
@@ -1448,6 +1676,7 @@ class ContentViewModel extends BaseViewModel {
     _session = _session.edited(field);
     _autoSavePaused = false;
     _scheduleAutoSave();
+    _publishSaveState();
   }
 
   Future<void> handleLinkClick(String url) async {
@@ -1471,25 +1700,38 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<void> toggleEditorMode() async {
-    return _libraryTask(_toggleEditorMode, null);
+    await setEditorMode(_isHtmlMode ? EditorMode.richText : EditorMode.html);
   }
 
-  Future<void> _toggleEditorMode() async {
-    if (_disposed || !_session.canWrite || _isLocked) return;
+  Future<OperationResult<void>> setEditorMode(EditorMode target) =>
+      _libraryTask(() => _setEditorMode(target), _cancelledResult());
+
+  Future<OperationResult<void>> _setEditorMode(EditorMode target) async {
+    if (_disposed || !_session.canWrite || _isLocked) return _cancelledResult();
+    if (target == editorMode) return const OperationResult.success();
+    if (isConvertingEditor) {
+      return const OperationResult.failure(
+        OperationOutcome.conflict,
+        'Editor conversion is already running.',
+      );
+    }
     _observeRichEdit();
     final owner = _session.generation;
     final revision = _session.editRevision;
-    setBusy(true);
+    final request = ++_conversionRequest;
+    final source = editorMode;
+    isConvertingNotifier.value = true;
     try {
-      if (_isHtmlMode) {
-        final html = htmlController.text;
-        final deltaList = await compute(_htmlToDeltaTask, html);
+      if (target == EditorMode.richText) {
+        final delta = await _htmlToDelta(htmlController.text);
         if (_disposed ||
             owner != _session.generation ||
-            revision != _session.editRevision) {
-          return;
+            revision != _session.editRevision ||
+            request != _conversionRequest ||
+            source != editorMode) {
+          return _cancelledResult();
         }
-        final document = Document.fromJson(deltaList);
+        final document = Document.fromJson(delta);
         _publishing = true;
         try {
           _replaceDocument(document);
@@ -1498,13 +1740,16 @@ class ContentViewModel extends BaseViewModel {
           _publishing = false;
         }
       } else {
-        final delta = quillController.document.toDelta();
-        final html = await compute(_deltaToHtmlTask, delta.toJson());
+        final html = await _deltaToHtml(
+          quillController.document.toDelta().toJson(),
+        );
         _observeRichEdit();
         if (_disposed ||
             owner != _session.generation ||
-            revision != _session.editRevision) {
-          return;
+            revision != _session.editRevision ||
+            request != _conversionRequest ||
+            source != editorMode) {
+          return _cancelledResult();
         }
         _publishing = true;
         try {
@@ -1516,15 +1761,19 @@ class ContentViewModel extends BaseViewModel {
       }
       _recordEdit(DraftField.body);
       notifyListeners();
+      return const OperationResult.success();
     } catch (_) {
-      _reportResult(
+      if (_disposed || owner != _session.generation) return _cancelledResult();
+      return _reportResult(
         const OperationResult.failure(
           OperationOutcome.rejectedInput,
           'Editor conversion failed; the draft was retained.',
         ),
       );
     } finally {
-      if (!_disposed) setBusy(false);
+      if (!_disposed && request == _conversionRequest) {
+        isConvertingNotifier.value = false;
+      }
     }
   }
 
@@ -1544,12 +1793,31 @@ class ContentViewModel extends BaseViewModel {
         return;
       }
       _recentFiles = snapshot.files;
+      _inventoryRoot = snapshot.request.directoryPath;
       _listingRevision++;
+      _listError = null;
+      _isScanning = !snapshot.isFinal || _refreshAgain;
       _restartSearch();
-      notifyListeners();
+      _publishNoteList();
+      if (snapshot.isFinal) _finishBackgroundRefresh(snapshot.request);
     });
-    _backgroundErrorsSubscription = background.errorsStream.listen((failure) {
-      if (!_disposed) _reportResult(failure);
+    _backgroundErrorsSubscription = background.failuresStream.listen((failure) {
+      if (_disposed ||
+          _libraryResourcesClosing ||
+          (failure.request != null &&
+              !background.isCurrent(failure.request!))) {
+        return;
+      }
+      _listError =
+          failure.result.message ?? 'Library discovery failed. Retry refresh.';
+      _isScanning = false;
+      _publishNoteList();
+      if (failure.request != null) {
+        _finishBackgroundRefresh(failure.request!);
+      } else {
+        _refreshInFlight = null;
+        _refreshAgain = false;
+      }
     });
 
     if (_fileService is LibraryFileService && !kIsWeb) {
@@ -1588,7 +1856,10 @@ class ContentViewModel extends BaseViewModel {
             return;
           }
           _debounceTimer?.cancel();
-          _debounceTimer = Timer(const Duration(seconds: 2), loadRecentFiles);
+          _debounceTimer = Timer(
+            const Duration(seconds: 2),
+            () => unawaited(_requestBackgroundRefresh()),
+          );
         },
         onError: (Object error, StackTrace stackTrace) {
           if (!_disposed && identical(_libraryWatch, watch)) {
@@ -1752,7 +2023,15 @@ class ContentViewModel extends BaseViewModel {
         candidateSubscription = null;
         final unchanged = isTransitionPermitCurrent(resolved.value!);
         if (!_disposed) {
-          _recentFiles = [];
+          _libraryEpoch++;
+          _inventoryRoot = next.root;
+          _refreshInFlight = null;
+          _refreshAgain = false;
+          _postCommitRefreshBinding = null;
+          _listError = null;
+          _recentFiles = const [];
+          _filteredFiles = const [];
+          _displayedQuery = '';
           _listingRevision++;
           _restartSearch();
           _sessionPasswords.clear();
@@ -1900,40 +2179,67 @@ class ContentViewModel extends BaseViewModel {
   // endregion
 
   // region File Loading
+  Future<void> _requestBackgroundRefresh() async {
+    if (_disposed || _libraryResourcesClosing || _backgroundService == null)
+      return;
+    if (_refreshInFlight != null || _refreshDispatching) {
+      _refreshAgain = true;
+      _isScanning = true;
+      _publishNoteList();
+      return;
+    }
+    _refreshDispatching = true;
+    try {
+      await loadRecentFiles();
+    } finally {
+      _refreshDispatching = false;
+    }
+  }
+
+  void _finishBackgroundRefresh(DiscoveryRequest request) {
+    if (_refreshInFlight != null && !_refreshInFlight!.matches(request)) return;
+    _refreshInFlight = null;
+    if (_refreshAgain && !_disposed && !_libraryResourcesClosing) {
+      _refreshAgain = false;
+      scheduleMicrotask(() => unawaited(_requestBackgroundRefresh()));
+    }
+  }
+
   Future<void> loadRecentFiles() async {
     if (_disposed || _libraryResourcesClosing || _backgroundService == null) {
       return;
     }
     final request = ++_listingPathRequest;
     _backgroundService.invalidateRequests();
+    _refreshAgain = false;
+    _refreshInFlight = null;
+    _listError = null;
+    _isScanning = true;
+    _publishNoteList();
     try {
       final path = await _fileService.getUserDataPath();
-      if (path.isNotEmpty && !_disposed && request == _listingPathRequest) {
-        if (_fileService is LibraryFileService &&
-            !_librarySwitching &&
-            !kIsWeb) {
-          await _bindLibraryWatch(StorageBinding(path, request));
-          if (_disposed || request != _listingPathRequest) return;
-        }
-        _backgroundService.loadRecentFiles(path);
+      if (path.isEmpty || _disposed || request != _listingPathRequest) return;
+      if (_inventoryRoot != null && !p.equals(_inventoryRoot!, path)) {
+        _libraryEpoch++;
+        _recentFiles = const [];
+        _filteredFiles = const [];
+        _displayedQuery = '';
+        _listingRevision++;
+        _restartSearch();
       }
-    } on BackgroundServiceFailure catch (failure) {
-      if (!_disposed && request == _listingPathRequest) {
-        _reportResult(
-          OperationResult.failure(
-            failure.outcome,
-            'Library discovery is unavailable. Retry refresh.',
-          ),
-        );
+      _inventoryRoot = path;
+      if (_fileService is LibraryFileService && !_librarySwitching && !kIsWeb) {
+        await _bindLibraryWatch(StorageBinding(path, request));
+        if (_disposed || request != _listingPathRequest) return;
       }
+      _backgroundService.loadRecentFiles(path);
+      _refreshInFlight = _backgroundService.requestedScan;
+      _publishNoteList();
     } catch (_) {
       if (!_disposed && request == _listingPathRequest) {
-        _reportResult(
-          const OperationResult.failure(
-            OperationOutcome.ioFailure,
-            'Library discovery failed. Retry refresh.',
-          ),
-        );
+        _listError = 'Library discovery failed. Retry refresh.';
+        _isScanning = false;
+        _publishNoteList();
       }
     }
   }
@@ -2011,14 +2317,39 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
-  Future<OperationResult<void>> loadNote(String fileName) async {
+  Future<OperationResult<void>> openListedNote(RecentFile file, int epoch) =>
+      loadNote(
+        file.path,
+        expectedRoot: _inventoryRoot,
+        expectedContentPath: file.fullPath,
+        expectedLibraryEpoch: epoch,
+      );
+
+  Future<OperationResult<void>> loadNote(
+    String fileName, {
+    String? expectedRoot,
+    String? expectedContentPath,
+    int? expectedLibraryEpoch,
+  }) async {
+    bool expected(NoteReference? reference) =>
+        (expectedLibraryEpoch == null ||
+            expectedLibraryEpoch == _libraryEpoch) &&
+        (expectedRoot == null ||
+            (reference != null &&
+                p.equals(expectedRoot, reference.binding.root))) &&
+        (expectedContentPath == null ||
+            (reference != null &&
+                p.equals(expectedContentPath, reference.contentPath)));
+    if (expectedLibraryEpoch != null && expectedLibraryEpoch != _libraryEpoch) {
+      return _cancelledResult();
+    }
     if (_disposed) {
       return const OperationResult.failure(
         OperationOutcome.cancelled,
         'Editor was closed.',
       );
     }
-    if (fileName == _currentFileName && !_loading) {
+    if (fileName == _currentFileName && !_loading && expected(_noteReference)) {
       return const OperationResult.success();
     }
     final request = ++_loadRequest;
@@ -2031,6 +2362,7 @@ class ContentViewModel extends BaseViewModel {
     setBusy(true);
     try {
       final reference = await _fileService.resolveNote(fileName);
+      if (!expected(reference)) return _cancelledResult();
       if (_disposed ||
           request != _loadRequest ||
           owner != _session.generation) {
@@ -2054,6 +2386,7 @@ class ContentViewModel extends BaseViewModel {
       }
       final prospective = await _decodeNote(content);
       final note = prospective.note;
+      if (!expected(reference)) return _cancelledResult();
       final resolvedReference = reference!.withModelId(note.id);
       String? password;
       String? plainBody;
@@ -2094,6 +2427,10 @@ class ContentViewModel extends BaseViewModel {
       _unlockRequest++;
       _publishing = true;
       try {
+        if (!expected(resolvedReference)) {
+          document.close();
+          return _cancelledResult();
+        }
         _currentFileName = fileName;
         _currentPassword = password;
         _storedNote = note;
@@ -2836,46 +3173,84 @@ class ContentViewModel extends BaseViewModel {
   }
 
   void setSearchQuery(String query) {
-    if (_disposed || query == _searchQuery) {
-      return;
-    }
+    if (_disposed || query == _searchQuery) return;
+    if (_searchQuery.isEmpty && query.isNotEmpty) _filteredFiles = _recentFiles;
     _searchQuery = query;
+    _listError = null;
     _restartSearch();
-    notifyListeners();
+  }
+
+  void clearSearch() => setSearchQuery('');
+  void retrySearch() {
+    _listError = null;
+    _restartSearch();
   }
 
   void _restartSearch() {
     _searchDebounceTimer?.cancel();
     final generation = ++_searchGeneration;
-    _filteredFiles = const [];
+    _pendingSearch = null;
     if (_searchQuery.isEmpty) {
+      _displayedQuery = '';
+      _isFiltering = false;
+      _publishNoteList();
       return;
     }
+    _isFiltering = true;
+    _publishNoteList();
     final query = _searchQuery;
     final listing = _listingRevision;
-    final files = List<RecentFile>.unmodifiable(_recentFiles);
-    _searchDebounceTimer = Timer(const Duration(milliseconds: 300), () async {
-      if (!_ownsSearch(generation, listing, query)) {
+    final epoch = _libraryEpoch;
+    _searchDebounceTimer = Timer(const Duration(milliseconds: 300), () {
+      if (!_ownsSearch(generation, listing, query) || epoch != _libraryEpoch)
         return;
-      }
-      try {
-        final results = await _filterRecentFiles(files, query);
-        if (!_ownsSearch(generation, listing, query)) {
-          return;
-        }
-        _filteredFiles = List<RecentFile>.unmodifiable(results);
-        notifyListeners();
-      } catch (_) {
-        if (_ownsSearch(generation, listing, query)) {
-          _reportResult(
-            const OperationResult.failure(
-              OperationOutcome.ioFailure,
-              'Note search failed. Retry search.',
-            ),
-          );
-        }
-      }
+      _pendingSearch = _SearchTicket(
+        generation,
+        listing,
+        epoch,
+        query,
+        _recentFiles,
+      );
+      _pumpSearch();
     });
+  }
+
+  void _pumpSearch() {
+    if (_disposed || _libraryResourcesClosing || _activeSearch != null) return;
+    final ticket = _pendingSearch;
+    _pendingSearch = null;
+    if (ticket == null ||
+        !_ownsSearch(ticket.generation, ticket.listing, ticket.query) ||
+        ticket.epoch != _libraryEpoch) {
+      return;
+    }
+    _activeSearch = ticket;
+    unawaited(_runSearch(ticket));
+  }
+
+  Future<void> _runSearch(_SearchTicket ticket) async {
+    bool owns() =>
+        ticket.epoch == _libraryEpoch &&
+        _ownsSearch(ticket.generation, ticket.listing, ticket.query);
+    try {
+      final results = await _filterRecentFiles(ticket.files, ticket.query);
+      if (owns()) {
+        _filteredFiles = List.unmodifiable(results);
+        _displayedQuery = ticket.query;
+        _isFiltering = false;
+        _listError = null;
+        _publishNoteList();
+      }
+    } catch (_) {
+      if (owns()) {
+        _isFiltering = false;
+        _listError = 'Note search failed. Retry search.';
+        _publishNoteList();
+      }
+    } finally {
+      if (identical(_activeSearch, ticket)) _activeSearch = null;
+      _pumpSearch();
+    }
   }
 
   bool _ownsSearch(int generation, int listing, String query) =>
@@ -2924,7 +3299,7 @@ class ContentViewModel extends BaseViewModel {
     }
     if (_disposed || !_session.canWrite || _isLocked) {
       return Future.value(
-        _reportResult(
+        _saveResult(
           const OperationResult.failure(
             OperationOutcome.rejectedInput,
             'This session cannot be saved.',
@@ -2946,7 +3321,7 @@ class ContentViewModel extends BaseViewModel {
     if (!_session.isDirty &&
         !(allowEmptyFirstSave && !isAutoSave && !_session.isPersisted)) {
       return Future.value(
-        _reportResult(
+        _saveResult(
           _session.isPersisted
               ? const OperationResult.success()
               : const OperationResult.failure(
@@ -2962,6 +3337,18 @@ class ContentViewModel extends BaseViewModel {
         _storedNote != null &&
         !_session.dirtyFields.contains(DraftField.body) &&
         _session.credentialGeneration == _persistedCredentialGeneration;
+    final queued = _pendingSaves.isEmpty ? null : _pendingSaves.last;
+    if (queued != null &&
+        queued.snapshot.sessionGeneration == _session.generation &&
+        queued.snapshot.credentialGeneration == _session.credentialGeneration &&
+        queued.snapshot.noteId == (_storedNote?.id ?? _draftNoteId) &&
+        queued.snapshot.editRevision == _session.editRevision &&
+        (queued.snapshot.reference == null ||
+            queued.snapshot.reference!.contentPath ==
+                _noteReference?.contentPath)) {
+      queued.isAutoSave = queued.isAutoSave && isAutoSave;
+      return queued.result.future;
+    }
     late final NoteSnapshot snapshot;
     try {
       snapshot = NoteSnapshot(
@@ -2990,7 +3377,7 @@ class ContentViewModel extends BaseViewModel {
       );
     } catch (_) {
       return Future.value(
-        _reportResult(
+        _saveResult(
           const OperationResult.failure(
             OperationOutcome.rejectedInput,
             'The draft could not be encoded; it was retained.',
@@ -3023,6 +3410,7 @@ class ContentViewModel extends BaseViewModel {
       _drainingSaves = true;
       _saveTail = Future<void>.microtask(_drainSaveQueue);
     }
+    _publishSaveState();
     return pending.result.future;
   }
 
@@ -3037,7 +3425,15 @@ class ContentViewModel extends BaseViewModel {
           );
         } catch (_) {
           // Settle every accepted caller even if an unexpected callback fails.
-          if (_ownsSnapshot(pending.snapshot)) _autoSavePaused = true;
+          if (_ownsSnapshot(pending.snapshot)) {
+            _autoSavePaused = true;
+            _saveResult(
+              const OperationResult.failure(
+                OperationOutcome.ioFailure,
+                'Save failed; the draft was retained. Retry Save.',
+              ),
+            );
+          }
           result = const OperationResult.failure(
             OperationOutcome.ioFailure,
             'Save failed; the draft was retained. Retry Save.',
@@ -3047,6 +3443,8 @@ class ContentViewModel extends BaseViewModel {
       }
     } finally {
       _drainingSaves = false;
+      _publishSaveState();
+      _flushCommittedRefresh();
     }
   }
 
@@ -3069,10 +3467,13 @@ class ContentViewModel extends BaseViewModel {
         _session.persistedRevision != null &&
         _session.persistedRevision! >= snapshot.editRevision) {
       // This queued request is already covered by our own acknowledged write.
-      return _reportResult(const OperationResult.success());
+      return _saveResult(const OperationResult.success());
     }
     if (!isAutoSave && !_usesOwnedMutations) setBusy(true);
+    _saveWriting = true;
+    _saveFailure = null;
     isSavingNotifier.value = true;
+    _publishSaveState();
     if (isAutoSave) isAutoSavingNotifier.value = true;
     try {
       var reference =
@@ -3190,12 +3591,14 @@ class ContentViewModel extends BaseViewModel {
       } else {
         _cancelAutoSave();
       }
-      await loadRecentFiles();
-      return _reportResult(const OperationResult.success());
+      _markCommittedRefresh(committedReference.binding);
+      _saveWriting = false;
+      _publishNoteList();
+      return _saveResult(const OperationResult.success());
     } on NotePersistenceFailure catch (failure) {
       if (!_ownsSnapshot(snapshot)) return _cancelledResult();
       _autoSavePaused = true;
-      return _reportResult(
+      return _saveResult(
         OperationResult.failure(
           failure.outcome,
           'Save failed; the draft was retained. Retry Save.',
@@ -3204,7 +3607,7 @@ class ContentViewModel extends BaseViewModel {
     } catch (_) {
       if (!_ownsSnapshot(snapshot)) return _cancelledResult();
       _autoSavePaused = true;
-      return _reportResult(
+      return _saveResult(
         const OperationResult.failure(
           OperationOutcome.ioFailure,
           'Save failed; the draft was retained. Retry Save.',
@@ -3213,7 +3616,9 @@ class ContentViewModel extends BaseViewModel {
     } finally {
       if (!_disposed) {
         if (!isAutoSave && !_usesOwnedMutations) setBusy(false);
+        _saveWriting = false;
         isSavingNotifier.value = false;
+        _publishSaveState();
         if (isAutoSave) isAutoSavingNotifier.value = false;
       }
     }
@@ -3762,8 +4167,9 @@ class ContentViewModel extends BaseViewModel {
           );
           if (_cancelledAttachmentJobs.contains(id)) {
             result = _cancelledResult();
+          } else if (!_tryBeginFinalization([job])) {
+            result = _cancelledResult();
           } else {
-            _jobPhase(job, AttachmentJobPhase.finalizing);
             result = await ExternalFileExport.publish(
               candidate: candidate,
               destination: destination,
@@ -4035,13 +4441,18 @@ class ContentViewModel extends BaseViewModel {
             'Import cancelled.',
           );
         }
-        _jobPhase(job, AttachmentJobPhase.finalizing);
+        if (!_tryBeginFinalization([job])) {
+          return const OperationResult<String>.failure(
+            OperationOutcome.cancelled,
+            'Import cancelled.',
+          );
+        }
         final committed = await files.commitGeneration(
           reference,
           encoded,
           prepared,
         );
-        await loadRecentFiles();
+        _markCommittedRefresh(committed.binding);
         return OperationResult<String>.success(committed.fileName);
       });
     } on FileJobCancelled {
@@ -4317,8 +4728,18 @@ class ContentViewModel extends BaseViewModel {
     for (final job in _ownedJobStates) {
       job.dispose();
     }
+    for (final job in _retiredJobStates) {
+      job.dispose();
+    }
+    _retiredJobStates.clear();
     attachmentJobsNotifier.dispose();
     _disposed = true;
+    _postCommitRefreshBinding = null;
+    _pendingSearch = null;
+    _conversionRequest++;
+    saveStateNotifier.dispose();
+    noteListStateNotifier.dispose();
+    isConvertingNotifier.dispose();
     _listingPathRequest++;
     _searchGeneration++;
     for (final pending in _pendingSaves) {
@@ -4522,4 +4943,19 @@ Future<String> _deltaToHtmlTask(List<dynamic> deltaJson) async {
     ConverterOptions.forEmail(),
   );
   return converter.convert();
+}
+
+class _SearchTicket {
+  const _SearchTicket(
+    this.generation,
+    this.listing,
+    this.epoch,
+    this.query,
+    this.files,
+  );
+  final int generation;
+  final int listing;
+  final int epoch;
+  final String query;
+  final List<RecentFile> files;
 }

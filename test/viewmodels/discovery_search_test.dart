@@ -89,10 +89,34 @@ void main() {
     await joinCleanup(tester, f.editor.closeLibraryResources());
     pending.result.complete([pending.files.first]);
     await tester.pump();
-    expect(f.editor.recentFiles, isEmpty);
+    expect(f.editor.recentFiles.length, 2);
     f.editor.setSearchQuery('');
     expect(f.editor.recentFiles.length, 2);
     expect(f.reader.closed, isTrue);
+  });
+
+  searchTest('scan completion and queued failures retain request ownership', (
+    tester,
+    f,
+  ) async {
+    final original = f.reader.desired!;
+    f.reader.publish([f.file('Partial')], isFinal: false);
+    expect(f.editor.noteListStateNotifier.value.isScanning, isTrue);
+    f.reader.failures.add(
+      DiscoveryFailureEvent(
+        const OperationResult.failure(
+          OperationOutcome.ioFailure,
+          'stale synthetic failure',
+        ),
+        request: original,
+      ),
+    );
+    await f.editor.loadRecentFiles();
+    f.reader.publish([f.file('Current')]);
+    await tester.pump();
+    expect(f.editor.noteListStateNotifier.value.error, isNull);
+    expect(f.editor.noteListStateNotifier.value.isScanning, isFalse);
+    expect(f.editor.recentFiles.single.title, 'Current');
   });
 
   searchTest('a delayed older query cannot replace the newer search', (
@@ -103,11 +127,16 @@ void main() {
     await search(tester, f, 'Alpha');
     final old = f.filters.single;
     await search(tester, f, 'Beta');
-    final current = f.filters.last;
-    current.result.complete([current.files.last]);
-    await tester.pump();
-    expect(f.editor.recentFiles.single.title, 'Beta');
+    expect(f.filters, hasLength(1));
     old.result.complete([old.files.first]);
+    await tester.pump();
+    expect(
+      f.editor.recentFiles.length,
+      2,
+    ); // Retained inventory, not stale result.
+    final current = f.filters.last;
+    expect(identical(old, current), isFalse);
+    current.result.complete([current.files.last]);
     await tester.pump();
     expect(f.editor.recentFiles.single.title, 'Beta');
   });
@@ -131,12 +160,15 @@ void main() {
       await search(tester, f, 'Alpha');
       final old = f.filters.single;
       f.publish(['New Alpha']);
-      expect(f.editor.recentFiles, isEmpty);
+      expect(f.editor.recentFiles.single.title, 'Old Alpha');
+      expect(f.editor.noteListStateNotifier.value.isFiltering, isTrue);
       await tester.pump(const Duration(milliseconds: 300));
-      final current = f.filters.last;
+      expect(f.filters, hasLength(1));
       old.result.complete(old.files);
       await tester.pump();
-      expect(f.editor.recentFiles, isEmpty);
+      final current = f.filters.last;
+      expect(identical(current, old), isFalse);
+      expect(f.editor.recentFiles.single.title, 'Old Alpha');
       current.result.complete(current.files);
       await tester.pump();
       expect(f.editor.recentFiles.single.title, 'New Alpha');
@@ -181,12 +213,9 @@ void main() {
       StateError('synthetic-sensitive-filter-detail'),
     );
     await tester.pump();
-    final result = f.editor.operationResultNotifier.value!;
-    expect(result.outcome, OperationOutcome.ioFailure);
-    expect(
-      result.message,
-      isNot(contains('synthetic-sensitive-filter-detail')),
-    );
+    final error = f.editor.noteListStateNotifier.value.error;
+    expect(error, isNotNull);
+    expect(error, isNot(contains('synthetic-sensitive-filter-detail')));
     expect(identical(f.editor.quillController.document, document), isTrue);
     expect(tester.takeException(), isNull);
   });
@@ -198,9 +227,12 @@ void main() {
       await search(tester, f, 'Alpha');
       final old = f.filters.single;
       await search(tester, f, 'Beta');
-      final current = f.filters.last;
-      current.result.complete([current.files.last]);
+      expect(f.filters, hasLength(1));
       old.result.completeError(StateError('synthetic-stale-error'));
+      await tester.pump();
+      final current = f.filters.last;
+      expect(identical(current, old), isFalse);
+      current.result.complete([current.files.last]);
       await tester.pump();
       expect(f.editor.recentFiles.single.title, 'Beta');
       expect(f.editor.operationResultNotifier.value, isNull);
@@ -348,15 +380,20 @@ class _Files extends MemoryNoteFiles {
 class _Reader extends BackgroundService {
   _Reader(StorageEnvironment environment) : super(environment: environment);
   final snapshots = StreamController<DiscoverySnapshot>.broadcast(sync: true);
+  final failures = StreamController<DiscoveryFailureEvent>.broadcast();
   final requests = <DiscoveryRequest>[];
   DiscoveryRequest? desired;
   bool closed = false;
   @override
   bool get isReady => !closed;
   @override
+  DiscoveryRequest? get requestedScan => desired;
+  @override
   Future<void> init() async {}
   @override
   Stream<DiscoverySnapshot> get discoveriesStream => snapshots.stream;
+  @override
+  Stream<DiscoveryFailureEvent> get failuresStream => failures.stream;
   @override
   bool isCurrent(DiscoveryRequest request) =>
       !closed && desired != null && desired!.matches(request);
@@ -371,8 +408,13 @@ class _Reader extends BackgroundService {
     requests.add(desired!);
   }
 
-  void publish(List<RecentFile> files, {DiscoveryRequest? request}) => snapshots
-      .add(DiscoverySnapshot(request ?? desired!, files, isFinal: true));
+  void publish(
+    List<RecentFile> files, {
+    DiscoveryRequest? request,
+    bool isFinal = true,
+  }) => snapshots.add(
+    DiscoverySnapshot(request ?? desired!, files, isFinal: isFinal),
+  );
   @override
   void dispose() {
     if (closed) {
@@ -380,6 +422,7 @@ class _Reader extends BackgroundService {
     }
     closed = true;
     snapshots.close();
+    failures.close();
     super.dispose();
   }
 }

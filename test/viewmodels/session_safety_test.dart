@@ -426,7 +426,7 @@ void main() {
       expect(h.files.writeAttempts, 1);
       expect(h.editor.hasUnsavedChanges, isTrue);
       expect(
-        h.editor.operationResultNotifier.value!.outcome,
+        h.editor.saveStateNotifier.value.failure,
         OperationOutcome.ioFailure,
       );
       await tester.pump(const Duration(seconds: 20));

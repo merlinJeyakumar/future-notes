@@ -1,3 +1,4 @@
+import 'package:flutter_application_1/features/dashboard/widgets/attachment_viewer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_application_1/features/dashboard/models/attachment_job.dart';
@@ -52,19 +53,15 @@ void main() {
         expect(find.text('Unlock'), findsOneWidget);
         expect(find.text('Save Note'), findsNothing);
         expect(find.byIcon(Icons.save_rounded), findsNothing);
-        expect(find.byTooltip('Settings'), findsNothing);
+        expect(find.byTooltip('Note actions'), findsNothing);
         expect(find.byTooltip('Attach file'), findsNothing);
         expect(find.text('Editing'), findsNothing);
         expect(find.textContaining('active operations'), findsNothing);
         expect(find.textContaining('synthetic-'), findsNothing);
         expect(find.text('Retry'), findsNothing);
         expect(find.text('Dismiss'), findsNothing);
-        expect(
-          tester.widget<TextField>(find.byType(TextField).first).readOnly,
-          isTrue,
-        );
+        expect(find.byType(TextField), findsNothing);
         if (width >= 900) {
-          expect(find.text('Locked'), findsOneWidget);
           expect(find.textContaining('Note date'), findsOneWidget);
         }
       }
@@ -99,23 +96,18 @@ void main() {
         harness.editor.attachmentJobsNotifier.value = List.of(jobs);
         await tester.pump();
         expect(find.text('This note is locked'), findsNothing);
-        expect(find.byTooltip('Settings'), findsOneWidget);
+        expect(find.byTooltip('Note actions'), findsOneWidget);
         expect(find.byTooltip('Attach file'), findsOneWidget);
         expect(find.text('synthetic-completed.txt'), findsOneWidget);
         expect(find.text('synthetic-failed.txt'), findsOneWidget);
         expect(find.text('Retry'), findsOneWidget);
         expect(find.text('Dismiss'), findsNothing);
-        expect(find.byTooltip('More attachment actions'), findsNWidgets(2));
+        expect(find.byType(AttachmentMoreButton), findsNWidgets(2));
         expect(
           tester.widget<TextField>(find.byType(TextField).first).readOnly,
           isFalse,
         );
-        expect(
-          width >= 900
-              ? find.text('Save Note')
-              : find.byIcon(Icons.save_rounded),
-          findsOneWidget,
-        );
+        expect(find.text('Save Note'), findsOneWidget);
         expect((await harness.editor.manualLock()).isSuccess, isTrue);
         await tester.pump();
         expectLocked();

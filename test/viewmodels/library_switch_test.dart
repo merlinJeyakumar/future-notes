@@ -295,12 +295,34 @@ void main() {
       isTrue,
     );
   });
+  scenario(
+    'same-root watcher requests retain a running scan and one trailing refresh',
+    (tester, f) async {
+      final before = f.reader.requests.length;
+      final request = f.reader.desired!;
+      f.files.watches.single.events.add(null);
+      f.files.watches.single.events.add(null);
+      await tester.pump(const Duration(seconds: 3));
+      expect(f.reader.requests.length, before);
+      expect(f.reader.isCurrent(request), isTrue);
+      f.reader.publish();
+      await tester.pump();
+      expect(f.reader.requests.length, before + 1);
+      expect(f.editor.noteListStateNotifier.value.isScanning, isTrue);
+      f.reader.publish();
+      await tester.pump();
+      expect(f.editor.noteListStateNotifier.value.isScanning, isFalse);
+    },
+  );
+
   scenario('retired watcher events cannot refresh the new library', (
     tester,
     f,
   ) async {
     final old = f.files.watches.single;
     await _joinLibraryOperation(tester, f.editor.switchLibrary(f.nextRoot));
+    f.reader.publish();
+    await tester.pump();
     final count = f.reader.requests.length;
     old.events.add(null);
     await tester.pump(const Duration(seconds: 2));
@@ -628,6 +650,8 @@ class _Reader extends BackgroundService {
 
   @override
   Stream<DiscoverySnapshot> get discoveriesStream => snapshots.stream;
+  @override
+  DiscoveryRequest? get requestedScan => desired;
   @override
   bool isCurrent(DiscoveryRequest request) =>
       desired?.matches(request) ?? false;

@@ -79,7 +79,7 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
               'Format',
               style: TextStyle(
                 color: theme.appSubtleGray,
-                fontSize: 12,
+                fontSize: 10.368,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -107,7 +107,7 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
               ),
               subtitle: Text(
                 'Encrypt the export with a password',
-                style: TextStyle(color: theme.appSubtleGray, fontSize: 12),
+                style: TextStyle(color: theme.appSubtleGray, fontSize: 10.368),
               ),
               value: _usePassword,
               onChanged: (value) {
@@ -194,7 +194,7 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
                         'This note has attachments. They will be included in the export.',
                         style: TextStyle(
                           color: theme.appTextSecondary,
-                          fontSize: 12,
+                          fontSize: 10.368,
                         ),
                       ),
                     ),
@@ -263,7 +263,10 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
                   ),
                   Text(
                     subtitle,
-                    style: TextStyle(color: theme.appSubtleGray, fontSize: 12),
+                    style: TextStyle(
+                      color: theme.appSubtleGray,
+                      fontSize: 10.368,
+                    ),
                   ),
                 ],
               ),

@@ -266,8 +266,14 @@ void main() {
         ),
       );
       final cancelled = second.cancel();
+      // The second descriptor owns no handles/isolate; it must acknowledge
+      // cancellation before waiting for the earlier operation.
+      expect(
+        (await cancelled.timeout(const Duration(seconds: 2))).outcome,
+        OperationOutcome.cancelled,
+      );
+      expect(await File(path('second')).exists(), isFalse);
       expect((await first.result).isSuccess, isTrue);
-      expect((await cancelled).outcome, OperationOutcome.cancelled);
       await worker.close();
       expect(await File(path('second')).exists(), isFalse);
     },

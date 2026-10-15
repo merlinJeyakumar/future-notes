@@ -51,7 +51,7 @@ class ImportConfirmationDialog extends StatelessWidget {
                 previewInfo!,
                 style: TextStyle(
                   fontFamily: 'monospace',
-                  fontSize: 12,
+                  fontSize: 10.368,
                   color: theme.appTextSecondary,
                 ),
                 maxLines: 5,

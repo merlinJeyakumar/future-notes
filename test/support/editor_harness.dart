@@ -41,6 +41,8 @@ class EditorHarness {
     DraftDecisionHandler? onDraftDecision, {
     AttachmentOpenCache? attachmentOpenCache,
     DesktopActions? desktopActions,
+    Future<List<dynamic>> Function(String)? htmlToDelta,
+    Future<String> Function(List<dynamic>)? deltaToHtml,
   }) {
     editor = ContentViewModel(
       fileService: files,
@@ -51,6 +53,8 @@ class EditorHarness {
       onDraftDecision: onDraftDecision,
       attachmentOpenCache: attachmentOpenCache,
       desktopActions: desktopActions,
+      htmlToDelta: htmlToDelta,
+      deltaToHtml: deltaToHtml,
     );
   }
 
@@ -58,6 +62,8 @@ class EditorHarness {
     DraftDecisionHandler? onDraftDecision,
     AttachmentOpenCache? attachmentOpenCache,
     DesktopActions? desktopActions,
+    Future<List<dynamic>> Function(String)? htmlToDelta,
+    Future<String> Function(List<dynamic>)? deltaToHtml,
   }) async {
     // Widget tests run in fake async. Synchronous creation of this empty,
     // disposable directory avoids an OS future that fake async cannot resolve.
@@ -81,6 +87,8 @@ class EditorHarness {
       onDraftDecision,
       attachmentOpenCache: attachmentOpenCache,
       desktopActions: desktopActions,
+      htmlToDelta: htmlToDelta,
+      deltaToHtml: deltaToHtml,
     );
   }
 

@@ -1,0 +1,35 @@
+{
+  "projectId": "6056916933162144137",
+  "screens": [
+    {
+      "title": "Future Notes - Offline Note Workspace",
+      "updated": "2026-10-15",
+      "designSystemId": "assets/15757192085103975382",
+      "localHtml": ".stitch/designs/ux-workspace-plan-20261015.html",
+      "purpose": "UX planning concept; synthetic content only",
+      "id": "ecd3946e9c034fd0ae8b6365aa6195ee",
+      "localScreenshot": ".stitch/designs/ux-workspace-plan-20261015.png",
+      "deviceType": "DESKTOP"
+    },
+    {
+      "id": "42171071cc8c4ba9a548fe69f6ed38e3",
+      "title": "Future Notes - Compact Editor & Toolbar Workspace",
+      "updated": "2026-10-15",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Header and typography refinement; synthetic content only",
+      "localHtml": ".stitch/designs/ux-header-refinement-20261015.html",
+      "localScreenshot": ".stitch/designs/ux-header-refinement-20261015.png"
+    },
+    {
+      "id": "5b750795125a4acfb654affa83e575e9",
+      "title": "Future Notes - Bottom-Docked Sidebar Toggle & Tuned Chrome",
+      "updated": "2026-10-15",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Further 20 percent interface text reduction and bottom sidebar toggle; synthetic content only",
+      "localHtml": ".stitch/designs/ux-bottom-toggle-20261015.html",
+      "localScreenshot": ".stitch/designs/ux-bottom-toggle-20261015.png"
+    }
+  ]
+}

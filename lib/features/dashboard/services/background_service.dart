@@ -63,6 +63,12 @@ class DiscoveryScanFailure {
   final DiscoveryRequest request;
 }
 
+class DiscoveryFailureEvent {
+  const DiscoveryFailureEvent(this.result, {this.request});
+  final DiscoveryRequest? request;
+  final OperationResult<void> result;
+}
+
 class BackgroundService {
   BackgroundService({
     StorageEnvironment environment = const StorageEnvironment.production(),
@@ -82,6 +88,7 @@ class BackgroundService {
   final ReceivePort _receivePort = ReceivePort();
   final _discoveries = StreamController<DiscoverySnapshot>.broadcast();
   final _errors = StreamController<OperationResult<void>>.broadcast();
+  final _failures = StreamController<DiscoveryFailureEvent>.broadcast();
   final _ready = Completer<OperationResult<void>>();
   Future<void>? _initialization;
   bool _disposed = false;
@@ -95,6 +102,8 @@ class BackgroundService {
 
   bool get isReady => !_disposed && _failure == null && _sendPort != null;
   Stream<OperationResult<void>> get errorsStream => _errors.stream;
+  Stream<DiscoveryFailureEvent> get failuresStream => _failures.stream;
+  DiscoveryRequest? get requestedScan => _desired;
 
   Stream<DiscoverySnapshot> get discoveriesStream => _discoveries.stream;
   Stream<List<RecentFile>> get recentFilesStream =>
@@ -185,6 +194,15 @@ class BackgroundService {
         return;
       }
       if (isCurrent(message.request)) {
+        _failures.add(
+          DiscoveryFailureEvent(
+            const OperationResult.failure(
+              OperationOutcome.ioFailure,
+              'The library scan failed. Retry refresh.',
+            ),
+            request: message.request,
+          ),
+        );
         _errors.add(
           const OperationResult.failure(
             OperationOutcome.ioFailure,
@@ -212,6 +230,11 @@ class BackgroundService {
       );
     }
     if (!_disposed) {
+      _failures.add(
+        DiscoveryFailureEvent(
+          OperationResult.failure(outcome, 'Discovery is unavailable.'),
+        ),
+      );
       _errors.add(
         OperationResult.failure(outcome, 'Discovery is unavailable.'),
       );
@@ -272,6 +295,7 @@ class BackgroundService {
     _fail(OperationOutcome.cancelled);
     _discoveries.close();
     _errors.close();
+    _failures.close();
   }
 
   /// Read-only worker entry, also exposed for deterministic test launchers.

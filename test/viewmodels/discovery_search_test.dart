@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -63,6 +64,73 @@ void main() {
     expect(completed, isTrue, reason: 'Read-only cleanup did not acknowledge.');
     expect(failure, isNull);
   }
+
+  searchTest(
+    'remembered unlock survives selection, refresh and search until relock',
+    (tester, f) async {
+      void seedProtected(String password) => f.files.seed(
+        'protected.enc',
+        jsonEncode({
+          'id': 'protected',
+          'title': 'Protected',
+          'content': SyntheticCipher().wrapUser('Synthetic body', password),
+          'isLocked': true,
+          'timestamp': 1700000000000,
+          'attachments': [],
+        }),
+      );
+      seedProtected('synthetic-password');
+      f.files.seed(
+        'plain.enc',
+        jsonEncode({
+          'id': 'plain',
+          'title': 'Plain',
+          'content': 'Synthetic plain body',
+          'isLocked': false,
+          'timestamp': 1700000000000,
+          'attachments': [],
+        }),
+      );
+      final protected = RecentFile(
+        path: 'protected.enc',
+        fullPath: f.files.reference('protected.enc').contentPath,
+        title: 'Protected',
+        isLocked: true,
+      );
+      final plain = RecentFile(
+        path: 'plain.enc',
+        fullPath: f.files.reference('plain.enc').contentPath,
+        title: 'Plain',
+      );
+      void publish() => f.reader.publish([protected, plain]);
+      Set<String> unlocked() =>
+          f.editor.noteListStateNotifier.value.unlockedContentPaths;
+      publish();
+      await f.editor.loadNote('protected.enc');
+      expect(unlocked(), isEmpty);
+      expect(await f.editor.unlockNote('synthetic-password'), isTrue);
+      expect(unlocked(), {protected.fullPath});
+      await f.editor.loadNote('plain.enc');
+      expect(unlocked(), {protected.fullPath});
+      publish();
+      expect(unlocked(), {protected.fullPath});
+      await search(tester, f, 'Protected');
+      f.filters.single.result.complete([protected]);
+      await tester.pump();
+      expect(unlocked(), {protected.fullPath});
+      f.editor.setSearchQuery('');
+      await f.editor.loadNote('protected.enc');
+      expect(f.editor.isLocked, isFalse);
+      expect((await f.editor.manualLock()).isSuccess, isTrue);
+      expect(unlocked(), isEmpty);
+      expect(await f.editor.unlockNote('synthetic-password'), isTrue);
+      await f.editor.loadNote('plain.enc');
+      seedProtected('changed-synthetic-password');
+      await f.editor.loadNote('protected.enc');
+      expect(f.editor.isLocked, isTrue);
+      expect(unlocked(), isEmpty);
+    },
+  );
 
   searchTest(
     'shutdown stops a queued search and closes its read-only scanner',

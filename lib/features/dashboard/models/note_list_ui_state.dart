@@ -1,5 +1,7 @@
 import 'note_model.dart';
 
+enum NoteLockState { unprotected, locked, unlocked }
+
 /// Immutable projection of discovery/search; scheduling remains in the VM.
 class NoteListUiState {
   const NoteListUiState({
@@ -10,6 +12,8 @@ class NoteListUiState {
     this.isFiltering = false,
     this.error,
     this.selectedContentPath,
+    this.selectedLockState,
+    this.unlockedContentPaths = const {},
     this.libraryEpoch = 0,
   });
   final List<RecentFile> files;
@@ -19,6 +23,8 @@ class NoteListUiState {
   final bool isFiltering;
   final String? error;
   final String? selectedContentPath;
+  final NoteLockState? selectedLockState;
+  final Set<String> unlockedContentPaths;
   final int libraryEpoch;
   bool get updating => isScanning || isFiltering;
 }

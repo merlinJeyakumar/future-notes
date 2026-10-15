@@ -179,6 +179,9 @@ class Sidebar extends StatelessWidget {
               itemBuilder: (context, index) {
                 final file = files[index];
                 final subtitle = _subtitle(file);
+                final rememberedUnlocked =
+                    state?.unlockedContentPaths.contains(file.fullPath) ??
+                    false;
                 final selected =
                     state?.selectedContentPath != null &&
                     p.equals(state!.selectedContentPath!, file.fullPath);
@@ -188,11 +191,19 @@ class Sidebar extends StatelessWidget {
                   selectedTileColor: theme.colorScheme.primary.withValues(
                     alpha: .12,
                   ),
-                  leading: Icon(
-                    file.isLocked
-                        ? Icons.lock_outline
-                        : Icons.description_outlined,
-                  ),
+                  leading: Icon(switch (selected
+                      ? state.selectedLockState
+                      : null) {
+                    NoteLockState.locked => Icons.lock_rounded,
+                    NoteLockState.unlocked => Icons.lock_open_rounded,
+                    NoteLockState.unprotected => Icons.description_outlined,
+                    null =>
+                      file.isLocked
+                          ? rememberedUnlocked
+                                ? Icons.lock_open_rounded
+                                : Icons.lock_rounded
+                          : Icons.description_outlined,
+                  }),
                   title: Tooltip(
                     message: file.title,
                     child: Text(

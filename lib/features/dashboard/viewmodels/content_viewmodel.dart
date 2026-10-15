@@ -139,6 +139,16 @@ class ContentViewModel extends BaseViewModel {
       isFiltering: _isFiltering,
       error: _listError,
       selectedContentPath: currentContentPath,
+      selectedLockState: _isLocked
+          ? NoteLockState.locked
+          : isPasswordSet
+          ? NoteLockState.unlocked
+          : NoteLockState.unprotected,
+      unlockedContentPaths: Set.unmodifiable({
+        for (final file in _recentFiles)
+          if (file.isLocked && _sessionPasswords.containsKey(file.path))
+            file.fullPath,
+      }),
       libraryEpoch: _libraryEpoch,
     );
   }

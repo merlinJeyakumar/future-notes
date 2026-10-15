@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:flutter_application_1/core/operations/operation_result.dart';
 import 'package:flutter_application_1/core/storage/note_reference.dart';
 import 'package:flutter_application_1/features/dashboard/models/draft_session.dart';
+import 'package:flutter_application_1/features/dashboard/models/note_list_ui_state.dart';
 
 import '../support/editor_harness.dart';
 
@@ -16,6 +17,30 @@ void main() {
     addTearDown(result.dispose);
     return result;
   }
+
+  testWidgets(
+    'sidebar state follows unlock, navigation and relock without writes',
+    (tester) async {
+      final h = await harness();
+      h.seed('protected', h.note('protected', 'Protected body', locked: true));
+      h.seed('plain', h.note('plain', 'Plain body'));
+      NoteLockState? state() =>
+          h.editor.noteListStateNotifier.value.selectedLockState;
+      await h.editor.loadNote('protected');
+      expect(state(), NoteLockState.locked);
+      expect(await h.editor.unlockNote('wrong-synthetic-password'), isFalse);
+      expect(state(), NoteLockState.locked);
+      expect(await h.editor.unlockNote('synthetic-password'), isTrue);
+      expect(state(), NoteLockState.unlocked);
+      await h.editor.loadNote('plain');
+      expect(state(), NoteLockState.unprotected);
+      await h.editor.loadNote('protected');
+      expect(state(), NoteLockState.unlocked);
+      expect((await h.editor.manualLock()).isSuccess, isTrue);
+      expect(state(), NoteLockState.locked);
+      expect(h.files.writeAttempts, 0);
+    },
+  );
 
   testWidgets(
     'locked manual Save and autosave perform zero writes/encryption',

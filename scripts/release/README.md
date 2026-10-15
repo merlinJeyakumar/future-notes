@@ -38,3 +38,12 @@ runtime dependencies on user computers, or changes an existing tag.
 
 The app is unsigned. No signing certificate is created or publisher trust
 claimed. No other-machine result is inferred from local build/dependency checks.
+
+Private repositories need authenticated asset downloads. The bootstrap supports
+an existing GH_TOKEN/GITHUB_TOKEN or a masked token prompt and uses the repository
+API's asset IDs. It never persists credentials or changes repository visibility.
+An uploaded bootstrap can be corrected without moving the application tag or
+changing its native payload: commit the helper change to development, render it
+against the existing verified manifest, rerun the downloader regression, replace
+only that release asset and SHA256SUMS.txt, then verify actual API downloads.
+Keep release notes explicit about this separate delivery-tool revision.

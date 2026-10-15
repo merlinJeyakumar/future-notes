@@ -164,9 +164,17 @@ class BundleTests(unittest.TestCase):
         wrapper = self.root / "transfer-fixture.ps1"
         wrapper.write_text('''param($Assets, $Downloader, $Target)
 $ErrorActionPreference = 'Stop'
+$fixtureFiles = @(Get-ChildItem -LiteralPath $Assets -File)
+function Invoke-RestMethod {
+    param([string]$Uri, $Headers)
+    $records = @()
+    for ($i=0; $i -lt $fixtureFiles.Count; $i++) { $records += [pscustomobject]@{ name=$fixtureFiles[$i].Name; id=($i+1) } }
+    return [pscustomobject]@{tag_name='v1.1.0'; draft=$false; assets=$records}
+}
 function Invoke-WebRequest {
-    param([switch]$UseBasicParsing, [string]$Uri, [string]$OutFile)
-    $name = [Uri]::UnescapeDataString(([Uri]$Uri).Segments[-1])
+    param([switch]$UseBasicParsing, [string]$Uri, [string]$OutFile, $Headers)
+    if ($Uri -notmatch '^https://api.github.com/repos/merlinJeyakumar/future-notes/releases/assets/([0-9]+)$') { throw 'Credentials/transfer escaped expected API.' }
+    $name = $fixtureFiles[[int]$Matches[1]-1].Name
     Copy-Item -LiteralPath (Join-Path $Assets $name) -Destination $OutFile
 }
 & $Downloader -DestinationRoot $Target

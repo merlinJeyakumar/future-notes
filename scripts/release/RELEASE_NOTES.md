@@ -26,3 +26,10 @@ regressions, Windows Release compilation, and PE dependency/hash verification.
 Local portable startup and app-local runtime loading are checked separately.
 No clean second-PC/VM execution has been performed; graphics, playback and full
 workflow compatibility on another computer remain subject to that check.
+
+This repository is private. Download the PowerShell helper while signed in to
+GitHub; it uses GH_TOKEN/GITHUB_TOKEN or prompts for a hidden repository-access
+token. Credentials are used only for this repository's GitHub API and are never
+saved in the portable folder. Once copied, the application runs offline without
+GitHub credentials. The download helper may be serviced separately from the
+unchanged application/tag; its exact bytes are included in SHA256SUMS.txt.

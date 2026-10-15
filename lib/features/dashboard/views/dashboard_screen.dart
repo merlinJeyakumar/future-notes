@@ -579,6 +579,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const SizedBox(height: 16),
               TextField(
                 controller: passwordController,
+                autofocus: true,
                 obscureText: true,
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
@@ -796,6 +797,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 16),
             TextField(
               controller: passwordController,
+              autofocus: true,
               obscureText: true,
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(

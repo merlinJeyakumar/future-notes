@@ -7,6 +7,7 @@ import 'attachment_job_panel.dart';
 import 'attachment_strip.dart';
 import '../models/note_model.dart';
 import 'password_dialog.dart';
+import 'note_unlock_form.dart';
 import '../../../core/theme/app_theme.dart';
 
 import 'package:code_text_field/code_text_field.dart';
@@ -41,6 +42,7 @@ class _ContentAreaState extends State<ContentArea> {
   late final QuillEditorConfig _editorConfig;
   late final FocusNode _focusNode;
   late final ScrollController _scrollController;
+  final _unlockFocusNode = FocusNode(debugLabel: 'Note unlock password');
 
   ContentViewModel get viewModel => widget.viewModel;
 
@@ -69,6 +71,12 @@ class _ContentAreaState extends State<ContentArea> {
       enableInteractiveSelection: true,
       enableSelectionToolbar: true,
     );
+  }
+
+  @override
+  void dispose() {
+    _unlockFocusNode.dispose();
+    super.dispose();
   }
 
   @override
@@ -769,13 +777,7 @@ class _ContentAreaState extends State<ContentArea> {
 
   void _handleLockAction(BuildContext context) async {
     if (viewModel.isLocked) {
-      final password = await _showPasswordDialog(
-        context,
-        mode: PasswordMode.unlock,
-      );
-      if (password != null && password.isNotEmpty) {
-        viewModel.unlockNote(password);
-      }
+      _unlockFocusNode.requestFocus();
     } else if (viewModel.isPasswordSet) {
       // Lock the file manually as requested
       viewModel.manualLock();
@@ -817,58 +819,23 @@ class _ContentAreaState extends State<ContentArea> {
 
   Widget _buildInputArea(BuildContext context) {
     if (viewModel.isLocked) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: colors.toolbarIsland.withOpacity(0.5),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.lock_rounded,
-                size: 48,
-                color: colors.subtleGray,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'This note is locked',
-              style: TextStyle(
-                color: colors.textSecondary,
-                fontSize: 12.096,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () async {
-                final password = await _showPasswordDialog(
-                  context,
-                  mode: PasswordMode.unlock,
-                );
-                if (password != null && password.isNotEmpty) {
-                  viewModel.unlockNote(password);
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: colors.accent,
-                foregroundColor: Colors.white,
-                shape: const StadiumBorder(),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 32,
-                  vertical: 14,
-                ),
-              ),
-              child: Text(
-                'Unlock',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-          ],
-        ),
+      return NoteUnlockForm(
+        key: ValueKey(viewModel.draftSession.generation),
+        focusNode: _unlockFocusNode,
+        onUnlock: (password) async {
+          final unlocked = await viewModel.unlockNote(password);
+          if (unlocked && mounted) {
+            final generation = viewModel.draftSession.generation;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted &&
+                  !viewModel.isLocked &&
+                  generation == viewModel.draftSession.generation) {
+                _focusNode.requestFocus();
+              }
+            });
+          }
+          return unlocked;
+        },
       );
     }
 

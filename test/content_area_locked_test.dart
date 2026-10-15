@@ -8,6 +8,62 @@ import 'package:flutter_application_1/main.dart';
 import 'support/editor_harness.dart';
 
 void main() {
+  testWidgets('inline unlock retries safely and returns focus to the editor', (
+    tester,
+  ) async {
+    final harness = await EditorHarness.create();
+    harness.seed(
+      'protected',
+      harness.note('protected', 'Synthetic body', locked: true),
+    );
+    await harness.editor.loadNote('protected');
+    try {
+      await tester.pumpWidget(
+        MyApp(
+          settings: harness.settings,
+          home: Scaffold(
+            body: ListenableBuilder(
+              listenable: harness.editor,
+              builder: (_, _) => ContentArea(viewModel: harness.editor),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
+      expect(
+        tester
+            .widget<EditableText>(find.byType(EditableText))
+            .focusNode
+            .hasFocus,
+        isTrue,
+      );
+      tester.testTextInput.enterText('synthetic-wrong');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(harness.editor.isLocked, isTrue);
+      expect(find.textContaining('Could not unlock.'), findsOneWidget);
+      expect(harness.files.writeAttempts, 0);
+      tester.testTextInput.enterText('synthetic-password');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(harness.editor.isLocked, isFalse);
+      expect(find.text('This note is locked'), findsNothing);
+      expect(
+        harness.editor.quillController.document.toPlainText(),
+        contains('Synthetic body'),
+      );
+      expect(harness.editor.focusNode.hasFocus, isTrue);
+      expect(harness.files.writeAttempts, 0);
+      expect(tester.takeException(), isNull);
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      harness.disposeEditor();
+      await tester.pump(const Duration(seconds: 3));
+      await tester.runAsync(harness.dispose);
+    }
+  });
+
   for (final width in [1440.0, 700.0]) {
     testWidgets('locked controls follow unlock/relock at width $width', (
       tester,
@@ -60,7 +116,12 @@ void main() {
         expect(find.textContaining('synthetic-'), findsNothing);
         expect(find.byTooltip('Retry'), findsNothing);
         expect(find.text('Dismiss'), findsNothing);
-        expect(find.byType(TextField), findsNothing);
+        expect(find.byType(TextField), findsOneWidget);
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).obscureText,
+          isTrue,
+        );
+        expect(find.byType(Dialog), findsNothing);
         if (width >= 900) {
           expect(find.textContaining('Note date'), findsOneWidget);
         }

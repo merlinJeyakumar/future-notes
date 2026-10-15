@@ -118,6 +118,13 @@ void main() {
         find.widgetWithText(TextField, 'Confirm Password'),
         findsOneWidget,
       );
+      final password = tester.widget<EditableText>(
+        find.byType(EditableText).first,
+      );
+      expect(password.focusNode.hasFocus, isTrue);
+      tester.testTextInput.enterText('synthetic-export-password');
+      await tester.pump();
+      expect(password.controller.text, 'synthetic-export-password');
     });
 
     testWidgets('shows error when passwords do not match', (

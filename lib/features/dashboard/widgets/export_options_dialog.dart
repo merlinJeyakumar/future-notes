@@ -123,6 +123,7 @@ class _ExportOptionsDialogState extends State<ExportOptionsDialog> {
               const SizedBox(height: 12),
               TextField(
                 controller: _passwordController,
+                autofocus: true,
                 obscureText: true,
                 style: TextStyle(color: theme.appTextPrimary),
                 decoration: InputDecoration(

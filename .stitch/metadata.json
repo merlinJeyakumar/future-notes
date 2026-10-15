@@ -90,6 +90,16 @@
       "purpose": "Dedicated import progress, three-choice conflict and result dialog; synthetic content only",
       "localHtml": ".stitch/designs/note-import-dialog-20261015.html",
       "localScreenshot": ".stitch/designs/note-import-dialog-20261015.png"
+    },
+    {
+      "id": "1b8c09c98df14276a4ca18f381fccdd1",
+      "title": "Future Notes - Locked Editor Inline Unlock State",
+      "updated": "2026-10-15",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Centered nonmodal unlock input with autofocus and inline errors; synthetic content only",
+      "localHtml": ".stitch/designs/inline-note-unlock-20261015.html",
+      "localScreenshot": ".stitch/designs/inline-note-unlock-20261015.png"
     }
   ]
 }

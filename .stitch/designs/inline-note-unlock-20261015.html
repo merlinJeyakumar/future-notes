@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Future Notes - Desktop Workspace</title>
+<!-- Google Fonts: Public Sans & Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS v3 with Forms & Container Queries -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            surface: {
+              DEFAULT: "#111318",
+              container: "#161920",
+              "container-low": "#13151c",
+              "container-high": "#1c202a",
+              "container-highest": "#242936"
+            },
+            "on-surface": "#e2e6ee",
+            "on-surface-variant": "#9aa2b2",
+            outline: "#343b4c",
+            "outline-variant": "#252b38",
+            primary: {
+              DEFAULT: "#4299e1",
+              container: "#1e3a5f"
+            },
+            "on-primary": "#ffffff",
+            "on-primary-container": "#bee3f8",
+            secondary: {
+              DEFAULT: "#2b3240",
+              container: "#232938"
+            },
+            "on-secondary-container": "#dce3f1"
+          },
+          borderRadius: {
+            DEFAULT: "0.25rem",
+            lg: "0.5rem",
+            xl: "0.75rem",
+            full: "9999px"
+          },
+          fontFamily: {
+            headline: ["Public Sans", "sans-serif"],
+            display: ["Public Sans", "sans-serif"],
+            body: ["Public Sans", "sans-serif"],
+            label: ["Public Sans", "sans-serif"]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+      font-size: 18px;
+      line-height: 1;
+      display: inline-block;
+      user-select: none;
+      vertical-align: middle;
+    }
+    .material-symbols-outlined.fill {
+      font-variation-settings: 'FILL' 1;
+    }
+    /* Custom subtle scrollbars for Windows desktop feel */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #111318;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #252b38;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #343b4c;
+    }
+  </style>
+</head>
+<body class="bg-[#111318] text-on-surface font-body antialiased select-none h-screen flex flex-col overflow-hidden">
+<!-- ==================== 1. WINDOWS TITLEBAR & TOP SYSTEM SHELL ==================== -->
+<header class="h-9 bg-[#13151c] border-b border-outline-variant/50 flex items-center justify-between px-3 text-xs shrink-0 select-none z-50"><div class="flex items-center gap-2.5"><div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-sm bg-primary/90 flex items-center justify-center"><span class="w-1 h-1 bg-[#111318] rounded-full"></span></span><span class="font-display font-semibold tracking-tight text-on-surface text-[11px]">Future Notes</span></div><div class="h-3 w-px bg-outline-variant/60"></div><div class="relative group flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-container-high/60 border border-outline-variant/40 text-[10px] text-on-surface-variant cursor-default"><span class="relative flex h-1.5 w-1.5"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60"></span><span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary"></span></span><span class="font-medium text-slate-300">1 background task</span><div class="absolute left-0 top-full mt-1.5 hidden group-hover:flex flex-col w-64 p-2 bg-[#1c202a] border border-outline rounded shadow-xl text-[10px] text-slate-300 pointer-events-none z-50"><span class="font-semibold text-white mb-0.5">Processing attachment</span><span class="text-on-surface-variant leading-relaxed">sample-document.pdf · 42% completed</span><div class="mt-1.5 pt-1.5 border-t border-outline-variant/40 text-[9px] text-slate-400">Closing the window minimizes to system tray. Use tray icon Exit to quit.</div></div></div></div><div class="flex-1 h-full mx-4 flex items-center justify-center text-[10px] text-slate-500"><span class="truncate max-w-sm">Notes • Sample note</span></div><div class="flex items-center h-full"><button class="h-9 w-11 flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" title="Minimize"><span class="material-symbols-outlined" style="font-size: 14px;">minimize</span></button><button class="h-9 w-11 flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" title="Maximize"><span class="material-symbols-outlined" style="font-size: 14px;">crop_square</span></button><button class="h-9 w-11 flex items-center justify-center text-on-surface-variant hover:bg-[#c42b1c] hover:text-white transition-colors" title="Minimize to system tray (Use tray icon Exit to quit)"><span class="material-symbols-outlined" style="font-size: 15px;">close</span></button></div></header>
+<!-- ==================== MAIN WORKSPACE AREA ==================== -->
+<div class="flex-1 flex overflow-hidden">
+<!-- ==================== 2. LEFT NOTES SIDEBAR (~250px) ==================== -->
+<aside class="w-[252px] bg-[#13151c] border-r border-outline-variant/40 flex flex-col shrink-0">
+<!-- Sidebar Top Action & Search -->
+<div class="p-3 border-b border-outline-variant/30 space-y-2.5">
+<!-- Prominent labeled button '+ New note' -->
+<button class="w-full flex items-center justify-center gap-2 py-1.5 px-3 rounded-md bg-primary hover:bg-[#3b87c8] active:scale-[0.99] text-white text-xs font-semibold shadow-sm transition-all">
+<span class="material-symbols-outlined" style="font-size: 16px;">add</span>
+<span>+ New note</span>
+</button>
+<!-- Persistent 'Search notes' input box -->
+<div class="relative">
+<span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm pointer-events-none">search</span>
+<input class="w-full bg-[#181c24] border border-outline-variant/50 rounded-md pl-8 pr-3 py-1.5 text-xs text-on-surface placeholder:text-slate-500 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors" placeholder="Search notes" type="text"/>
+</div>
+</div>
+<!-- Notes List -->
+<div class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5"><div class="group relative flex flex-col p-2 rounded-lg bg-surface-container-high/90 border border-primary/40 shadow-sm cursor-pointer transition-colors"><div class="flex items-center justify-between mb-0.5"><span class="font-medium text-[11px] text-white truncate pr-1">Sample note</span><span class="material-symbols-outlined text-amber-400/90 text-[12px] shrink-0" title="Locked note">lock</span></div><div class="flex items-center justify-between text-[10px] text-slate-400"><span class="truncate italic text-slate-400">Locked note</span><span class="shrink-0 text-[9px] text-slate-400 font-mono">Today, 14:15</span></div><div class="absolute left-0 top-2 bottom-2 w-1 bg-primary rounded-r"></div></div><div class="group flex flex-col p-2 rounded-lg hover:bg-surface-container-high/50 border border-transparent cursor-pointer transition-colors"><div class="flex items-center justify-between mb-0.5"><span class="font-normal text-[11px] text-slate-300 truncate pr-1">Meeting notes</span></div><div class="flex items-center justify-between text-[10px] text-slate-500"><span class="truncate">Sprint planning &amp; roadmap sync</span><span class="shrink-0 text-[9px] font-mono">Yesterday</span></div></div><div class="group flex flex-col p-2 rounded-lg hover:bg-surface-container-high/50 border border-transparent cursor-pointer transition-colors"><div class="flex items-center justify-between mb-0.5"><span class="font-normal text-[11px] text-slate-300 truncate pr-1">Project ideas</span></div><div class="flex items-center justify-between text-[10px] text-slate-500"><span class="truncate">Desktop widget &amp; quick notes</span><span class="shrink-0 text-[9px] font-mono">Oct 12</span></div></div><div class="group flex flex-col p-2 rounded-lg hover:bg-surface-container-high/50 border border-transparent cursor-pointer transition-colors"><div class="flex items-center justify-between mb-0.5"><span class="font-normal text-[11px] text-slate-300 truncate pr-1">Reading list</span></div><div class="flex items-center justify-between text-[10px] text-slate-500"><span class="truncate">Articles and documentation</span><span class="shrink-0 text-[9px] font-mono">Sep 28</span></div></div><div class="group flex flex-col p-2 rounded-lg hover:bg-surface-container-high/50 border border-transparent cursor-pointer transition-colors"><div class="flex items-center justify-between mb-0.5"><span class="font-normal text-[11px] text-slate-300 truncate pr-1">Personal draft</span><span class="material-symbols-outlined text-amber-400/90 text-[11px] shrink-0" title="Locked note">lock</span></div><div class="flex items-center justify-between text-[10px] text-slate-500"><span class="truncate italic text-slate-500">Locked note</span><span class="shrink-0 text-[9px] font-mono">Aug 14</span></div></div></div>
+<!-- Sidebar Bottom Docked Actions -->
+<div class="border-t border-outline-variant/40 bg-[#111318] flex flex-col shrink-0"><div class="p-1.5 space-y-0.5"><button class="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-surface-container-high text-[11px] text-on-surface-variant hover:text-white transition-colors"><span class="material-symbols-outlined" style="font-size: 15px;">file_upload</span><span>Import note</span></button><button class="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-surface-container-high text-[11px] text-on-surface-variant hover:text-white transition-colors"><span class="material-symbols-outlined" style="font-size: 15px;">settings</span><span>App settings</span></button></div><div class="h-8 border-t border-outline-variant/30 px-2 flex items-center justify-between bg-[#12151b]"><button aria-label="Hide notes" class="w-7 h-7 flex items-center justify-center rounded-md hover:bg-surface-container-high/60 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer" title="Hide notes (Ctrl+B)"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.75" viewbox="0 0 24 24"><rect height="18" rx="2" width="18" x="3" y="3"></rect><path d="M9 3v18"></path></svg></button><span class="text-[10px] text-slate-500 font-mono">Ctrl+B</span></div></div>
+</aside>
+<!-- ==================== 3 & 4. MAIN EDITING CANVAS ==================== -->
+<main class="flex-1 flex flex-col bg-[#111318] overflow-hidden">
+<!-- 3. MAIN NOTE HEADER -->
+<div class="h-14 px-6 border-b border-outline-variant/40 bg-[#13151c]/70 flex items-center justify-between shrink-0"><div class="flex items-center gap-2.5 min-w-0 flex-1"><span class="text-base font-semibold tracking-tight text-white px-1.5 py-0.5 truncate">Sample note</span><div class="h-3 w-px bg-outline-variant/60 shrink-0"></div><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-400/10 border border-amber-400/20 text-amber-400 text-[10px] font-medium shrink-0"><span class="material-symbols-outlined text-[12px]">lock</span><span>Locked</span></span><div class="h-3 w-px bg-outline-variant/60 shrink-0"></div><span class="text-[11px] text-slate-400 shrink-0">Created Oct 14 <span class="text-slate-500">•</span> Edited today, 14:15</span></div><div class="flex items-center gap-2 shrink-0"><button class="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-slate-300 hover:text-white bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant/50 transition-colors" title="Note actions"><span class="material-symbols-outlined text-[14px]">tune</span><span>Note actions</span><span class="material-symbols-outlined text-[12px]">arrow_drop_down</span></button></div></div>
+<!-- 4. WRITING AREA (DOMINATES USABLE SCREEN HEIGHT) -->
+<div class="flex-1 flex flex-col overflow-hidden"><div class="flex-1 flex flex-col items-center justify-center min-h-[500px] w-full px-4 select-none"><div class="w-full max-w-xs flex flex-col items-center text-center"><div class="w-11 h-11 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-amber-400/90 mb-3 shadow-inner"><span class="material-symbols-outlined text-xl">lock</span></div><h2 class="text-base font-medium text-slate-100 tracking-tight mb-1">This note is locked</h2><p class="text-xs text-slate-400 mb-6">Enter password to view and edit this note</p><form class="w-full space-y-3" onsubmit="event.preventDefault(); const btn = document.getElementById('unlock-submit-btn'); const spin = document.getElementById('unlock-spinner'); const txt = document.getElementById('unlock-btn-text'); const err = document.getElementById('unlock-error-msg'); btn.disabled = true; btn.classList.add('opacity-75', 'cursor-not-allowed'); spin.classList.remove('hidden'); txt.innerText = 'Verifying...'; err.classList.add('hidden'); setTimeout(() =&gt; { btn.disabled = false; btn.classList.remove('opacity-75', 'cursor-not-allowed'); spin.classList.add('hidden'); txt.innerText = 'Unlock'; err.classList.remove('hidden'); const inp = document.getElementById('note-password-input'); inp.focus(); inp.select(); }, 600);"><div class="text-left space-y-1.5"><label class="block text-[11px] font-medium text-slate-300" for="note-password-input">Password</label><div class="relative"><input autocomplete="current-password" autofocus="" class="w-full bg-[#181c24] border border-rose-500/50 rounded-md pl-3 pr-8 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all tracking-widest font-mono" id="note-password-input" placeholder="Enter note password" type="password" value="••••••••"/><button class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors p-0.5" onclick="const inp = document.getElementById('note-password-input'); const isPw = inp.type === 'password'; inp.type = isPw ? 'text' : 'password'; this.querySelector('span').innerText = isPw ? 'visibility_off' : 'visibility';" title="Toggle password visibility" type="button"><span class="material-symbols-outlined text-[15px]">visibility</span></button></div><div class="flex items-center gap-1.5 pt-0.5 text-rose-400 text-[11px]" id="unlock-error-msg"><span class="material-symbols-outlined text-[13px] shrink-0">error</span><span>Incorrect password. Try again.</span></div></div><div class="pt-1"><button class="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-md bg-primary hover:bg-[#3b87c8] active:scale-[0.99] text-white text-xs font-semibold shadow-sm transition-all focus:outline-none focus:ring-1 focus:ring-offset-0 focus:ring-primary" id="unlock-submit-btn" type="submit"><span class="hidden material-symbols-outlined text-sm animate-spin" id="unlock-spinner">sync</span><span id="unlock-btn-text">Unlock</span></button><div class="text-[10px] text-slate-500 text-center mt-2 font-mono">Enter submits</div></div></form></div></div></div>
+<!-- ==================== 5. BOTTOM ATTACHMENT DOCK (~90-100px) ==================== -->
+</main>
+</div>
+</body></html>

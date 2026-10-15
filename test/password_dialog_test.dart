@@ -3,6 +3,38 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_application_1/features/dashboard/widgets/password_dialog.dart';
 
 void main() {
+  for (final mode in PasswordMode.values) {
+    testWidgets('$mode accepts typing immediately when prompted', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => PasswordDialog(mode: mode, onConfirm: (_) {}),
+                ),
+                child: const Text('Prompt'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Prompt'));
+      await tester.pumpAndSettle();
+      final fields = tester
+          .widgetList<EditableText>(find.byType(EditableText))
+          .toList();
+      expect(fields.first.focusNode.hasFocus, isTrue);
+      expect(fields.skip(1).any((field) => field.focusNode.hasFocus), isFalse);
+      tester.testTextInput.enterText('synthetic-password');
+      await tester.pump();
+      expect(fields.first.controller.text, 'synthetic-password');
+    });
+  }
+
   group('PasswordDialog Widget Tests', () {
     testWidgets('renders unlock mode correctly', (WidgetTester tester) async {
       await tester.pumpWidget(

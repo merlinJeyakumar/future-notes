@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_application_1/core/storage/attachment_open_cache.dart';
 import 'package:flutter_application_1/features/dashboard/models/note_model.dart';
 import 'package:flutter_application_1/features/dashboard/widgets/attachment_viewer.dart';
+import 'package:flutter_application_1/features/dashboard/widgets/attachment_document_preview.dart';
 import 'support/editor_harness.dart';
 
 class _PlaybackSpy implements AttachmentMediaPlayer {
@@ -51,6 +52,15 @@ class _PlaybackSpy implements AttachmentMediaPlayer {
       : const Text('Synthetic media surface');
 }
 
+class _DocumentStub implements AttachmentDocumentRenderer {
+  @override
+  Future<void> load() async {}
+  @override
+  Future<void> dispose() async {}
+  @override
+  Widget build(BuildContext context) => const Text('Document preview');
+}
+
 Future<void> _show(
   WidgetTester tester,
   EditorHarness h,
@@ -77,6 +87,7 @@ Future<void> _show(
                 'synthetic',
               ),
               playerFactory: factory,
+              documentFactory: (_, _, _) => _DocumentStub(),
             ),
           ),
           child: const Text('Open fixture'),

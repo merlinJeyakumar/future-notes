@@ -8,6 +8,7 @@ import '../models/note_model.dart';
 import '../viewmodels/content_viewmodel.dart';
 import '../../../core/storage/attachment_open_cache.dart';
 import 'attachment_presentation.dart';
+import 'attachment_document_preview.dart';
 
 abstract class AttachmentMediaPlayer {
   Widget build(BuildContext context);
@@ -357,19 +358,23 @@ class AttachmentViewer extends StatefulWidget {
     required this.attachment,
     required this.file,
     this.playerFactory,
+    this.documentFactory,
   });
   final ContentViewModel viewModel;
   final AttachmentModel attachment;
   final CachedAttachmentFile file;
   final AttachmentPlayerFactory? playerFactory;
+  final AttachmentDocumentFactory? documentFactory;
   @override
   State<AttachmentViewer> createState() => _AttachmentViewerState();
 }
 
 class _AttachmentViewerState extends State<AttachmentViewer> {
   AttachmentMediaPlayer? _player;
+  AttachmentDocumentRenderer? _document;
   Future<void>? _closing;
   bool _playbackFailed = false;
+  bool _documentFailed = false;
   bool _systemOpening = false;
   String? _systemError;
   ImageProvider? _previewImage;
@@ -394,6 +399,26 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
     }
     widget.viewModel.registerAttachmentViewer(close);
     widget.viewModel.registerAttachmentPauser(pause);
+    if (attachmentSupportsDocumentPreview(widget.attachment.fileName)) {
+      try {
+        _document = (widget.documentFactory ?? NativeAttachmentDocument.new)(
+          widget.file.path,
+          widget.attachment.fileName,
+          _openSystem,
+        );
+        unawaited(_loadDocument());
+      } catch (_) {
+        _documentFailed = true;
+      }
+    }
+  }
+
+  Future<void> _loadDocument() async {
+    try {
+      await _document!.load();
+    } catch (_) {
+      if (mounted && _closing == null) setState(() => _documentFailed = true);
+    }
   }
 
   Future<void> _startPlayback() async {
@@ -413,6 +438,7 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
     widget.viewModel.unregisterAttachmentViewer(close);
     widget.viewModel.unregisterAttachmentPauser(pause);
     await _player?.dispose();
+    await _document?.dispose();
     await _previewImage?.evict();
     if (mounted) {
       final route = ModalRoute.of(context);
@@ -425,6 +451,7 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
     widget.viewModel.unregisterAttachmentViewer(close);
     widget.viewModel.unregisterAttachmentPauser(pause);
     _player?.dispose();
+    _document?.dispose();
     _previewImage?.evict();
     super.dispose();
   }
@@ -524,6 +551,13 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
                         )
                       : _player != null
                       ? _player!.build(context)
+                      : _documentFailed
+                      ? AttachmentPreviewFallback(
+                          message: 'Document preview unavailable.',
+                          onOpenSystem: _openSystem,
+                        )
+                      : _document != null
+                      ? _document!.build(context)
                       : [
                           'jpg',
                           'jpeg',

@@ -158,99 +158,132 @@ class _AttachmentStripState extends State<AttachmentStrip> {
                   .toList();
               final attachments = model.attachmentsNotifier.value;
               final scale = MediaQuery.textScalerOf(context).scale(1);
-              return Padding(
+              return Container(
+                width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    ListenableBuilder(
-                      listenable: Listenable.merge(jobs.map((j) => j.phase)),
-                      builder: (context, _) {
-                        final active = jobs
-                            .where((j) => j.progress.value.active)
-                            .length;
-                        return TextButton.icon(
-                          onPressed: () => setState(() => expanded = !expanded),
-                          icon: Icon(
-                            expanded ? Icons.expand_less : Icons.expand_more,
+                    Row(
+                      children: [
+                        TextButton.icon(
+                          onPressed: () => _showRemaining(0),
+                          icon: const Icon(Icons.grid_view, size: 16),
+                          label: const Text('Show all'),
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: ListenableBuilder(
+                            listenable: Listenable.merge(
+                              jobs.map((j) => j.phase),
+                            ),
+                            builder: (context, _) {
+                              final active = jobs
+                                  .where((j) => j.progress.value.active)
+                                  .length;
+                              final label =
+                                  'Attachments (${attachments.length})${active == 0 ? '' : ' · $active background operation${active == 1 ? '' : 's'}'}';
+                              return Tooltip(
+                                message: label,
+                                child: TextButton.icon(
+                                  onPressed: () =>
+                                      setState(() => expanded = !expanded),
+                                  icon: Icon(
+                                    expanded
+                                        ? Icons.expand_less
+                                        : Icons.expand_more,
+                                  ),
+                                  label: Text(
+                                    label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              );
+                            },
                           ),
-                          label: Text(
-                            'Attachments (${attachments.length})${active == 0 ? '' : ' · $active background operation${active == 1 ? '' : 's'}'}',
-                          ),
-                        );
-                      },
+                        ),
+                      ],
                     ),
-                    SizedBox(
+                    ConstrainedBox(
                       key: const ValueKey('attachment-dock-items'),
-                      height: _tileHeight(expanded) * scale,
+                      constraints: BoxConstraints(
+                        maxHeight: expanded
+                            ? math.max(
+                                _tileHeight(true) * scale,
+                                math.min(
+                                  280,
+                                  MediaQuery.sizeOf(context).height * .35,
+                                ),
+                              )
+                            : _tileHeight(false) * scale,
+                      ),
                       child: LayoutBuilder(
                         builder: (context, constraints) {
-                          final maxSlots =
-                              ((constraints.maxWidth + 8) /
-                                      (expanded ? 84 : 64))
-                                  .floor()
-                                  .clamp(2, 5);
+                          final maxSlots = ((constraints.maxWidth + 8) / 64)
+                              .floor()
+                              .clamp(2, 5);
                           final maximumVisible = math.min(4, maxSlots);
-                          final visibleCount = entries.length > maximumVisible
+                          final visibleCount = expanded
+                              ? entries.length
+                              : entries.length > maximumVisible
                               ? math.min(4, maxSlots - 1)
                               : entries.length;
                           final hidden = entries.length - visibleCount;
                           final slots = visibleCount + (hidden > 0 ? 1 : 0);
-                          final width = math.min(
-                            expanded ? 96.0 : 56.0,
-                            (constraints.maxWidth - (slots - 1) * 8) / slots,
-                          );
-                          return Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              for (var index = 0; index < slots; index++) ...[
-                                if (index > 0) const SizedBox(width: 8),
-                                SizedBox(
-                                  width: width,
-                                  child: index == visibleCount
-                                      ? Tooltip(
-                                          message:
-                                              'Show $hidden more attachments',
-                                          child: OutlinedButton(
-                                            style: OutlinedButton.styleFrom(
-                                              padding: EdgeInsets.zero,
-                                              minimumSize: Size.zero,
+                          final width = expanded
+                              ? math.min(96.0, constraints.maxWidth)
+                              : math.min(
+                                  56.0,
+                                  (constraints.maxWidth - (slots - 1) * 8) /
+                                      slots,
+                                );
+                          return SingleChildScrollView(
+                            primary: false,
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (var index = 0; index < slots; index++) ...[
+                                  SizedBox(
+                                    width: width,
+                                    height: _tileHeight(expanded) * scale,
+                                    child: index == visibleCount
+                                        ? Tooltip(
+                                            message:
+                                                'Show $hidden more attachments',
+                                            child: OutlinedButton(
+                                              style: OutlinedButton.styleFrom(
+                                                padding: EdgeInsets.zero,
+                                                minimumSize: Size.zero,
+                                              ),
+                                              key: const ValueKey(
+                                                'attachment-overflow',
+                                              ),
+                                              onPressed: () =>
+                                                  _showRemaining(visibleCount),
+                                              child: FittedBox(
+                                                fit: BoxFit.scaleDown,
+                                                child: Text('+$hidden'),
+                                              ),
                                             ),
-                                            key: const ValueKey(
-                                              'attachment-overflow',
+                                          )
+                                        : _AttachmentTile(
+                                            key: ValueKey(
+                                              '${model.draftSession.generation}/${entries[index].id}',
                                             ),
-                                            onPressed: () =>
-                                                _showRemaining(visibleCount),
-                                            child: !expanded
-                                                ? FittedBox(
-                                                    fit: BoxFit.scaleDown,
-                                                    child: Text('+$hidden'),
-                                                  )
-                                                : Column(
-                                                    mainAxisAlignment:
-                                                        MainAxisAlignment
-                                                            .center,
-                                                    children: [
-                                                      const Icon(Icons.add),
-                                                      Text('+$hidden'),
-                                                    ],
-                                                  ),
+                                            model: model,
+                                            attachment:
+                                                entries[index].attachment,
+                                            job: entries[index].job,
+                                            expanded: expanded,
+                                            onAction: _action,
                                           ),
-                                        )
-                                      : _AttachmentTile(
-                                          key: ValueKey(
-                                            '${model.draftSession.generation}/${entries[index].id}',
-                                          ),
-                                          model: model,
-                                          attachment: entries[index].attachment,
-                                          job: entries[index].job,
-                                          expanded: expanded,
-                                          onAction: _action,
-                                        ),
-                                ),
+                                  ),
+                                ],
                               ],
-                            ],
+                            ),
                           );
                         },
                       ),
@@ -666,6 +699,16 @@ class _AttachmentGallery extends StatefulWidget {
 
 class _AttachmentGalleryState extends State<_AttachmentGallery> {
   bool _closing = false;
+  final _search = TextEditingController();
+  final _searchFocus = FocusNode();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: Listenable.merge([
@@ -691,40 +734,91 @@ class _AttachmentGalleryState extends State<_AttachmentGallery> {
         }
         return const SizedBox.shrink();
       }
-      final remaining = _entries(model).skip(widget.startIndex).toList();
+      final all = _entries(model).skip(widget.startIndex).toList();
+      final query = _search.text.trim().toLowerCase();
+      final remaining = all
+          .where(
+            (entry) =>
+                (entry.attachment?.fileName ??
+                        entry.job!.progress.value.fileName)
+                    .toLowerCase()
+                    .contains(query),
+          )
+          .toList();
       return AlertDialog(
-        title: const Text('More attachments'),
+        title: Text(
+          widget.startIndex == 0 ? 'All attachments' : 'More attachments',
+        ),
         content: SizedBox(
           width: 600,
           height: MediaQuery.sizeOf(context).height * .55,
-          child: remaining.isEmpty
-              ? const Center(child: Text('No more attachments'))
-              : SingleChildScrollView(
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final entry in remaining)
-                        ListenableBuilder(
-                          key: ValueKey('overflow/${widget.owner}/${entry.id}'),
-                          listenable:
-                              entry.job?.phase ?? model.attachmentsNotifier,
-                          builder: (context, _) => SizedBox(
-                            height:
-                                _tileHeight(true) *
-                                MediaQuery.textScalerOf(context).scale(1),
-                            child: _AttachmentTile(
-                              model: model,
-                              attachment: entry.attachment,
-                              job: entry.job,
-                              expanded: true,
-                              onAction: widget.onAction,
-                            ),
-                          ),
+          child: Column(
+            children: [
+              TextField(
+                key: const ValueKey('attachment-filename-search'),
+                controller: _search,
+                focusNode: _searchFocus,
+                autofocus: true,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: 'Search filenames',
+                  isDense: true,
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _search.text.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Clear attachment search',
+                          icon: const Icon(Icons.close),
+                          onPressed: () {
+                            setState(_search.clear);
+                            _searchFocus.requestFocus();
+                          },
                         ),
-                    ],
-                  ),
                 ),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: remaining.isEmpty
+                    ? Center(
+                        child: Text(
+                          all.isEmpty
+                              ? 'No attachments'
+                              : 'No matching attachments',
+                        ),
+                      )
+                    : SingleChildScrollView(
+                        primary: false,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final entry in remaining)
+                              ListenableBuilder(
+                                key: ValueKey(
+                                  'overflow/${widget.owner}/${entry.id}',
+                                ),
+                                listenable:
+                                    entry.job?.phase ??
+                                    model.attachmentsNotifier,
+                                builder: (context, _) => SizedBox(
+                                  height:
+                                      _tileHeight(true) *
+                                      MediaQuery.textScalerOf(context).scale(1),
+                                  child: _AttachmentTile(
+                                    model: model,
+                                    attachment: entry.attachment,
+                                    job: entry.job,
+                                    expanded: true,
+                                    onAction: widget.onAction,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(

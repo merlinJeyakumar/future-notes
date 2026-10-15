@@ -75,6 +75,8 @@ endif()
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
+include(document_preview.cmake)
+
 # Deploy the compiler's redistributable Release CRT beside the app. Windows
 # 10/11 supply the Universal CRT; never ship debug or System32 runtime files.
 if(MSVC)

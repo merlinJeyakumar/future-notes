@@ -100,6 +100,36 @@
       "purpose": "Centered nonmodal unlock input with autofocus and inline errors; synthetic content only",
       "localHtml": ".stitch/designs/inline-note-unlock-20261015.html",
       "localScreenshot": ".stitch/designs/inline-note-unlock-20261015.png"
+    },
+    {
+      "id": "d517ef2a3c004e5fb2009ce40aba1f3b",
+      "title": "Future Notes - In-App Document Preview",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Local read-only PDF, Word and spreadsheet surfaces inside existing viewer; synthetic content only",
+      "localHtml": ".stitch/designs/document-preview-20261016.html",
+      "localScreenshot": ".stitch/designs/document-preview-20261016.png"
+    },
+    {
+      "id": "5767042c901a4a2cbe9405577c29c6af",
+      "title": "Future Notes - Word Preview and Wrapped Dock",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Office paper styling and expanded dock showing all files; synthetic content only",
+      "localHtml": ".stitch/designs/office-reading-refinement-20261016.html",
+      "localScreenshot": ".stitch/designs/office-reading-refinement-20261016.png"
+    },
+    {
+      "id": "de64fd33b6d14e92a04da30f460e1734",
+      "title": "Future Notes - Left Dock and Searchable All Attachments",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Left alignment and Show all filename search dialog; synthetic content only",
+      "localHtml": ".stitch/designs/attachment-search-gallery-20261016.html",
+      "localScreenshot": ".stitch/designs/attachment-search-gallery-20261016.png"
     }
   ]
 }

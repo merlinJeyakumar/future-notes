@@ -14,7 +14,7 @@ MANIFEST = "release-manifest.json"
 CRT = {"msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"}
 # Windows 10/11 inbox libraries, not DLLs copied from the developer's System32.
 WINDOWS_DLLS = set("""
-advapi32 avicap32 avrt bcrypt cfgmgr32 clbcatq combase comctl32 comdlg32 crypt32
+advapi32 avicap32 avrt bcrypt bcryptprimitives cfgmgr32 clbcatq combase comctl32 comdlg32 crypt32
 cryptbase cryptsp d2d1 d3d9 d3d11 d3d12 dcomp dinput8 dnsapi dwrite dwmapi dxcore
 dxgi gdi32 hid imm32 iphlpapi kernel32 kernelbase mf mfplat mfreadwrite mfuuid
 msacm32 msvcp_win msvcrt netapi32 ntdll ole32 oleacc oleaut32 opengl32 powrprof

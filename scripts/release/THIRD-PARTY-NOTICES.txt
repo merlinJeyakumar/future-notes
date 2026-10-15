@@ -1,5 +1,11 @@
 Flutter and Dart package license notices are included in data/flutter_assets/NOTICES.Z.
 
+Document previews bundle Office Oxide 0.1.15 (MIT license in
+data/licenses/office-oxide-MIT.txt) and PDFium chromium/7520 (upstream
+third-party notices in data/licenses/pdfium). Source and release references:
+https://github.com/yfedoseev/office_oxide/tree/v0.1.15
+https://github.com/bblanchon/pdfium-binaries/releases/tag/chromium%2F7520
+
 Microsoft Visual C++ Release runtime DLLs are distributed unmodified from the
 Visual Studio redistributable directory. They are Microsoft components subject
 to their applicable Microsoft license terms, not Future Notes source code.

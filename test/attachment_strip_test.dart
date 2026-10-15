@@ -122,6 +122,142 @@ class FakeDesktop implements DesktopActions {
 
 void main() {
   testWidgets(
+    'dock stays left aligned in the editor and Show all searches every filename',
+    (tester) async {
+      final cache = FakeOpenCache();
+      final desktop = FakeDesktop();
+      final h = await EditorHarness.create(
+        attachmentOpenCache: cache,
+        desktopActions: desktop,
+      );
+      final names = [
+        'Project overview.pdf',
+        'Budget 2026.xlsx',
+        'Notes.docx',
+        'Demo video.mp4',
+        'Summary.pdf',
+        'Photo.png',
+      ];
+      h.seed(
+        'synthetic',
+        h.note(
+          'synthetic',
+          'body',
+          attachments: [
+            for (var i = 0; i < names.length; i++)
+              {'id': 'item$i', 'fileName': names[i], 'size': 1024},
+          ],
+        ),
+      );
+      await h.editor.loadNote('synthetic');
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Column(
+                children: [
+                  const Spacer(),
+                  AttachmentStrip(viewModel: h.editor),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.getRect(find.byType(AttachmentStrip)).left, 0);
+        expect(
+          tester.getRect(find.byType(AttachmentStrip)).width,
+          tester.view.physicalSize.width / tester.view.devicePixelRatio,
+        );
+        expect(
+          tester
+              .getTopLeft(find.byKey(const ValueKey('attachment-open-item0')))
+              .dx,
+          16,
+        );
+        expect(
+          tester.getTopLeft(find.text('Show all')).dx,
+          lessThan(tester.getTopLeft(find.text('Attachments (6)')).dx),
+        );
+        await tester.tap(find.text('Show all'));
+        await tester.pumpAndSettle();
+        final dialog = find.byType(AlertDialog);
+        final search = find.byKey(const ValueKey('attachment-filename-search'));
+        expect(find.text('All attachments'), findsOneWidget);
+        expect(
+          tester
+              .widget<EditableText>(find.byType(EditableText))
+              .focusNode
+              .hasFocus,
+          true,
+        );
+        expect(
+          find.descendant(
+            of: dialog,
+            matching: find.byType(AttachmentMoreButton),
+          ),
+          findsNWidgets(6),
+        );
+        await tester.enterText(search, '  BuDgEt ');
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(
+            of: dialog,
+            matching: find.byType(AttachmentMoreButton),
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('Budget 2026.xlsx'), findsOneWidget);
+        expect(find.text('Notes.docx'), findsNothing);
+        await tester.enterText(search, 'not-present');
+        await tester.pumpAndSettle();
+        expect(find.text('No matching attachments'), findsOneWidget);
+        expect(cache.opens, 0);
+        await tester.tap(find.byTooltip('Clear attachment search'));
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(
+            of: dialog,
+            matching: find.byType(AttachmentMoreButton),
+          ),
+          findsNWidgets(6),
+        );
+        expect(
+          tester
+              .widget<EditableText>(find.byType(EditableText))
+              .focusNode
+              .hasFocus,
+          true,
+        );
+        await tester.enterText(search, 'notes.docx');
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.descendant(
+            of: dialog,
+            matching: find.byTooltip('More actions for Notes.docx'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Open in system app'));
+        await tester.pumpAndSettle();
+        expect(cache.opens, 1);
+        expect(desktop.opened, ['D:/synthetic-cache/demo.mp4']);
+        h.editor.isLockedNotifier.value = true;
+        await tester.pumpAndSettle();
+        expect(dialog, findsNothing);
+        expect(find.text('Show all'), findsNothing);
+        expect(h.files.writeAttempts, 0);
+        expect(tester.takeException(), isNull);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        h.disposeEditor();
+        await tester.pump(const Duration(seconds: 3));
+        await desktop.dispose();
+        await tester.runAsync(h.dispose);
+      }
+    },
+  );
+  testWidgets(
     'opening switching and unlocking collapse the dock; ordinary updates retain expansion',
     (tester) async {
       final cache = FakeOpenCache();
@@ -592,7 +728,7 @@ void main() {
   );
 
   testWidgets(
-    'four previews collapse to small thumbnails; overflow keeps remaining actions',
+    'expanded dock shows every attachment; collapsed overflow keeps remaining actions',
     (tester) async {
       final cache = FakeOpenCache();
       final desktop = FakeDesktop();
@@ -622,9 +758,10 @@ void main() {
         await tester.pumpAndSettle();
         final dock = find.byKey(const ValueKey('attachment-dock-items'));
         final largeHeight = tester.getSize(dock).height;
-        expect(find.byType(AttachmentMoreButton), findsNWidgets(4));
-        expect(find.text('+2'), findsOneWidget);
-        expect(find.text('sample4.png'), findsNothing);
+        expect(find.byType(AttachmentMoreButton), findsNWidgets(6));
+        expect(find.byKey(const ValueKey('attachment-overflow')), findsNothing);
+        expect(find.text('sample4.png'), findsOneWidget);
+        expect(find.text('sample5.png'), findsOneWidget);
         expect(cache.opens, 0);
         await tester.tap(find.text('Attachments (6)'));
         await tester.pump();
@@ -658,6 +795,52 @@ void main() {
         h.disposeEditor();
         await tester.pump(const Duration(seconds: 3));
         await desktop.dispose();
+        await tester.runAsync(h.dispose);
+      }
+    },
+  );
+
+  testWidgets(
+    'expanded attachments wrap and scroll without hiding entries or decrypting',
+    (tester) async {
+      final cache = FakeOpenCache();
+      final h = await EditorHarness.create(attachmentOpenCache: cache);
+      h.editor.attachmentsNotifier.value = [
+        for (var i = 0; i < 20; i++)
+          AttachmentModel(id: 'item$i', fileName: 'sample$i.txt'),
+      ];
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(body: AttachmentStrip(viewModel: h.editor)),
+          ),
+        );
+        await tester.tap(find.text('Attachments (20)'));
+        await tester.pumpAndSettle();
+        final dock = find.byKey(const ValueKey('attachment-dock-items'));
+        expect(find.byKey(const ValueKey('attachment-overflow')), findsNothing);
+        expect(find.byType(AttachmentMoreButton), findsNWidgets(20));
+        expect(tester.getSize(dock).height, lessThanOrEqualTo(280));
+        final first = find.byKey(const ValueKey('attachment-open-item0'));
+        final last = find.byKey(const ValueKey('attachment-open-item19'));
+        expect(
+          tester.getTopLeft(last).dy,
+          greaterThan(tester.getTopLeft(first).dy),
+        );
+        await tester.ensureVisible(last);
+        await tester.pumpAndSettle();
+        expect(
+          tester.getRect(last).bottom,
+          lessThanOrEqualTo(tester.getRect(dock).bottom + 1),
+        );
+        expect(tester.takeException(), isNull);
+        expect(h.encryption.binaryDecryptCalls, 0);
+        expect(cache.opens, 0);
+        expect(h.files.writeAttempts, 0);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        h.disposeEditor();
+        await tester.pump(const Duration(seconds: 3));
         await tester.runAsync(h.dispose);
       }
     },

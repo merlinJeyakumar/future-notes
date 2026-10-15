@@ -101,9 +101,19 @@ install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
 if(PLUGIN_BUNDLED_LIBRARIES)
-  install(FILES "${PLUGIN_BUNDLED_LIBRARIES}"
-    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-    COMPONENT Runtime)
+  foreach(BUNDLED_LIBRARY IN LISTS PLUGIN_BUNDLED_LIBRARIES)
+    if(BUNDLED_LIBRARY MATCHES "/ANGLE/zlib[.]dll$")
+      # The pinned ANGLE archive includes an unused debug zlib sidecar. No
+      # shipped DLL imports/loads it; it requires non-redistributable debug CRT.
+      # Keep existing development configurations, but never publish it as Release.
+      install(FILES "${BUNDLED_LIBRARY}"
+        DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+        CONFIGURATIONS Debug Profile COMPONENT Runtime)
+    else()
+      install(FILES "${BUNDLED_LIBRARY}"
+        DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+    endif()
+  endforeach()
 endif()
 
 # Copy the native assets provided by the build.dart from all packages.

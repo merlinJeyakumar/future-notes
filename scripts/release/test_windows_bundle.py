@@ -81,6 +81,17 @@ class BundleTests(unittest.TestCase):
         path.write_bytes(binary(["VCRUNTIME140.dll", "USER32.dll"], delay=True))
         self.assertEqual(pe_imports(path), ["user32.dll", "vcruntime140.dll"])
 
+    def test_import_directory_size_includes_auxiliary_names_and_thunks(self):
+        path = self.source / EXE
+        value = binary(["KERNEL32.dll"])
+        struct.pack_into("<I", value, 152 + 124, 22980)
+        path.write_bytes(value)
+        self.assertEqual(pe_imports(path), ["kernel32.dll"])
+        struct.pack_into("<I", value, 152 + 124, 32 * 1024 * 1024 + 1)
+        path.write_bytes(value)
+        with self.assertRaisesRegex(ValueError, "Unbounded"):
+            pe_imports(path)
+
     def test_wrong_architecture_and_truncated_header_rejected(self):
         for value in (binary(machine=0x14C), b"MZ"):
             (self.source / EXE).write_bytes(value)

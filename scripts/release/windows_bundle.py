@@ -127,9 +127,11 @@ def pe_imports(path):
             rva, length = struct.unpack_from("<II", optional, 112 + directory * 8)
             if not rva:
                 continue
-            if not width <= length <= 1024 * width:
+            # PE directory Size covers import names/thunks too, not only the
+            # descriptor array. libmpv legitimately exceeds 1024 * 20 bytes.
+            if not width <= length <= 32 * 1024 * 1024:
                 raise ValueError("Unbounded PE import table")
-            for cursor in range(0, length - width + 1, width):
+            for cursor in range(0, min(length - width + 1, 1024 * width), width):
                 descriptor = read(offset(rva + cursor, width), width)
                 if not any(descriptor):
                     break

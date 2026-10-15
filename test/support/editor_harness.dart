@@ -242,7 +242,7 @@ class SyntheticCipher implements IEncryptionService {
   }
 }
 
-class MemoryNoteFiles implements IFileService {
+class MemoryNoteFiles implements IFileService, AttachmentMetadataReader {
   MemoryNoteFiles(this.libraryRoot);
 
   String libraryRoot;
@@ -254,6 +254,20 @@ class MemoryNoteFiles implements IFileService {
   int writeAttempts = 0;
   int pickerCalls = 0;
   bool failWrites = false;
+
+  DateTime? attachmentDate;
+  Completer<DateTime?>? attachmentDateGate;
+  int attachmentDateReads = 0;
+  bool failAttachmentDate = false;
+  @override
+  Future<DateTime?> attachmentModified(
+    NoteReference reference,
+    String id,
+  ) async {
+    attachmentDateReads++;
+    if (failAttachmentDate) throw StateError('Synthetic metadata failure');
+    return attachmentDateGate?.future ?? attachmentDate;
+  }
 
   @override
   Future<FilePickerResult?> pickFile({List<String>? allowedExtensions}) async {

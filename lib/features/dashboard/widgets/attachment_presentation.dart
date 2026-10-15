@@ -40,6 +40,13 @@ AttachmentVisualKind attachmentVisualKind(String name) {
   return AttachmentVisualKind.file;
 }
 
+bool attachmentSupportsPlayback(String name) {
+  final kind = attachmentVisualKind(name);
+  return kind == AttachmentVisualKind.video ||
+      kind == AttachmentVisualKind.audio ||
+      name.split('.').last.toLowerCase() == 'gif';
+}
+
 String formatAttachmentBytes(int bytes) {
   if (bytes < 1024) return '$bytes B';
   var value = bytes.toDouble();

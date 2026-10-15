@@ -58,7 +58,7 @@ void main() {
         expect(find.text('Editing'), findsNothing);
         expect(find.textContaining('active operations'), findsNothing);
         expect(find.textContaining('synthetic-'), findsNothing);
-        expect(find.text('Retry'), findsNothing);
+        expect(find.byTooltip('Retry'), findsNothing);
         expect(find.text('Dismiss'), findsNothing);
         expect(find.byType(TextField), findsNothing);
         if (width >= 900) {
@@ -100,7 +100,7 @@ void main() {
         expect(find.byTooltip('Attach file'), findsOneWidget);
         expect(find.text('synthetic-completed.txt'), findsOneWidget);
         expect(find.text('synthetic-failed.txt'), findsOneWidget);
-        expect(find.text('Retry'), findsOneWidget);
+        expect(find.byTooltip('Retry'), findsOneWidget);
         expect(find.text('Dismiss'), findsNothing);
         expect(find.byType(AttachmentMoreButton), findsNWidgets(2));
         expect(

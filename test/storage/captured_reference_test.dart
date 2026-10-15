@@ -39,6 +39,49 @@ void main() {
   });
 
   test(
+    'attachment date uses its captured library without reading payloads',
+    () async {
+      await files.saveNoteContent('synthetic', 'synthetic');
+      final reference = (await files.resolveNote('note_synthetic'))!;
+      final object = File(p.join(reference.attachmentLocation, 'media.med'));
+      await object.parent.create(recursive: true);
+      await object.writeAsBytes([1, 2, 3]);
+      await object.setLastModified(DateTime(2026, 10, 15, 14, 30));
+      final expected = (await object.stat()).modified;
+      final other = p.join(run.path, 'other-library');
+      await settings.setCustomDataPath(other);
+      expect(await files.attachmentModified(reference, 'media'), expected);
+      expect(await files.attachmentModified(reference, 'missing'), isNull);
+      expect(await object.readAsBytes(), [1, 2, 3]);
+      expect(await Directory(other).exists(), isFalse);
+    },
+  );
+
+  test(
+    'attachment metadata rejects traversal and forged storage locations',
+    () async {
+      await files.saveNoteContent('synthetic', 'synthetic');
+      final reference = (await files.resolveNote('note_synthetic'))!;
+      await expectLater(
+        files.attachmentModified(reference, '../outside'),
+        throwsArgumentError,
+      );
+      final forged = NoteReference(
+        binding: reference.binding,
+        fileName: reference.fileName,
+        format: reference.format,
+        contentPath: reference.contentPath,
+        attachmentLocation: p.join(run.path, 'outside'),
+      );
+      await expectLater(
+        files.attachmentModified(forged, 'media'),
+        throwsArgumentError,
+      );
+      expect(await Directory(p.join(run.path, 'outside')).exists(), isFalse);
+    },
+  );
+
+  test(
     'captured folder write remains in its original library after root changes',
     () async {
       await files.saveNoteContent('synthetic-id', 'original synthetic content');

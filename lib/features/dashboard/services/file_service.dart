@@ -30,6 +30,11 @@ abstract interface class NoteMutationPolicy {
   bool get supportsExtendedNoteOperations;
 }
 
+/// Metadata-only reads; never hashes or decrypts an attachment payload.
+abstract interface class AttachmentMetadataReader {
+  Future<DateTime?> attachmentModified(NoteReference reference, String id);
+}
+
 abstract interface class TransactionalNoteFiles {
   bool get usesOwnedStorage;
   Future<List<NoteReference>> pendingDeletions();
@@ -74,7 +79,8 @@ class FileService
         IFileService,
         LibraryFileService,
         NoteMutationPolicy,
-        TransactionalNoteFiles {
+        TransactionalNoteFiles,
+        AttachmentMetadataReader {
   FileService({SettingsService? settings, StorageOwner? storageOwner})
     : _settings = settings ?? SettingsService() {
     if (storageOwner != null) {
@@ -102,6 +108,24 @@ class FileService
 
   Future<void> closePersistence() async {
     await _ownedNotes?.close();
+  }
+
+  @override
+  Future<DateTime?> attachmentModified(
+    NoteReference reference,
+    String id,
+  ) async {
+    if (kIsWeb) return null;
+    await _verifyReference(reference);
+    if (!RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(id) ||
+        !p.isAbsolute(reference.attachmentLocation) ||
+        !p.isWithin(reference.binding.root, reference.attachmentLocation)) {
+      throw ArgumentError('Invalid captured attachment location.');
+    }
+    final target = p.join(reference.attachmentLocation, '$id.med');
+    await _settings.verifyStoragePath(target);
+    final stat = await File(target).stat();
+    return stat.type == FileSystemEntityType.file ? stat.modified : null;
   }
 
   @override

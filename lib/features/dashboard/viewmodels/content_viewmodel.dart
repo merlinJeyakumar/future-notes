@@ -287,6 +287,36 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
+  Future<DateTime?> attachmentStoredDate(String id) async {
+    final reference = _noteReference;
+    final files = _fileService;
+    final owner = _session.generation;
+    final credentials = _session.credentialGeneration;
+    if (_disposed ||
+        _isLocked ||
+        reference == null ||
+        files is! AttachmentMetadataReader ||
+        !_attachments.any((a) => a.id == id)) {
+      return null;
+    }
+    try {
+      final date = await (files as AttachmentMetadataReader).attachmentModified(
+        reference,
+        id,
+      );
+      if (_disposed ||
+          _isLocked ||
+          owner != _session.generation ||
+          credentials != _session.credentialGeneration ||
+          reference.contentPath != _noteReference?.contentPath ||
+          !_attachments.any((a) => a.id == id))
+        return null;
+      return date;
+    } catch (_) {
+      return null;
+    }
+  }
+
   CachedAttachmentFile? cachedAttachment(String id) {
     final reference = _noteReference;
     if (_isLocked || reference == null) return null;

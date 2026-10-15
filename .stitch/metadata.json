@@ -30,6 +30,56 @@
       "purpose": "Further 20 percent interface text reduction and bottom sidebar toggle; synthetic content only",
       "localHtml": ".stitch/designs/ux-bottom-toggle-20261015.html",
       "localScreenshot": ".stitch/designs/ux-bottom-toggle-20261015.png"
+    },
+    {
+      "id": "92636f73a0d74be5a37a5e5cadbe560c",
+      "title": "Future Notes - Attachment Dock with Thumbnails, Previews & Overflow Gallery",
+      "updated": "2026-10-15",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Collapsible thumbnails, larger previews and four-item overflow; synthetic content only",
+      "localHtml": ".stitch/designs/attachment-dock-sizes-20261015.html",
+      "localScreenshot": ".stitch/designs/attachment-dock-sizes-20261015.png"
+    },
+    {
+      "id": "2fbcafcefc174601ae87b02b9f6d6a24",
+      "title": "Future Notes - Compact Attachment Dock Cards",
+      "updated": "2026-10-15",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "About 60 percent smaller expanded footprint, wrapped filenames and metadata captions; synthetic content only",
+      "localHtml": ".stitch/designs/attachment-caption-compact-20261015.html",
+      "localScreenshot": ".stitch/designs/attachment-caption-compact-20261015.png"
+    },
+    {
+      "id": "bb3ef373e39348e58d31c18efb108374",
+      "title": "Future Notes - Small Attachment Cards with Full-card Open",
+      "updated": "2026-10-15",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Smaller cards and text, full filename hover and whole-card activation; synthetic content only",
+      "localHtml": ".stitch/designs/attachment-card-click-20261015.html",
+      "localScreenshot": ".stitch/designs/attachment-card-click-20261015.png"
+    },
+    {
+      "id": "f9c6ecb18425437798e5f4b0404b0bf1",
+      "title": "Future Notes - Audio Attachment Thumbnail",
+      "updated": "2026-10-15",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Audio-only thumbnail with central play/pause target; synthetic content only",
+      "localHtml": ".stitch/designs/audio-thumbnail-player-20261015.html",
+      "localScreenshot": ".stitch/designs/audio-thumbnail-player-20261015.png"
+    },
+    {
+      "id": "3f988913409f4e9c868f12c7853e7791",
+      "title": "Future Notes - Compact Collapsed 56x36 Icon Strip Dock",
+      "updated": "2026-10-15",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Icon-only collapsed attachments with hover filenames, More actions and fixed inline progress; synthetic content only",
+      "localHtml": ".stitch/designs/attachment-collapsed-icons-20261015.html",
+      "localScreenshot": ".stitch/designs/attachment-collapsed-icons-20261015.png"
     }
   ]
 }

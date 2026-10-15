@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,7 @@ import 'attachment_presentation.dart';
 
 abstract class AttachmentMediaPlayer {
   Widget build(BuildContext context);
+  Future<void> play();
   Future<void> pause();
   Future<void> dispose();
 }
@@ -17,53 +19,270 @@ abstract class AttachmentMediaPlayer {
 typedef AttachmentPlayerFactory = AttachmentMediaPlayer Function(String path);
 
 class NativeAttachmentPlayer implements AttachmentMediaPlayer {
-  NativeAttachmentPlayer(String path, {this.onOpenSystem}) {
+  NativeAttachmentPlayer(String path, {String? fileName, this.onOpenSystem}) {
     MediaKit.ensureInitialized();
+    final name = fileName ?? path;
+    _audioOnly = attachmentVisualKind(name) == AttachmentVisualKind.audio;
     _player = Player();
     try {
-      _controller = VideoController(_player);
-      _opening = _player.open(Media(path), play: false);
+      // Audio uses a thumbnail and never creates a native video texture.
+      if (!_audioOnly) _controller = VideoController(_player);
+      _opening = _open(path);
     } catch (_) {
       _player.dispose();
+      _failed.dispose();
       rethrow;
     }
   }
   late final Player _player;
-  late final VideoController _controller;
+  VideoController? _controller;
+  late final bool _audioOnly;
   late final Future<void> _opening;
+  final _failed = ValueNotifier(false);
   Future<void>? _disposal;
+  bool _disposed = false;
+  bool _wantsPlayback = false;
   final Future<void> Function()? onOpenSystem;
+
+  Future<void> _open(String path) async {
+    if (_disposed) return;
+    // Viewer requests Play explicitly. A pause/close while opening must win.
+    await _player.open(Media(path), play: false);
+  }
+
   @override
-  Widget build(BuildContext context) => FutureBuilder<void>(
-    future: _opening,
-    builder: (context, snapshot) {
-      if (snapshot.hasError) {
-        return AttachmentPreviewFallback(
-          message: 'Playback unavailable.',
-          onOpenSystem: onOpenSystem,
-        );
+  Future<void> play() async {
+    if (_disposed) return;
+    _wantsPlayback = true;
+    await _opening;
+    if (_disposed || !_wantsPlayback) return;
+    if (_player.state.completed) await _player.seek(Duration.zero);
+    if (!_disposed && _wantsPlayback) await _player.play();
+  }
+
+  Future<void> _toggle() async {
+    if (_disposed) return;
+    try {
+      if (_player.state.playing) {
+        await pause();
+      } else {
+        await play();
       }
-      return StreamBuilder<String>(
-        stream: _player.stream.error,
-        builder: (context, failure) {
-          if (failure.hasData && failure.data!.isNotEmpty) {
-            return AttachmentPreviewFallback(
-              message: 'Playback unavailable.',
-              onOpenSystem: onOpenSystem,
+    } catch (_) {
+      if (!_disposed) _failed.value = true;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: _failed,
+    builder: (context, failed, _) => FutureBuilder<void>(
+      future: _opening,
+      builder: (context, snapshot) {
+        if (_disposed) return const SizedBox.shrink();
+        if (failed || snapshot.hasError) {
+          return AttachmentPreviewFallback(
+            message: 'Playback unavailable.',
+            onOpenSystem: onOpenSystem,
+          );
+        }
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        return StreamBuilder<String>(
+          stream: _player.stream.error,
+          builder: (context, failure) {
+            if (failure.hasData && failure.data!.isNotEmpty) {
+              return AttachmentPreviewFallback(
+                message: 'Playback unavailable.',
+                onOpenSystem: onOpenSystem,
+              );
+            }
+            if (_audioOnly) {
+              return StreamBuilder<bool>(
+                stream: _player.stream.playing,
+                initialData: _player.state.playing,
+                builder: (context, state) => AudioAttachmentThumbnail(
+                  playing: state.data ?? false,
+                  onToggle: _toggle,
+                ),
+              );
+            }
+            return MaterialDesktopVideoControlsTheme(
+              normal: const MaterialDesktopVideoControlsThemeData(
+                playAndPauseOnTap: true,
+                visibleOnMount: true,
+              ),
+              fullscreen: const MaterialDesktopVideoControlsThemeData(
+                playAndPauseOnTap: true,
+                visibleOnMount: true,
+              ),
+              child: Video(
+                controller: _controller!,
+                controls: MaterialDesktopVideoControls,
+              ),
             );
-          }
-          return Video(
-            controller: _controller,
-            controls: MaterialDesktopVideoControls,
+          },
+        );
+      },
+    ),
+  );
+
+  @override
+  Future<void> pause() async {
+    _wantsPlayback = false;
+    if (!_disposed) await _player.pause();
+  }
+
+  @override
+  Future<void> dispose() => _disposal ??= _dispose();
+
+  Future<void> _dispose() async {
+    _disposed = true;
+    _wantsPlayback = false;
+    try {
+      await _player.dispose();
+    } finally {
+      _failed.dispose();
+    }
+  }
+}
+
+/// GIF uses Flutter's animated-image decoder, with pixel bounds matching images.
+/// TickerMode pauses the current frame without restarting or converting the file.
+class GifAttachmentPlayer implements AttachmentMediaPlayer {
+  GifAttachmentPlayer(this.path, {this.onOpenSystem});
+  final String path;
+  final Future<void> Function()? onOpenSystem;
+  final _playing = ValueNotifier(false);
+  ImageProvider? _image;
+  bool _disposed = false;
+  Future<void>? _disposal;
+
+  @override
+  Future<void> play() async {
+    if (!_disposed) _playing.value = true;
+  }
+
+  @override
+  Future<void> pause() async {
+    if (!_disposed) _playing.value = false;
+  }
+
+  @override
+  Future<void> dispose() => _disposal ??= _dispose();
+  Future<void> _dispose() async {
+    _disposed = true;
+    _playing.value = false;
+    await _image?.evict();
+    _playing.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: _playing,
+    builder: (context, playing, _) {
+      if (_disposed) return const SizedBox.shrink();
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final ratio = MediaQuery.devicePixelRatioOf(context);
+          final image = ResizeImage.resizeIfNeeded(
+            (constraints.maxWidth * ratio).clamp(1, 2048).round(),
+            (constraints.maxHeight * ratio).clamp(1, 2048).round(),
+            FileImage(File(path)),
+          );
+          if (_image != image) _image?.evict();
+          _image = image;
+          final label = playing ? 'Pause GIF' : 'Play GIF';
+          return Tooltip(
+            message: label,
+            child: InkWell(
+              key: const ValueKey('gif-playback-preview'),
+              onTap: () => _playing.value = !playing,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  TickerMode(
+                    enabled: playing,
+                    child: Image(
+                      image: image,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, _, _) => AttachmentPreviewFallback(
+                        message: 'GIF preview unavailable.',
+                        onOpenSystem: onOpenSystem,
+                      ),
+                    ),
+                  ),
+                  if (!playing)
+                    const Center(
+                      child: Icon(Icons.play_circle_outline, size: 48),
+                    ),
+                ],
+              ),
+            ),
           );
         },
       );
     },
   );
+}
+
+/// Audio artwork is a lightweight local thumbnail, not a blank video texture.
+class AudioAttachmentThumbnail extends StatelessWidget {
+  const AudioAttachmentThumbnail({
+    super.key,
+    required this.playing,
+    required this.onToggle,
+  });
+  final bool playing;
+  final VoidCallback onToggle;
+
   @override
-  Future<void> pause() => _player.pause();
-  @override
-  Future<void> dispose() => _disposal ??= _player.dispose();
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final label = playing ? 'Pause audio' : 'Play audio';
+    return Center(
+      child: Tooltip(
+        message: label,
+        child: Material(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(16),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            key: const ValueKey('audio-playback-thumbnail'),
+            onTap: onToggle,
+            child: Semantics(
+              button: true,
+              label: label,
+              child: SizedBox(
+                width: 160,
+                height: 160,
+                child: Stack(
+                  children: [
+                    Center(
+                      child: Icon(
+                        Icons.music_note,
+                        size: 72,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                    Positioned(
+                      right: 12,
+                      bottom: 12,
+                      child: Icon(
+                        playing ? Icons.pause_circle : Icons.play_circle,
+                        size: 28,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 enum AttachmentAction { open, system, save, remove }
@@ -76,20 +295,38 @@ class AttachmentMoreButton extends StatelessWidget {
     this.canRemove = true,
     this.fileName,
     this.alreadyOpen = false,
+    this.compact = false,
+    this.onCancel,
+    this.onRetry,
+    this.onRemovePending,
   });
   final ValueChanged<AttachmentAction> onSelected;
   final bool enabled;
   final bool canRemove;
   final String? fileName;
   final bool alreadyOpen;
+  final bool compact;
+  final VoidCallback? onCancel;
+  final VoidCallback? onRetry;
+  final VoidCallback? onRemovePending;
   @override
-  Widget build(BuildContext context) => PopupMenuButton<AttachmentAction>(
+  Widget build(BuildContext context) => PopupMenuButton<VoidCallback>(
+    padding: compact ? EdgeInsets.zero : const EdgeInsets.all(8),
     tooltip: fileName == null
         ? 'More attachment actions'
         : 'More actions for $fileName',
     icon: const Icon(Icons.more_vert, size: 20),
-    onSelected: onSelected,
+    onSelected: (action) => action(),
     itemBuilder: (_) => [
+      if (onCancel != null)
+        PopupMenuItem(value: onCancel, child: const Text('Cancel attachment')),
+      if (onRetry != null)
+        PopupMenuItem(value: onRetry, child: const Text('Retry')),
+      if (onRemovePending != null)
+        PopupMenuItem(
+          value: onRemovePending,
+          child: const Text('Remove pending'),
+        ),
       for (final item in [
         (AttachmentAction.open, 'Open in Future Notes'),
         (AttachmentAction.system, 'Open in system app'),
@@ -97,7 +334,7 @@ class AttachmentMoreButton extends StatelessWidget {
         (AttachmentAction.remove, 'Remove'),
       ])
         PopupMenuItem(
-          value: item.$1,
+          value: () => onSelected(item.$1),
           enabled: item.$1 == AttachmentAction.remove
               ? canRemove
               : (item.$1 == AttachmentAction.open && alreadyOpen)
@@ -139,18 +376,32 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
   @override
   void initState() {
     super.initState();
-    if (attachmentVisualKind(widget.attachment.fileName) ==
-        AttachmentVisualKind.video) {
+    if (attachmentSupportsPlayback(widget.attachment.fileName)) {
       try {
         _player =
-            widget.playerFactory?.call(widget.file.path) ??
-            NativeAttachmentPlayer(widget.file.path, onOpenSystem: _openSystem);
+            widget.attachment.fileName.split('.').last.toLowerCase() == 'gif'
+            ? GifAttachmentPlayer(widget.file.path, onOpenSystem: _openSystem)
+            : widget.playerFactory?.call(widget.file.path) ??
+                  NativeAttachmentPlayer(
+                    widget.file.path,
+                    fileName: widget.attachment.fileName,
+                    onOpenSystem: _openSystem,
+                  );
+        unawaited(_startPlayback());
       } catch (_) {
         _playbackFailed = true;
       }
     }
     widget.viewModel.registerAttachmentViewer(close);
     widget.viewModel.registerAttachmentPauser(pause);
+  }
+
+  Future<void> _startPlayback() async {
+    try {
+      await _player?.play();
+    } catch (_) {
+      if (mounted && _closing == null) setState(() => _playbackFailed = true);
+    }
   }
 
   Future<void> pause() async {
@@ -179,12 +430,13 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
   }
 
   Future<void> _openSystem() async {
-    if (_systemOpening || !mounted) return;
+    if (_systemOpening || !mounted || _closing != null) return;
     setState(() {
       _systemOpening = true;
       _systemError = null;
     });
     try {
+      await pause();
       final result = await widget.viewModel.openAttachment(
         widget.attachment,
         system: true,
@@ -193,6 +445,8 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
         setState(
           () => _systemError = result.message ?? 'System opening failed.',
         );
+    } catch (_) {
+      if (mounted) setState(() => _systemError = 'System opening failed.');
     } finally {
       if (mounted) setState(() => _systemOpening = false);
     }
@@ -263,7 +517,12 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
                     ),
                   ),
                 Expanded(
-                  child: _player != null
+                  child: _playbackFailed
+                      ? AttachmentPreviewFallback(
+                          message: 'Playback unavailable.',
+                          onOpenSystem: _openSystem,
+                        )
+                      : _player != null
                       ? _player!.build(context)
                       : [
                           'jpg',

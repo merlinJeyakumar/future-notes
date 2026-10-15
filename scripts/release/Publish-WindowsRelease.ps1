@@ -16,9 +16,18 @@ try {
     & $PythonPath (Join-Path $PSScriptRoot 'windows_bundle.py') verify --bundle $bundle
     if ($LASTEXITCODE -ne 0) { throw 'Release bundle verification failed.' }
     $manifest = Get-Content -LiteralPath (Join-Path $bundle 'release-manifest.json') -Raw | ConvertFrom-Json
-    if ($manifest.gitRevision -ne $revision -or $manifest.version -ne "$version+$($versionLine.Matches[0].Groups[2].Value)") { throw 'Bundle is not the reviewed source revision.' }
+    if ($manifest.version -ne "$version+$($versionLine.Matches[0].Groups[2].Value)") { throw 'Bundle version mismatch.' }
+    # A publisher-only correction need not rebuild unchanged app/package inputs.
+    # Retain the actual build revision in the manifest and require ancestry plus
+    # identical runtime, package construction and distributed text inputs.
+    git merge-base --is-ancestor $manifest.gitRevision $revision
+    if ($LASTEXITCODE -ne 0) { throw 'Build revision is not an ancestor of the reviewed tag.' }
+    git diff --exit-code $manifest.gitRevision $revision -- lib pubspec.yaml pubspec.lock windows/CMakeLists.txt windows/runner scripts/release/windows_bundle.py scripts/release/New-WindowsRelease.ps1 scripts/release/Download-FutureNotes.ps1 scripts/release/README.txt scripts/release/THIRD-PARTY-NOTICES.txt scripts/release/RELEASE_NOTES.md
+    if ($LASTEXITCODE -ne 0) { throw 'Runtime/package inputs changed after build.' }
+    $oldLocalTag = (git rev-parse refs/tags/v1.0.0).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Existing local release tag could not be verified.' }
     $oldTag = @(git ls-remote --tags origin 'refs/tags/v1.0.0*')
-    if ($LASTEXITCODE -ne 0 -or $oldTag.Count -eq 0) { throw 'Existing release tag could not be verified.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Existing remote release tags could not be verified.' }
     git show-ref --verify --quiet "refs/tags/$tag"
     if ($LASTEXITCODE -eq 0) { throw 'New tag already exists; existing tags are never moved.' }
     $remoteTag = @(git ls-remote --tags origin "refs/tags/$tag")
@@ -52,7 +61,9 @@ try {
         $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($remote.Count -ne 1 -or $remote[0].size -ne (Get-Item -LiteralPath $file).Length -or $remote[0].digest -ne "sha256:$hash") { throw "Draft asset verification failed: $name" }
     }
-    if (Compare-Object $oldTag @(git ls-remote --tags origin 'refs/tags/v1.0.0*')) { throw 'Existing tag changed; stop publication.' }
+    $oldTagAfter = @(git ls-remote --tags origin 'refs/tags/v1.0.0*')
+    if ($LASTEXITCODE -ne 0 -or ($oldTag -join "`n") -cne ($oldTagAfter -join "`n") -or
+        (git rev-parse refs/tags/v1.0.0).Trim() -cne $oldLocalTag) { throw 'Existing tag changed; stop publication.' }
     & $GitHubPath release edit $tag --repo merlinJeyakumar/future-notes --draft=false --latest
     if ($LASTEXITCODE -ne 0) { throw 'Verified draft could not be published.' }
     & $GitHubPath release view $tag --repo merlinJeyakumar/future-notes --json url,isDraft,tagName

@@ -59,11 +59,9 @@ class Sidebar extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.inbox, color: theme.colorScheme.primary),
-                      const SizedBox(width: 12),
                       const Expanded(
                         child: Text(
-                          'Notes',
+                          'Future Notes',
                           style: TextStyle(
                             fontSize: 15.552,
                             fontWeight: FontWeight.bold,

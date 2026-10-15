@@ -9,6 +9,8 @@ import '../services/file_service.dart';
 import '../services/background_service.dart';
 import '../services/encryption_service.dart';
 import '../models/note_model.dart';
+import '../models/note_import.dart';
+import '../services/note_import_service.dart';
 import 'dart:convert';
 import 'package:flutter_quill/flutter_quill.dart';
 // Removed invalid quill_delta import
@@ -178,6 +180,8 @@ class ContentViewModel extends BaseViewModel {
     });
   }
 
+  bool _importCutover = false;
+  bool get isImportCutover => _importCutover;
   bool _decisionPending = false;
   bool _librarySwitching = false;
   bool _libraryCutover = false;
@@ -1737,7 +1741,9 @@ class ContentViewModel extends BaseViewModel {
       _libraryTask(() => _setEditorMode(target), _cancelledResult());
 
   Future<OperationResult<void>> _setEditorMode(EditorMode target) async {
-    if (_disposed || !_session.canWrite || _isLocked) return _cancelledResult();
+    if (_disposed || _importCutover || !_session.canWrite || _isLocked) {
+      return _cancelledResult();
+    }
     if (target == editorMode) return const OperationResult.success();
     if (isConvertingEditor) {
       return const OperationResult.failure(
@@ -2379,7 +2385,10 @@ class ContentViewModel extends BaseViewModel {
         'Editor was closed.',
       );
     }
-    if (fileName == _currentFileName && !_loading && expected(_noteReference)) {
+    if (fileName == _currentFileName &&
+        !_loading &&
+        _session.access != DraftAccess.unsupported &&
+        expected(_noteReference)) {
       return const OperationResult.success();
     }
     final request = ++_loadRequest;
@@ -3311,6 +3320,14 @@ class ContentViewModel extends BaseViewModel {
     bool isAutoSave = false,
     bool allowEmptyFirstSave = false,
   }) {
+    if (_importCutover) {
+      return Future.value(
+        const OperationResult.failure(
+          OperationOutcome.conflict,
+          'Import replacement is finishing.',
+        ),
+      );
+    }
     if (_deleting) {
       return Future.value(
         const OperationResult.failure(
@@ -3946,11 +3963,9 @@ class ContentViewModel extends BaseViewModel {
           'A native file is required.',
         );
       }
-      return _trackOwnedJob(
-        _importOwnedFile(
-          file.path!,
-          plainText: p.extension(file.name).toLowerCase() == '.txt',
-        ),
+      return importOwnedFile(
+        file.path!,
+        plainText: p.extension(file.name).toLowerCase() == '.txt',
       );
     }
     if (!ensureExtendedNoteOperations()) {
@@ -4267,17 +4282,37 @@ class ContentViewModel extends BaseViewModel {
     ),
   );
 
-  Future<OperationResult<String>> importOwnedFile(
+  Future<OperationResult<NoteImportResult>> importNoteFile(
     String source, {
     String? archivePassword,
     bool plainText = false,
+    ResolveNoteImportConflict? resolveConflict,
   }) => _trackOwnedJob(
     _importOwnedFile(
       source,
       archivePassword: archivePassword,
       plainText: plainText,
+      resolveConflict: resolveConflict,
     ),
   );
+
+  /// Compatibility adapter for callers that only need the resolved filename.
+  Future<OperationResult<String>> importOwnedFile(
+    String source, {
+    String? archivePassword,
+    bool plainText = false,
+    ResolveNoteImportConflict? resolveConflict,
+  }) async {
+    final result = await importNoteFile(
+      source,
+      archivePassword: archivePassword,
+      plainText: plainText,
+      resolveConflict: resolveConflict,
+    );
+    return result.isSuccess
+        ? OperationResult.success(result.value!.fileName)
+        : OperationResult.failure(result.outcome, result.message);
+  }
 
   Future<OperationResult<NoteExportCapture>> captureNoteForExport(
     String fileName,
@@ -4329,10 +4364,11 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
-  Future<OperationResult<String>> _importOwnedFile(
+  Future<OperationResult<NoteImportResult>> _importOwnedFile(
     String source, {
     String? archivePassword,
     bool plainText = false,
+    ResolveNoteImportConflict? resolveConflict,
   }) async {
     final ready = await _resolveOwnerJobs(DraftTransition.navigation);
     if (!ready.isSuccess) {
@@ -4348,6 +4384,10 @@ class ContentViewModel extends BaseViewModel {
         'Finish the active note operation first.',
       );
     }
+    final transition = await prepareTransition(DraftTransition.navigation);
+    if (!transition.isSuccess) {
+      return OperationResult.failure(transition.outcome, transition.message);
+    }
     _bulkAttachmentJob = true;
     final owner = _session.generation;
     final files = _fileService as TransactionalNoteFiles;
@@ -4358,13 +4398,20 @@ class ContentViewModel extends BaseViewModel {
     );
     final jobId = job.progress.value.id;
     Directory? operation;
-    OperationResult<String> result;
+    OperationResult<NoteImportResult> result;
+    Document? replacementDocument;
+    NoteReference? acknowledged;
+    final previousReadOnly = quillController.readOnly;
     try {
-      final noteId = const Uuid().v4();
-      final reference = await _fileService.newNoteReference(noteId);
+      final storageId = const Uuid().v4();
+      final freshReference = await _fileService.newNoteReference(storageId);
+      var reference = freshReference;
       operation = await files.createOperationDirectory(reference);
       final cancellation = File(p.join(operation.path, 'cancel'));
       _packageCancellationFiles[jobId] = cancellation;
+      if (_cancelledAttachmentJobs.contains(jobId)) {
+        throw const FileJobCancelled();
+      }
       _jobPhase(job, AttachmentJobPhase.preparing);
       FilePackResult imported;
       final extension = p.extension(source).toLowerCase();
@@ -4419,6 +4466,94 @@ class ContentViewModel extends BaseViewModel {
           throw const FormatException('Imported protected body is incomplete.');
         }
       }
+      // Validate ciphertext framing before duplicate decisions or publication.
+      for (final attachment in imported.note.note.attachments) {
+        final payload = imported.attachments[attachment.id];
+        if (payload == null ||
+            payload.length < 32 ||
+            (payload.length - 16) % 16 != 0) {
+          throw const FormatException(
+            'Imported attachment ciphertext is incomplete.',
+          );
+        }
+      }
+      var noteId = imported.note.note.id;
+      var createDuplicate = false;
+      _jobPhase(job, AttachmentJobPhase.verifying);
+      final importService = NoteImportService(_fileService, _encryptionService);
+      final existing = await importService.find(noteId, reference.binding);
+      final existingSources = <String, StreamingFileSource>{};
+      if (existing != null) {
+        reference = existing.reference;
+        for (final attachment in existing.decoded.note.attachments) {
+          existingSources[attachment.id] = await files.attachmentSource(
+            reference,
+            attachment.id,
+          );
+        }
+        final incomingFingerprint = await NoteImportService.fingerprint(
+          imported.note.metadata,
+          imported.attachments,
+          cancellationFile: cancellation.path,
+        );
+        final existingFingerprint = await NoteImportService.fingerprint(
+          existing.decoded.metadata,
+          existingSources,
+          cancellationFile: cancellation.path,
+        );
+        if (resolveConflict == null) {
+          _jobPhase(
+            job,
+            AttachmentJobPhase.failed,
+            error: 'Choose Duplicate, Back up & Replace, or Ignore.',
+          );
+          return const OperationResult.failure(
+            OperationOutcome.conflict,
+            'This note already exists. Choose Duplicate, Back up & Replace, or Ignore.',
+          );
+        }
+        final decision = await resolveConflict(
+          NoteImportConflict(
+            reference,
+            existing.decoded.note.title,
+            existing.decoded.note.isLocked,
+            identical: incomingFingerprint == existingFingerprint,
+          ),
+        );
+        if (_disposed ||
+            owner != _session.generation ||
+            _cancelledAttachmentJobs.contains(jobId)) {
+          _jobPhase(job, AttachmentJobPhase.cancelled);
+          return const OperationResult.failure(
+            OperationOutcome.cancelled,
+            'Import cancelled.',
+          );
+        }
+        if (decision == NoteImportDecision.ignore) {
+          _jobPhase(job, AttachmentJobPhase.completed);
+          return OperationResult.success(
+            NoteImportResult(NoteImportDisposition.ignored, reference.fileName),
+          );
+        }
+        if (decision == NoteImportDecision.duplicate) {
+          createDuplicate = true;
+          noteId = storageId;
+          reference = freshReference;
+          existingSources.clear();
+        }
+      }
+      final replacing = existing != null && !createDuplicate;
+      final replacementKind =
+          existing?.decoded.kind ?? NoteEnvelopeKind.appEncrypted;
+      final selected =
+          replacing &&
+          _noteReference?.contentPath == reference.contentPath &&
+          _noteReference?.binding.root == reference.binding.root;
+      if (selected) {
+        replacementDocument = imported.note.note.isLocked
+            ? Document()
+            : _prepareDocument(imported.note.note.content);
+      }
       final prepared = <PreparedAttachmentFile>[];
       final models = <AttachmentModel>[];
       final oldFields = imported.note.metadata['attachments'];
@@ -4449,7 +4584,11 @@ class ContentViewModel extends BaseViewModel {
           mimeType: attachment.mimeType,
         );
         models.add(model);
-        newFields.add({...?preserved[attachment.id], ...model.toJson()});
+        newFields.add(
+          preserved.containsKey(attachment.id)
+              ? {...preserved[attachment.id]!, 'id': id}
+              : model.toJson(),
+        );
       }
       final metadata = <String, dynamic>{
         ...imported.note.metadata,
@@ -4461,30 +4600,122 @@ class ContentViewModel extends BaseViewModel {
             ? models.map((a) => a.id).toList()
             : newFields,
       };
-      final encoded = await _encryptionService.encryptApp(jsonEncode(metadata));
+      final json = jsonEncode(metadata);
+      final encoded =
+          replacing && replacementKind == NoteEnvelopeKind.legacyJson
+          ? json
+          : await _encryptionService.encryptApp(json);
       result = await _mutate(() async {
         if (_disposed ||
             owner != _session.generation ||
             _cancelledAttachmentJobs.contains(jobId)) {
-          return const OperationResult<String>.failure(
+          return const OperationResult<NoteImportResult>.failure(
             OperationOutcome.cancelled,
             'Import cancelled.',
           );
         }
+        _observeRichEdit();
+        if (!isTransitionPermitCurrent(transition.value!)) {
+          return const OperationResult<NoteImportResult>.failure(
+            OperationOutcome.conflict,
+            'The draft changed during import; it was retained.',
+          );
+        }
+        final current = await importService.find(noteId, reference.binding);
+        if ((!replacing && current != null) ||
+            (replacing &&
+                (current == null ||
+                    current.reference.contentPath != reference.contentPath ||
+                    !reference.storageRevision!.matches(
+                      current.reference.storageRevision!,
+                    )))) {
+          return const OperationResult<NoteImportResult>.failure(
+            OperationOutcome.conflict,
+            'The library changed during confirmation. Import again.',
+          );
+        }
+        for (final entry in existingSources.entries) {
+          final latest = await files.attachmentSource(reference, entry.key);
+          if (latest.sha256Hex != entry.value.sha256Hex ||
+              latest.length != entry.value.length) {
+            return const OperationResult<NoteImportResult>.failure(
+              OperationOutcome.conflict,
+              'An existing attachment changed. Import again.',
+            );
+          }
+        }
+        // No await between the final draft check and making the selected editor
+        // read-only. Autosaves cannot recreate the replaced generation.
+        _observeRichEdit();
+        if (_disposed ||
+            owner != _session.generation ||
+            !isTransitionPermitCurrent(transition.value!)) {
+          return const OperationResult<NoteImportResult>.failure(
+            OperationOutcome.conflict,
+            'The draft changed during import; it was retained.',
+          );
+        }
         if (!_tryBeginFinalization([job])) {
-          return const OperationResult<String>.failure(
+          return const OperationResult<NoteImportResult>.failure(
             OperationOutcome.cancelled,
             'Import cancelled.',
           );
+        }
+        if (selected) {
+          _importCutover = true;
+          _conversionRequest++;
+          isConvertingNotifier.value = false;
+          _cancelAutoSave();
+          quillController.readOnly = true;
+          notifyListeners();
         }
         final committed = await files.commitGeneration(
           reference,
           encoded,
           prepared,
         );
+        acknowledged = committed.withModelId(noteId);
         _markCommittedRefresh(committed.binding);
-        return OperationResult<String>.success(committed.fileName);
+        if (replacing) {
+          await _invalidateAttachmentCache(reference);
+          _sessionPasswords.remove(reference.fileName);
+        }
+        if (selected && !_disposed) {
+          _observeRichEdit();
+          if (!isTransitionPermitCurrent(transition.value!)) {
+            return OperationResult<NoteImportResult>.partial(
+              OperationOutcome.recoveryRequired,
+              'The imported version was committed, but newer draft edits were retained.',
+              NoteImportResult(
+                NoteImportDisposition.replaced,
+                committed.fileName,
+              ),
+            );
+          }
+          _publishImportedReplacement(
+            committed.withModelId(noteId),
+            metadata,
+            replacementKind,
+            replacementDocument!,
+          );
+          replacementDocument = null;
+        }
+        return OperationResult<NoteImportResult>.success(
+          NoteImportResult(
+            createDuplicate
+                ? NoteImportDisposition.duplicated
+                : replacing
+                ? NoteImportDisposition.replaced
+                : NoteImportDisposition.created,
+            committed.fileName,
+          ),
+        );
       });
+    } on NotePersistenceFailure catch (failure) {
+      result = OperationResult.failure(
+        failure.outcome,
+        'Import failed; the existing note and recovery copies were retained.',
+      );
     } on FileJobCancelled {
       result = const OperationResult.failure(
         OperationOutcome.cancelled,
@@ -4510,6 +4741,38 @@ class ContentViewModel extends BaseViewModel {
         }
       }
       _bulkAttachmentJob = false;
+      replacementDocument?.close();
+      if (!_disposed && _importCutover) {
+        _importCutover = false;
+        quillController.readOnly = previousReadOnly;
+        notifyListeners();
+      }
+    }
+    if (!result.isSuccess && acknowledged != null) {
+      // A publication receipt is authoritative even if cache/viewer cleanup
+      // failed afterward. Never report this as an untouched original.
+      if (!_disposed &&
+          _noteReference?.contentPath == acknowledged!.contentPath) {
+        _session = DraftSession(
+          generation: _session.generation,
+          access: DraftAccess.unsupported,
+          editRevision: _session.editRevision,
+          persistedRevision: _session.persistedRevision,
+          credentialGeneration: _session.credentialGeneration,
+          dirtyFields: _session.dirtyFields,
+        );
+        quillController.readOnly = true;
+        _sessionPasswords.remove(acknowledged!.fileName);
+        notifyListeners();
+      }
+      result = OperationResult.partial(
+        OperationOutcome.recoveryRequired,
+        'The imported version was committed and backed up, but the editor could not be refreshed. Your draft was retained; reopen before editing.',
+        NoteImportResult(
+          NoteImportDisposition.replaced,
+          acknowledged!.fileName,
+        ),
+      );
     }
     _jobPhase(
       job,
@@ -4523,6 +4786,45 @@ class ContentViewModel extends BaseViewModel {
     return result;
   }
 
+  void _publishImportedReplacement(
+    NoteReference reference,
+    Map<String, dynamic> metadata,
+    NoteEnvelopeKind kind,
+    Document document,
+  ) {
+    final note = NoteModel.fromJson(metadata);
+    _publishing = true;
+    try {
+      _unlockRequest++;
+      _loadRequest++;
+      _currentFileName = reference.fileName;
+      _noteReference = reference;
+      _currentPassword = null;
+      _storedNote = note;
+      _retainedMetadata = metadata;
+      _retainedPlainBody = note.isLocked ? null : note.content;
+      _envelopeKind = kind;
+      _persistedCredentialGeneration = 0;
+      _session = DraftSession(
+        generation: ++_nextSessionGeneration,
+        access: note.isLocked ? DraftAccess.locked : DraftAccess.editable,
+        persistedRevision: 0,
+      );
+      _isLocked = note.isLocked;
+      _isHtmlMode = false;
+      _attachments = List.of(note.attachments);
+      _attachmentCache.clear();
+      _replaceDocument(document);
+      htmlController.clear();
+      titleController.text = note.title;
+      isLockedNotifier.value = _isLocked;
+      attachmentsNotifier.value = List.unmodifiable(_attachments);
+    } finally {
+      _publishing = false;
+    }
+    notifyListeners();
+  }
+
   /// Import a note pack file (.fnote or .zip)
   /// Returns the noteId on success, null on failure
   /// archivePassword: password to decrypt the archive itself
@@ -4533,7 +4835,7 @@ class ContentViewModel extends BaseViewModel {
   }) async {
     if (_usesOwnedMutations) {
       final result = await _trackOwnedJob(
-        _importOwnedFile(filePath, archivePassword: archivePassword),
+        importOwnedFile(filePath, archivePassword: archivePassword),
       );
       if (!result.isSuccess) {
         _reportResult(OperationResult.failure(result.outcome, result.message));

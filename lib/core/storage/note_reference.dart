@@ -60,7 +60,6 @@ class NoteReference {
   );
 
   NoteReference withModelId(String id) {
-    final legacyAttachments = binding.child('note_$id/attachments');
     return NoteReference(
       binding: binding,
       fileName: fileName,
@@ -68,7 +67,7 @@ class NoteReference {
       contentPath: contentPath,
       attachmentLocation: format == NoteStorageFormat.folder
           ? attachmentLocation
-          : legacyAttachments,
+          : binding.child('note_$id/attachments'),
       modelId: id,
       storageRevision: storageRevision,
       storageOwner: storageOwner,

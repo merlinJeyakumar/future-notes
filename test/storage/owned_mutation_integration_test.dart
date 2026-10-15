@@ -14,6 +14,7 @@ import 'package:flutter_application_1/features/dashboard/services/note_codec.dar
 import 'package:flutter_application_1/features/dashboard/services/pack_service.dart';
 import 'package:flutter_application_1/features/dashboard/viewmodels/content_viewmodel.dart';
 import '../support/validation_directory.dart';
+import 'package:flutter_application_1/features/dashboard/models/note_import.dart';
 
 class PausedEncryption extends EncryptionService {
   Completer<void>? reached;
@@ -289,7 +290,7 @@ void main() {
   );
 
   test(
-    'complete packages import under fresh identities and Delete clears managed generations',
+    'identical packages keep identity and Delete clears managed generations',
     () async {
       await save();
       final source = await input();
@@ -315,16 +316,17 @@ void main() {
         final imported = await editor.importOwnedFile(
           destination,
           archivePassword: 'archive-password',
+          resolveConflict: (_) async => NoteImportDecision.ignore,
         );
         expect(imported.isSuccess, isTrue, reason: imported.message);
-        expect(imported.value, isNot(name));
+        expect(imported.value, name);
         final reference = (await app.files.resolveNote(imported.value!))!;
         final metadata = await NoteCodec.decode(
           (await app.files.readResolved(reference))!,
           decryptApp: cipher.decryptAppResult,
         );
         expect(
-          metadata.note.attachments.every((a) => !ids.contains(a.id)),
+          metadata.note.attachments.every((a) => ids.contains(a.id)),
           isTrue,
         );
         expect(editor.currentFileName, name);

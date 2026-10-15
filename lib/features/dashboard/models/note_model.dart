@@ -98,6 +98,7 @@ class RecentFile {
   final String path;
   final String fullPath;
   final String title;
+  final String? noteId;
   final bool isLocked;
   final DateTime? created; // Can be file creation time or note timestamp
   final DateTime? modified;
@@ -107,6 +108,7 @@ class RecentFile {
     required this.path,
     required this.fullPath,
     required this.title,
+    this.noteId,
     this.isLocked = false,
     this.created,
     this.modified,

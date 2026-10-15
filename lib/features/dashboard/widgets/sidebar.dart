@@ -178,6 +178,7 @@ class Sidebar extends StatelessWidget {
               itemCount: files.length,
               itemBuilder: (context, index) {
                 final file = files[index];
+                final subtitle = _subtitle(file);
                 final selected =
                     state?.selectedContentPath != null &&
                     p.equals(state!.selectedContentPath!, file.fullPath);
@@ -200,9 +201,16 @@ class Sidebar extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  subtitle: file.created == null
+                  subtitle: subtitle.isEmpty
                       ? null
-                      : Text('Note date ${_formatDate(file.created!)}'),
+                      : Text(
+                          subtitle,
+                          style: TextStyle(
+                            fontSize: theme.textTheme.bodySmall?.fontSize,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                   onTap: () {
                     if (onRecentFileSelected != null) {
                       onRecentFileSelected!(file);
@@ -231,21 +239,20 @@ class Sidebar extends StatelessWidget {
     );
   }
 
-  String _formatDate(DateTime value) {
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    return '${value.day} ${months[value.month - 1]} ${value.year}';
+  String _subtitle(RecentFile file) {
+    final date = (file.modified ?? file.created)?.toLocal();
+    final id = file.noteId;
+    final suffix = id == null || id.isEmpty
+        ? null
+        : String.fromCharCodes(
+            id.runes.toList().reversed.take(5).toList().reversed,
+          );
+    String two(int value) => value.toString().padLeft(2, '0');
+    return [
+      if (date != null)
+        '${two(date.day)}/${two(date.month)}/${two(date.year % 100)} '
+            '${two(date.hour)}:${two(date.minute)}',
+      if (suffix != null) suffix,
+    ].join(' • ');
   }
 }

@@ -98,6 +98,9 @@ void main() {
         expect(find.text('This note is locked'), findsNothing);
         expect(find.byTooltip('Note actions'), findsOneWidget);
         expect(find.byTooltip('Attach file'), findsOneWidget);
+        expect(find.text('synthetic-completed.txt'), findsNothing);
+        await tester.tap(find.textContaining('Attachments ('));
+        await tester.pump();
         expect(find.text('synthetic-completed.txt'), findsOneWidget);
         expect(find.text('synthetic-failed.txt'), findsOneWidget);
         expect(find.byTooltip('Retry'), findsOneWidget);

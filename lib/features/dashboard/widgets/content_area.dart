@@ -272,6 +272,7 @@ class _ContentAreaState extends State<ContentArea> {
                 controller: viewModel.titleController,
                 readOnly:
                     viewModel.isLibraryCutover ||
+                    viewModel.isImportCutover ||
                     viewModel.isDeletingCurrent ||
                     !viewModel.draftSession.canWrite,
                 style: TextStyle(
@@ -395,53 +396,62 @@ class _ContentAreaState extends State<ContentArea> {
 
   /// Floating toolbar "island" with grouped formatting tools
   Widget _buildFloatingToolbar(bool isMobile) {
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 20, vertical: 8),
-      decoration: BoxDecoration(
-        color: colors.toolbarIsland,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.divider.withOpacity(0.3), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.15),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      // Always allow horizontal scroll to prevent overflow, even on larger screens if constrained
-      child: Row(
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: isMobile
-                    ? Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _buildToolbarRow1(),
-                          _buildVerticalDivider(),
-                          _buildToolbarRow2(),
-                        ],
-                      )
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _buildToolbarRow1(),
-                          Divider(
-                            color: colors.divider.withOpacity(0.3),
-                            height: 1,
-                          ),
-                          _buildToolbarRow2(),
-                        ],
-                      ),
+    return AbsorbPointer(
+      absorbing: viewModel.isImportCutover || !viewModel.draftSession.canWrite,
+      child: Container(
+        margin: EdgeInsets.symmetric(
+          horizontal: isMobile ? 12 : 20,
+          vertical: 8,
+        ),
+        decoration: BoxDecoration(
+          color: colors.toolbarIsland,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.divider.withOpacity(0.3), width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.15),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        // Always allow horizontal scroll to prevent overflow, even on larger screens if constrained
+        child: Row(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  child: isMobile
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _buildToolbarRow1(),
+                            _buildVerticalDivider(),
+                            _buildToolbarRow2(),
+                          ],
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _buildToolbarRow1(),
+                            Divider(
+                              color: colors.divider.withOpacity(0.3),
+                              height: 1,
+                            ),
+                            _buildToolbarRow2(),
+                          ],
+                        ),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -667,7 +677,10 @@ class _ContentAreaState extends State<ContentArea> {
             Semantics(
               selected: viewModel.editorMode == mode,
               child: TextButton(
-                onPressed: converting || !viewModel.draftSession.canWrite
+                onPressed:
+                    converting ||
+                        viewModel.isImportCutover ||
+                        !viewModel.draftSession.canWrite
                     ? null
                     : () => viewModel.setEditorMode(mode),
                 style: TextButton.styleFrom(
@@ -725,6 +738,7 @@ class _ContentAreaState extends State<ContentArea> {
     if (!mounted ||
         viewModel.isLocked ||
         viewModel.isHtmlMode ||
+        viewModel.isImportCutover ||
         !viewModel.draftSession.canWrite) {
       return;
     }
@@ -870,7 +884,9 @@ class _ContentAreaState extends State<ContentArea> {
                     controller: viewModel.htmlController,
                     readOnly:
                         viewModel.isLibraryCutover ||
-                        viewModel.isDeletingCurrent,
+                        viewModel.isImportCutover ||
+                        viewModel.isDeletingCurrent ||
+                        !viewModel.draftSession.canWrite,
                     textStyle: TextStyle(
                       fontFamily: 'monospace',
                       fontSize: 14,

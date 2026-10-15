@@ -278,6 +278,7 @@ void main() {
         final entry = await readRecentNote(file);
         expect(entry, isNotNull);
         expect(entry!.title, fixtures.note.title);
+        expect(entry.noteId, fixtures.note.id);
         expect(
           entry.created,
           DateTime.fromMillisecondsSinceEpoch(

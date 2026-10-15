@@ -21,9 +21,51 @@ class AttachmentStrip extends StatefulWidget {
 }
 
 class _AttachmentStripState extends State<AttachmentStrip> {
-  bool expanded = true;
+  bool expanded = false;
+  late int _owner;
+  late bool _locked;
+  String? _path;
   final _openIntents = <String>{};
   ContentViewModel get model => widget.viewModel;
+
+  void _rememberOwner() {
+    _owner = model.draftSession.generation;
+    _path = model.currentContentPath;
+    _locked = model.isLocked;
+  }
+
+  void _syncOwner() {
+    final reset =
+        _owner != model.draftSession.generation ||
+        _path != model.currentContentPath ||
+        (_locked && !model.isLocked);
+    _rememberOwner();
+    if (reset && expanded && mounted) setState(() => expanded = false);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _rememberOwner();
+    model.addListener(_syncOwner);
+  }
+
+  @override
+  void didUpdateWidget(covariant AttachmentStrip oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.viewModel != model) {
+      oldWidget.viewModel.removeListener(_syncOwner);
+      expanded = false;
+      _rememberOwner();
+      model.addListener(_syncOwner);
+    }
+  }
+
+  @override
+  void dispose() {
+    model.removeListener(_syncOwner);
+    super.dispose();
+  }
 
   Future<void> _action(
     AttachmentAction action,

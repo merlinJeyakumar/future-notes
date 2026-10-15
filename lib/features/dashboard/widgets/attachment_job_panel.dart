@@ -32,6 +32,12 @@ class _AttachmentJobPanelState extends State<AttachmentJobPanel> {
   ) => ValueListenableBuilder<List<AttachmentJobState>>(
     valueListenable: widget.viewModel.attachmentJobsNotifier,
     builder: (context, jobs, _) {
+      jobs = jobs
+          .where(
+            (job) =>
+                job.progress.value.operation != AttachmentJobOperation.import,
+          )
+          .toList();
       if (widget.auxiliaryOnly) {
         jobs = jobs
             .where(

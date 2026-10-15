@@ -1,3 +1,5 @@
+import '../models/note_import.dart';
+import '../widgets/note_import_dialog.dart';
 import '../models/note_list_ui_state.dart';
 import '../widgets/app_settings_dialog.dart';
 import 'dart:async';
@@ -677,6 +679,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (shouldImport != true) return;
 
     if (!mounted) return;
+
+    if (_viewModel.usesOwnedStorage) {
+      String? password;
+      if (verification.isPack) {
+        password = await _showPackPasswordDialog(
+          isRequired: verification.isPackEncrypted,
+        );
+        if (password == null || !mounted) return;
+      }
+      final result = await showDialog<OperationResult<NoteImportResult>>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => NoteImportDialog(
+          fileName: file.name,
+          jobs: _viewModel.attachmentJobsNotifier,
+          cancelJob: _viewModel.cancelAttachmentJob,
+          startImport: (resolveConflict) => _viewModel.importNoteFile(
+            file.path!,
+            archivePassword: password,
+            plainText:
+                !verification.isPack && file.extension?.toLowerCase() == 'txt',
+            resolveConflict: resolveConflict,
+          ),
+        ),
+      );
+      if (!mounted || result == null) return;
+      if (result.isSuccess &&
+          result.value!.disposition != NoteImportDisposition.ignored) {
+        await _viewModel.loadNote(result.value!.fileName);
+      }
+      return;
+    }
 
     String? importedNoteId;
     String? errorMessage;

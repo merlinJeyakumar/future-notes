@@ -455,6 +455,7 @@ Future<RecentFile?> readRecentNote(File file, {String? overridePath}) async {
       path: effectivePath,
       fullPath: file.path,
       title: note.title.isEmpty ? effectivePath : note.title,
+      noteId: note.id,
       isLocked: note.isLocked,
       created: retainedDate,
       modified: stat.modified,

@@ -80,6 +80,16 @@
       "purpose": "Icon-only collapsed attachments with hover filenames, More actions and fixed inline progress; synthetic content only",
       "localHtml": ".stitch/designs/attachment-collapsed-icons-20261015.html",
       "localScreenshot": ".stitch/designs/attachment-collapsed-icons-20261015.png"
+    },
+    {
+      "id": "17befab99d7748ef94f9f7a414466c19",
+      "title": "Future Notes - Compact Note Import Modal",
+      "updated": "2026-10-15",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Dedicated import progress, three-choice conflict and result dialog; synthetic content only",
+      "localHtml": ".stitch/designs/note-import-dialog-20261015.html",
+      "localScreenshot": ".stitch/designs/note-import-dialog-20261015.png"
     }
   ]
 }

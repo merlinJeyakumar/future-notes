@@ -121,6 +121,67 @@ class FakeDesktop implements DesktopActions {
 }
 
 void main() {
+  testWidgets(
+    'opening switching and unlocking collapse the dock; ordinary updates retain expansion',
+    (tester) async {
+      final cache = FakeOpenCache();
+      final h = await EditorHarness.create(attachmentOpenCache: cache);
+      for (final id in ['first', 'second', 'protected']) {
+        h.seed(
+          id,
+          h.note(
+            id,
+            'body',
+            locked: id == 'protected',
+            attachments: [
+              {'id': id, 'fileName': '$id.txt', 'size': 10},
+            ],
+          ),
+        );
+      }
+      await h.editor.loadNote('first');
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(body: AttachmentStrip(viewModel: h.editor)),
+          ),
+        );
+        final dock = find.byKey(const ValueKey('attachment-dock-items'));
+        expect(tester.getSize(dock).height, 36);
+        await tester.tap(find.text('Attachments (1)'));
+        await tester.pump();
+        expect(tester.getSize(dock).height, 104);
+        h.editor.titleController.text = 'Edited synthetic title';
+        h.editor.attachmentCacheNotifier.value++;
+        await tester.pump();
+        expect(tester.getSize(dock).height, 104);
+        expect((await h.editor.saveNote()).isSuccess, isTrue);
+        await tester.pump();
+        expect(tester.getSize(dock).height, 104);
+        await h.editor.loadNote('second');
+        await tester.pump();
+        expect(tester.getSize(dock).height, 36);
+        await tester.tap(find.text('Attachments (1)'));
+        await tester.pump();
+        expect(tester.getSize(dock).height, 104);
+        await h.editor.loadNote('protected');
+        await tester.pump();
+        expect(dock, findsNothing);
+        expect(await h.editor.unlockNote('synthetic-password'), isTrue);
+        await tester.pump();
+        expect(tester.getSize(dock).height, 36);
+        expect(cache.opens, 0);
+        expect(h.encryption.binaryDecryptCalls, 0);
+        expect(tester.takeException(), isNull);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        h.disposeEditor();
+        await tester.pump(const Duration(seconds: 3));
+        await tester.runAsync(h.dispose);
+      }
+    },
+  );
+
   testWidgets('collapsed icons keep hover Open keyboard and More actions', (
     tester,
   ) async {
@@ -155,7 +216,6 @@ void main() {
           ),
         ),
       );
-      await tester.tap(find.text('Attachments (1)'));
       await tester.pumpAndSettle();
       final card = find.byKey(const ValueKey('attachment-open-video'));
       expect(tester.getSize(card), const Size(56, 36));
@@ -234,7 +294,7 @@ void main() {
               home: Scaffold(body: AttachmentStrip(viewModel: h.editor)),
             ),
           );
-          if (collapsed) {
+          if (!collapsed) {
             await tester.tap(find.text('Attachments (4)'));
           }
           await tester.pumpAndSettle();
@@ -362,6 +422,8 @@ void main() {
             ),
           ),
         );
+        await tester.tap(find.textContaining('Attachments ('));
+        await tester.pumpAndSettle();
         await tester.pumpAndSettle();
         final card = find.byKey(const ValueKey('attachment-open-video'));
         await mouse.addPointer(location: const Offset(790, 590));
@@ -442,6 +504,7 @@ void main() {
             home: Scaffold(body: AttachmentStrip(viewModel: h.editor)),
           ),
         );
+        await tester.tap(find.text('Attachments (1)'));
         await tester.pumpAndSettle();
         final size = tester.getSize(find.byType(Card));
         expect(size.width, lessThan(112));
@@ -513,6 +576,8 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('first.pdf'), findsNothing);
         expect(find.text('Stored 15/10 14:30'), findsNothing);
+        await tester.tap(find.text('Attachments (1)'));
+        await tester.pumpAndSettle();
         expect(find.text('Date unavailable'), findsOneWidget);
         expect(find.text('document · 1.0 KiB'), findsOneWidget);
         expect(h.files.writeAttempts, 0);
@@ -553,6 +618,8 @@ void main() {
             home: Scaffold(body: AttachmentStrip(viewModel: h.editor)),
           ),
         );
+        await tester.tap(find.textContaining('Attachments ('));
+        await tester.pumpAndSettle();
         final dock = find.byKey(const ValueKey('attachment-dock-items'));
         final largeHeight = tester.getSize(dock).height;
         expect(find.byType(AttachmentMoreButton), findsNWidgets(4));
@@ -630,6 +697,8 @@ void main() {
             home: Scaffold(body: AttachmentStrip(viewModel: h.editor)),
           ),
         );
+        await tester.tap(find.textContaining('Attachments ('));
+        await tester.pumpAndSettle();
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('attachment-overflow')), findsNothing);
         final image = find.byType(Image).first;
@@ -682,7 +751,6 @@ void main() {
             home: Scaffold(body: AttachmentStrip(viewModel: h.editor)),
           ),
         );
-        await tester.tap(find.textContaining('Attachments (0)'));
         await tester.pump();
         expect(find.text('Encrypting'), findsNothing);
         expect(find.byType(LinearProgressIndicator), findsOneWidget);
@@ -981,6 +1049,8 @@ void main() {
             home: Scaffold(body: AttachmentStrip(viewModel: harness.editor)),
           ),
         );
+        await tester.tap(find.textContaining('Attachments ('));
+        await tester.pumpAndSettle();
         expect(find.text('Encrypting'), findsOneWidget);
         expect(
           tester

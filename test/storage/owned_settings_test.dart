@@ -27,6 +27,27 @@ void main() {
   late List<File> cleanupObstructions;
   late List<StorageOwnerWorker> probeWorkers;
 
+  test(
+    'Windows tray default and changes publish only after durable acknowledgement',
+    () async {
+      await settings.init();
+      expect(settings.minimizeToTrayOnClose, Platform.isWindows);
+      owner.failCommit = OperationOutcome.ioFailure;
+      await expectLater(
+        settings.setMinimizeToTrayOnClose(false),
+        throwsA(isA<SettingsPersistenceFailure>()),
+      );
+      expect(settings.minimizeToTrayOnClose, Platform.isWindows);
+      owner.failCommit = null;
+      await settings.setMinimizeToTrayOnClose(false);
+      expect(settings.minimizeToTrayOnClose, isFalse);
+      final metadata =
+          jsonDecode(await File(environment.settingsFile!).readAsString())
+              as Map<String, dynamic>;
+      expect(metadata['minimizeToTrayOnClose'], isFalse);
+    },
+  );
+
   setUp(() async {
     run = await Directory.systemTemp.createTemp('future-notes-validation-');
     environment = StorageEnvironment.validation(

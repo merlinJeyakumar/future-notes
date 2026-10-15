@@ -15,6 +15,8 @@ import 'package:flutter_application_1/features/dashboard/services/settings_servi
 import 'package:flutter_application_1/features/dashboard/viewmodels/content_viewmodel.dart';
 
 import 'validation_directory.dart';
+import 'package:flutter_application_1/core/storage/attachment_open_cache.dart';
+import 'package:flutter_application_1/core/platform/windows_desktop_actions.dart';
 
 class PausePoint {
   final started = Completer<void>();
@@ -36,8 +38,10 @@ class EditorHarness {
     this.settings,
     this.files,
     this.encryption,
-    DraftDecisionHandler? onDraftDecision,
-  ) {
+    DraftDecisionHandler? onDraftDecision, {
+    AttachmentOpenCache? attachmentOpenCache,
+    DesktopActions? desktopActions,
+  }) {
     editor = ContentViewModel(
       fileService: files,
       encryptionService: encryption,
@@ -45,11 +49,15 @@ class EditorHarness {
       startBackgroundServices: false,
       nowMilliseconds: () => 1700000000000,
       onDraftDecision: onDraftDecision,
+      attachmentOpenCache: attachmentOpenCache,
+      desktopActions: desktopActions,
     );
   }
 
   static Future<EditorHarness> create({
     DraftDecisionHandler? onDraftDecision,
+    AttachmentOpenCache? attachmentOpenCache,
+    DesktopActions? desktopActions,
   }) async {
     // Widget tests run in fake async. Synchronous creation of this empty,
     // disposable directory avoids an OS future that fake async cannot resolve.
@@ -71,6 +79,8 @@ class EditorHarness {
       MemoryNoteFiles(library),
       SyntheticCipher(),
       onDraftDecision,
+      attachmentOpenCache: attachmentOpenCache,
+      desktopActions: desktopActions,
     );
   }
 

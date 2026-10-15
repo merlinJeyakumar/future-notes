@@ -18,7 +18,18 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       harness.seed(
         'protected',
-        harness.note('protected', 'body', locked: true),
+        harness.note(
+          'protected',
+          'body',
+          locked: true,
+          attachments: [
+            {
+              'id': 'completed',
+              'fileName': 'synthetic-completed.txt',
+              'size': 1,
+            },
+          ],
+        ),
       );
       expect((await harness.editor.loadNote('protected')).isSuccess, isTrue);
       final jobs = [
@@ -75,6 +86,17 @@ void main() {
         await tester.pump();
         expectLocked();
         expect(await harness.editor.unlockNote('synthetic-password'), isTrue);
+        // Failed jobs cannot originate in a locked session. Model a failure
+        // belonging to the newly unlocked owner instead of a stale job.
+        jobs.last.update(
+          AttachmentJobSnapshot(
+            id: 'failed',
+            owner: harness.editor.draftSession.generation,
+            fileName: 'synthetic-failed.txt',
+            phase: AttachmentJobPhase.failed,
+          ),
+        );
+        harness.editor.attachmentJobsNotifier.value = List.of(jobs);
         await tester.pump();
         expect(find.text('This note is locked'), findsNothing);
         expect(find.byTooltip('Settings'), findsOneWidget);
@@ -82,7 +104,8 @@ void main() {
         expect(find.text('synthetic-completed.txt'), findsOneWidget);
         expect(find.text('synthetic-failed.txt'), findsOneWidget);
         expect(find.text('Retry'), findsOneWidget);
-        expect(find.text('Dismiss'), findsOneWidget);
+        expect(find.text('Dismiss'), findsNothing);
+        expect(find.byTooltip('More attachment actions'), findsNWidgets(2));
         expect(
           tester.widget<TextField>(find.byType(TextField).first).readOnly,
           isFalse,

@@ -6,7 +6,12 @@ import '../viewmodels/content_viewmodel.dart';
 /// Structural events rebuild the strip; byte events rebuild its header and the
 /// individual card only. The editor never subscribes to progress.
 class AttachmentJobPanel extends StatefulWidget {
-  const AttachmentJobPanel({super.key, required this.viewModel});
+  const AttachmentJobPanel({
+    super.key,
+    required this.viewModel,
+    this.auxiliaryOnly = false,
+  });
+  final bool auxiliaryOnly;
   final ContentViewModel viewModel;
   @override
   State<AttachmentJobPanel> createState() => _AttachmentJobPanelState();
@@ -26,6 +31,17 @@ class _AttachmentJobPanelState extends State<AttachmentJobPanel> {
   ) => ValueListenableBuilder<List<AttachmentJobState>>(
     valueListenable: widget.viewModel.attachmentJobsNotifier,
     builder: (context, jobs, _) {
+      if (widget.auxiliaryOnly) {
+        jobs = jobs
+            .where(
+              (job) =>
+                  job.progress.value.operation != AttachmentJobOperation.add &&
+                  job.progress.value.operation != AttachmentJobOperation.open &&
+                  job.progress.value.owner ==
+                      widget.viewModel.draftSession.generation,
+            )
+            .toList();
+      }
       if (jobs.isEmpty) return const SizedBox.shrink();
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),

@@ -1,5 +1,9 @@
 # Repair implementation status
 
+## Attachment viewing and tray candidate — 2026-10-14
+
+The unified inline attachment row, explicit file-backed Open cache, embedded video player, visible More menus, recoverable tray setting and native Windows tray lifecycle are implemented. Task-focused regressions and the single new 4 GiB/10 GiB cache gate passed, followed by one canonical Windows Release build and one prebuilt launch. Native inspection confirmed one visible responsive window and the protected cache ACL. On 2026-10-15 the user confirmed attachment addition and tray reopening worked, then authorized validation, commit and push. The final format/whitespace checks, retained analyzer exception and one full suite passed (461 tests, three opt-in skips). Remaining playback/system-opening/cache-lock/background-preparation/actual-Exit acceptance is pending; no native playback/performance claim is made. The previous 16-file Release bundle is hash-verified and retained. No ZIP or movement of `v1.0.0` belongs to this delivery. See [ATTACHMENT_VIEW_TRAY_RESULTS.md](ATTACHMENT_VIEW_TRAY_RESULTS.md) for failures/corrections, test overlap, timings and limits.
+
 ## Windows Release delivery — 2026-10-14
 
 Canonical Windows Release `1.0.0+1` compiled successfully. The final integration suite passed 440 tests with two previously validated opt-in checks skipped. The complete 16-file ZIP was verified against build output. See [WINDOWS_RELEASE.md](WINDOWS_RELEASE.md) for commands, package hash and validation limits. Release runtime has not been exercised; no app was launched for this delivery.

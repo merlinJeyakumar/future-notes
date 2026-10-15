@@ -37,6 +37,8 @@ import '../../../core/storage/attachment_transform_worker.dart';
 import '../../../core/storage/streaming_file_cipher.dart';
 import '../models/attachment_job.dart';
 import '../../../core/storage/library_watch.dart';
+import '../../../core/storage/attachment_open_cache.dart';
+import '../../../core/platform/windows_desktop_actions.dart';
 import '../../../core/storage/owned_settings_persistence.dart';
 import 'package:path/path.dart' as p;
 
@@ -107,6 +109,192 @@ class ContentViewModel extends BaseViewModel {
   Future<void> _mutationTail = Future.value();
   int _mutationsPending = 0;
   final _attachmentWorker = AttachmentTransformWorker();
+  AttachmentOpenCache? _attachmentOpenCache;
+  final DesktopActions? _desktopActions;
+  final attachmentCacheNotifier = ValueNotifier<int>(0);
+  final _attachmentViewerClosers = <Future<void> Function()>{};
+  final _attachmentViewerPausers = <Future<void> Function()>{};
+  bool _revokingAttachmentAccess = false;
+  void registerAttachmentViewer(Future<void> Function() close) =>
+      _attachmentViewerClosers.add(close);
+  void unregisterAttachmentViewer(Future<void> Function() close) =>
+      _attachmentViewerClosers.remove(close);
+  void registerAttachmentPauser(Future<void> Function() pause) =>
+      _attachmentViewerPausers.add(pause);
+  void unregisterAttachmentPauser(Future<void> Function() pause) =>
+      _attachmentViewerPausers.remove(pause);
+  Future<void> pauseAttachmentViewers() async {
+    for (final pause in _attachmentViewerPausers.toList()) {
+      try {
+        await pause();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _closeAttachmentViewers() async {
+    for (final close in _attachmentViewerClosers.toList()) {
+      try {
+        await close();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> initializeAttachmentCache() async {
+    if (_attachmentOpenCache == null &&
+        _desktopActions != null &&
+        _usesOwnedMutations) {
+      _attachmentOpenCache = AttachmentOpenCache(
+        worker: _attachmentWorker,
+        rootResolver: () => _desktopActions.cacheRoot(
+          validationRoot: _settings.isValidationMode
+              ? _settings.storageEnvironment.validationRoot
+              : null,
+        ),
+        sourceResolver:
+            (_fileService as TransactionalNoteFiles).attachmentSource,
+      );
+    }
+    try {
+      await _attachmentOpenCache?.initialize();
+    } catch (_) {
+      /* Open reports typed failure. */
+    }
+  }
+
+  CachedAttachmentFile? cachedAttachment(String id) {
+    final reference = _noteReference;
+    if (_isLocked || reference == null) return null;
+    return _attachmentOpenCache?.peek(
+      reference,
+      id,
+      _session.credentialGeneration,
+    );
+  }
+
+  Future<OperationResult<CachedAttachmentFile>> openAttachment(
+    AttachmentModel attachment, {
+    bool system = false,
+  }) async {
+    if (_disposed ||
+        _isLocked ||
+        _revokingAttachmentAccess ||
+        _noteReference == null ||
+        !_attachments.any((a) => a.id == attachment.id) ||
+        _deleting) {
+      return const OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        'Unlock the note before opening its attachment.',
+      );
+    }
+    final reference = _noteReference!;
+    final credential = _session.credentialGeneration;
+    final generation = _session.generation;
+    final password = _currentPassword;
+    await initializeAttachmentCache();
+    if (_disposed ||
+        _isLocked ||
+        _revokingAttachmentAccess ||
+        generation != _session.generation ||
+        credential != _session.credentialGeneration) {
+      return const OperationResult.failure(
+        OperationOutcome.cancelled,
+        'Attachment opening cancelled.',
+      );
+    }
+    final cache = _attachmentOpenCache;
+    if (cache == null)
+      return const OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        'File-based viewing is unavailable on this target.',
+      );
+    final job = _newAttachmentJob(
+      const Uuid().v4(),
+      attachment.fileName,
+      originalAttachmentId: attachment.id,
+      operation: AttachmentJobOperation.open,
+    );
+    final result = await _trackOwnedJob(
+      cache.prepare(
+        reference,
+        attachment,
+        credential,
+        password: password,
+        onProgress: (phase, bytes, total) => _jobPhase(
+          job,
+          phase == 'Verifying'
+              ? AttachmentJobPhase.verifying
+              : phase == 'Preparing'
+              ? AttachmentJobPhase.preparing
+              : AttachmentJobPhase.decrypting,
+          bytes: bytes,
+          total: total,
+        ),
+      ),
+    );
+    if (_disposed ||
+        _isLocked ||
+        generation != _session.generation ||
+        credential != _session.credentialGeneration ||
+        _cancelledAttachmentJobs.contains(job.progress.value.id)) {
+      _jobPhase(job, AttachmentJobPhase.cancelled);
+      return const OperationResult.failure(
+        OperationOutcome.cancelled,
+        'Attachment opening cancelled.',
+      );
+    }
+    _jobPhase(
+      job,
+      result.isSuccess
+          ? AttachmentJobPhase.completed
+          : result.outcome == OperationOutcome.cancelled
+          ? AttachmentJobPhase.cancelled
+          : AttachmentJobPhase.failed,
+      error: result.message,
+    );
+    attachmentCacheNotifier.value++;
+    if (!result.isSuccess) {
+      _reportResult(OperationResult.failure(result.outcome, result.message));
+      return result;
+    }
+    if (system) {
+      final opened = await _desktopActions?.openFile(result.value!.path);
+      if (opened == null || !opened.isSuccess) {
+        final failed = OperationResult<CachedAttachmentFile>.failure(
+          opened?.outcome ?? OperationOutcome.rejectedInput,
+          'No system application could open this file.',
+        );
+        _reportResult(OperationResult.failure(failed.outcome, failed.message));
+        return failed;
+      }
+    }
+    return result;
+  }
+
+  Future<void> _invalidateAttachmentCache(NoteReference reference) async {
+    _revokingAttachmentAccess = true;
+    try {
+      await _closeAttachmentViewers();
+      for (final cached
+          in _attachmentOpenCache?.filesForNote(reference) ??
+              <CachedAttachmentFile>[]) {
+        final image = FileImage(File(cached.path));
+        await image.evict();
+        await ResizeImage(image, width: 120, height: 120).evict();
+      }
+      await _attachmentOpenCache?.invalidateNote(reference);
+      if (!_disposed) attachmentCacheNotifier.value++;
+    } finally {
+      _revokingAttachmentAccess = false;
+    }
+  }
+
+  Future<void> closeAttachmentCache() async {
+    if (_noteReference != null)
+      await _invalidateAttachmentCache(_noteReference!);
+    await _closeAttachmentViewers();
+    await _attachmentOpenCache?.close();
+  }
+
   final ValueNotifier<List<AttachmentJobState>> attachmentJobsNotifier =
       ValueNotifier([]);
   final Map<String, FileTransformJob> _attachmentTransforms = {};
@@ -165,6 +353,10 @@ class ContentViewModel extends BaseViewModel {
     if (attachmentJobsNotifier.value.any(
       (job) => job.progress.value.phase == AttachmentJobPhase.finalizing,
     )) {
+      if (transition == DraftTransition.exit) {
+        await Future.wait(accepted);
+        return const OperationResult.success();
+      }
       return const OperationResult.failure(
         OperationOutcome.conflict,
         'Finishing attachment commit. Wait before continuing.',
@@ -182,6 +374,15 @@ class ContentViewModel extends BaseViewModel {
           flush: true,
         );
         await _attachmentTransforms[job.progress.value.id]?.cancel();
+        if (job.progress.value.operation == AttachmentJobOperation.open &&
+            _noteReference != null &&
+            job.progress.value.originalAttachmentId != null) {
+          await _attachmentOpenCache?.cancel(
+            _noteReference!,
+            job.progress.value.originalAttachmentId!,
+            _session.credentialGeneration,
+          );
+        }
       }
     }
     await Future.wait(accepted);
@@ -283,6 +484,7 @@ class ContentViewModel extends BaseViewModel {
     String fileName, {
     bool batch = false,
     String? originalAttachmentId,
+    AttachmentJobOperation operation = AttachmentJobOperation.add,
   }) {
     final job = AttachmentJobState(
       AttachmentJobSnapshot(
@@ -292,6 +494,7 @@ class ContentViewModel extends BaseViewModel {
         phase: AttachmentJobPhase.queued,
         batch: batch,
         originalAttachmentId: originalAttachmentId,
+        operation: batch ? AttachmentJobOperation.protection : operation,
       ),
     );
     _ownedJobStates.add(job);
@@ -319,6 +522,7 @@ class ContentViewModel extends BaseViewModel {
         error: error,
         batch: previous.batch,
         originalAttachmentId: previous.originalAttachmentId,
+        operation: previous.operation,
       ),
     );
   }
@@ -328,6 +532,18 @@ class ContentViewModel extends BaseViewModel {
       (j) => j.progress.value.id == id,
     );
     if (jobs.isEmpty || !jobs.first.progress.value.cancellable) return;
+    if (jobs.first.progress.value.operation == AttachmentJobOperation.open) {
+      _cancelledAttachmentJobs.add(id);
+      final reference = _noteReference;
+      final attachment = jobs.first.progress.value.originalAttachmentId;
+      if (reference != null && attachment != null)
+        await _attachmentOpenCache?.cancel(
+          reference,
+          attachment,
+          _session.credentialGeneration,
+        );
+      return;
+    }
     if (jobs.first.progress.value.batch) {
       for (final job in attachmentJobsNotifier.value.where(
         (j) => j.progress.value.batch && j.progress.value.active,
@@ -923,7 +1139,11 @@ class ContentViewModel extends BaseViewModel {
       return _cancelledResult();
     }
     _bulkAttachmentJob = true;
-    final job = _newAttachmentJob(const Uuid().v4(), attachment.fileName);
+    final job = _newAttachmentJob(
+      const Uuid().v4(),
+      attachment.fileName,
+      operation: AttachmentJobOperation.export,
+    );
     final files = _fileService as TransactionalNoteFiles;
     String? candidate;
     OperationResult<void> result;
@@ -1148,12 +1368,16 @@ class ContentViewModel extends BaseViewModel {
     DraftDecisionHandler? onDraftDecision,
     BackgroundService? backgroundService,
     RecentFileFilter? filterRecentFiles,
+    AttachmentOpenCache? attachmentOpenCache,
+    DesktopActions? desktopActions,
   }) : _fileService = fileService,
        _encryptionService = encryptionService,
        _settings = settings ?? SettingsService(),
        _nowMilliseconds = nowMilliseconds ?? _systemMilliseconds,
        _onDraftDecision = onDraftDecision,
        _filterRecentFiles = filterRecentFiles ?? _defaultFilterRecentFiles,
+       _attachmentOpenCache = attachmentOpenCache,
+       _desktopActions = desktopActions,
        _backgroundService = startBackgroundServices
            ? backgroundService ??
                  BackgroundService(
@@ -1857,6 +2081,7 @@ class ContentViewModel extends BaseViewModel {
         plainBody = note.content;
         document = _prepareDocument(note.content);
       }
+      if (locked) await _invalidateAttachmentCache(resolvedReference);
       // Edits made while reading must remain owned by the previous draft.
       if (_disposed ||
           request != _loadRequest ||
@@ -2396,6 +2621,9 @@ class ContentViewModel extends BaseViewModel {
     _cancelAutoSave();
     _loadRequest++;
     _unlockRequest++;
+    if (_noteReference != null)
+      await _invalidateAttachmentCache(_noteReference!);
+    if (_disposed || owner != _session.generation) return _cancelledResult();
     _loading = false;
     _publishing = true;
     try {
@@ -2909,6 +3137,14 @@ class ContentViewModel extends BaseViewModel {
           ? json
           : await _encryptionService.encryptApp(json);
       if (!_ownsSnapshot(snapshot)) return _cancelledResult();
+      if (generationChange &&
+          (changesProtection ||
+              _attachments.any(
+                (a) => !snapshot.attachments.any((next) => next.id == a.id),
+              ))) {
+        await _invalidateAttachmentCache(reference);
+        if (!_ownsSnapshot(snapshot)) return _cancelledResult();
+      }
       final committedReference = generationChange
           ? await (_fileService as TransactionalNoteFiles).commitGeneration(
               reference,
@@ -3033,6 +3269,7 @@ class ContentViewModel extends BaseViewModel {
       return _cancelledResult();
     }
     _deleting = true;
+    await _invalidateAttachmentCache(reference);
     final selected =
         _noteReference?.contentPath == reference.contentPath &&
         _noteReference?.binding.root == reference.binding.root;
@@ -3450,7 +3687,11 @@ class ContentViewModel extends BaseViewModel {
     final owner = _session.generation;
     _bulkAttachmentJob = true;
     final files = _fileService as TransactionalNoteFiles;
-    final job = _newAttachmentJob(const Uuid().v4(), 'Export package');
+    final job = _newAttachmentJob(
+      const Uuid().v4(),
+      'Export package',
+      operation: AttachmentJobOperation.export,
+    );
     final id = job.progress.value.id;
     Directory? operation;
     String? candidate;
@@ -3674,7 +3915,11 @@ class ContentViewModel extends BaseViewModel {
     _bulkAttachmentJob = true;
     final owner = _session.generation;
     final files = _fileService as TransactionalNoteFiles;
-    final job = _newAttachmentJob(const Uuid().v4(), 'Import package');
+    final job = _newAttachmentJob(
+      const Uuid().v4(),
+      'Import package',
+      operation: AttachmentJobOperation.import,
+    );
     final jobId = job.progress.value.id;
     Directory? operation;
     OperationResult<String> result;
@@ -4062,6 +4307,8 @@ class ContentViewModel extends BaseViewModel {
   // region Lifecycle
   @override
   void dispose() {
+    unawaited(closeAttachmentCache());
+    attachmentCacheNotifier.dispose();
     pendingDeletionsNotifier.dispose();
     for (final transform in _attachmentTransforms.values) {
       unawaited(transform.cancel());

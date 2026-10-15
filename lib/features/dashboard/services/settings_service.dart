@@ -74,6 +74,23 @@ class SettingsService {
   );
 
   ThemeMode get themeMode => _themeMode;
+  bool _minimizeToTrayOnClose = Platform.isWindows;
+  bool get minimizeToTrayOnClose => _minimizeToTrayOnClose;
+  Future<void> setMinimizeToTrayOnClose(bool enabled) async {
+    if (_storageOwner != null) {
+      return _queueOwnedSettings(
+        () => _saveOwnedSettings(minimizeToTray: enabled),
+      );
+    }
+    final previous = _minimizeToTrayOnClose;
+    _minimizeToTrayOnClose = enabled;
+    try {
+      await _saveSettings();
+    } catch (_) {
+      _minimizeToTrayOnClose = previous;
+      rethrow;
+    }
+  }
 
   Future<void> setThemeMode(ThemeMode mode) async {
     if (_storageOwner != null) {
@@ -107,6 +124,13 @@ class SettingsService {
         final metadata = await persistence.read();
         final compression = metadata['compressionLevel'];
         final theme = metadata['themeMode'];
+        final tray = metadata['minimizeToTrayOnClose'];
+        if (metadata.containsKey('minimizeToTrayOnClose') && tray is! bool) {
+          throw const SettingsPersistenceFailure(
+            OperationOutcome.rejectedInput,
+          );
+        }
+        _minimizeToTrayOnClose = tray as bool? ?? Platform.isWindows;
         if ((metadata.containsKey('compressionLevel') &&
                 (compression is! int ||
                     compression < 0 ||
@@ -250,6 +274,7 @@ class SettingsService {
     CompressionLevel? compression,
     String? path,
     bool changesPath = false,
+    bool? minimizeToTray,
   }) async {
     final candidateTheme = theme ?? _themeMode;
     final candidateCompression = compression ?? _compressionLevel;
@@ -259,12 +284,14 @@ class SettingsService {
       'compressionLevel': candidateCompression.index,
       'customDataPath': candidatePath,
       'themeMode': candidateTheme.index,
+      'minimizeToTrayOnClose': minimizeToTray ?? _minimizeToTrayOnClose,
     };
     await _ownedPersistence!.write(candidate);
     _ownedMetadata = candidate;
     _compressionLevel = candidateCompression;
     _customDataPath = candidatePath;
     _themeMode = candidateTheme;
+    _minimizeToTrayOnClose = minimizeToTray ?? _minimizeToTrayOnClose;
     themeModeNotifier.value = candidateTheme;
   }
 
@@ -369,6 +396,9 @@ class SettingsService {
             themeModeNotifier.value = _themeMode;
           }
         }
+        if (json['minimizeToTrayOnClose'] is bool) {
+          _minimizeToTrayOnClose = json['minimizeToTrayOnClose'] as bool;
+        }
       }
     } catch (e) {
       debugPrint('Settings could not be loaded; defaults retained.');
@@ -387,6 +417,7 @@ class SettingsService {
         'compressionLevel': _compressionLevel.index,
         'customDataPath': _customDataPath,
         'themeMode': _themeMode.index,
+        'minimizeToTrayOnClose': _minimizeToTrayOnClose,
       };
 
       await file.writeAsString(jsonEncode(json));

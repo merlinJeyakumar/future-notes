@@ -53,6 +53,9 @@ dependencies:
   flutter_highlight: ^0.7.0
   flutter_image_compress: ^2.4.0
   archive: ^4.0.4
+  media_kit: 1.2.6
+  media_kit_video: 2.0.1
+  media_kit_libs_video: 1.0.7
 
 dev_dependencies:
   flutter_test:

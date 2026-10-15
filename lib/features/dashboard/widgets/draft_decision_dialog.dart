@@ -15,17 +15,27 @@ class DraftDecisionDialog extends StatelessWidget {
     if (request.kind == DraftDecisionKind.activeAttachments) {
       return AlertDialog(
         title: const Text('Attachment processing'),
-        content: const Text(
-          'Cancel the active attachment operation and wait for its files to close before continuing?',
+        content: Text(
+          request.transition == DraftTransition.exit
+              ? 'Cancel attachment preparation and exit after its files close?'
+              : 'Cancel the active attachment operation and wait for its files to close before continuing?',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, DraftDecision.cancel),
-            child: const Text('Keep editing'),
+            child: Text(
+              request.transition == DraftTransition.exit
+                  ? 'Keep running'
+                  : 'Keep editing',
+            ),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, DraftDecision.discard),
-            child: const Text('Cancel & wait'),
+            child: Text(
+              request.transition == DraftTransition.exit
+                  ? 'Cancel attachment and exit'
+                  : 'Cancel & wait',
+            ),
           ),
         ],
       );

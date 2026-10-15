@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+enum AttachmentJobOperation { add, open, protection, export, import }
+
 enum AttachmentJobPhase {
   queued,
   preparing,
@@ -23,6 +25,7 @@ class AttachmentJobSnapshot {
     this.error,
     this.batch = false,
     this.originalAttachmentId,
+    this.operation = AttachmentJobOperation.add,
   });
   final String id;
   final int owner;
@@ -33,6 +36,7 @@ class AttachmentJobSnapshot {
   final String? error;
   final bool batch;
   final String? originalAttachmentId;
+  final AttachmentJobOperation operation;
   bool get active => ![
     AttachmentJobPhase.completed,
     AttachmentJobPhase.cancelled,

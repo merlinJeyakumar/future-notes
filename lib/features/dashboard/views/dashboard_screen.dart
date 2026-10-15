@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' show AppExitResponse;
+import 'dart:ui' show AppExitResponse, AppExitType;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -19,6 +19,8 @@ import '../models/draft_transition.dart';
 import '../widgets/draft_decision_dialog.dart';
 import '../../../core/operations/operation_result.dart';
 import '../../../core/operations/shutdown_sequence.dart';
+import '../../../core/platform/windows_desktop_actions.dart';
+import '../../../core/storage/attachment_open_cache.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
@@ -27,12 +29,18 @@ class DashboardScreen extends StatefulWidget {
     this.fileService,
     this.onClose,
     this.startBackgroundServices = true,
+    this.desktopActions,
+    this.attachmentOpenCache,
+    this.requestApplicationExit,
   });
 
   final SettingsService? settings;
   final IFileService? fileService;
   final Future<OperationResult<void>> Function()? onClose;
   final bool startBackgroundServices;
+  final DesktopActions? desktopActions;
+  final AttachmentOpenCache? attachmentOpenCache;
+  final Future<AppExitResponse> Function()? requestApplicationExit;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -46,18 +54,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _shutdownStarted = false;
   ShutdownSequence? _shutdown;
   final _shutdownElapsed = Stopwatch();
+  DesktopActions? _desktop;
+  StreamSubscription<String>? _desktopEvents;
+  bool _exitFromTray = false;
 
   @override
   void initState() {
     super.initState();
+    _desktop =
+        widget.desktopActions ??
+        (Platform.isWindows && widget.startBackgroundServices
+            ? WindowsDesktopActions()
+            : null);
     _viewModel = ContentViewModel(
       fileService: widget.fileService ?? FileService(settings: widget.settings),
       settings: widget.settings,
       encryptionService: EncryptionService(),
       onDraftDecision: _showDraftDecision,
       startBackgroundServices: widget.startBackgroundServices,
+      desktopActions: _desktop,
+      attachmentOpenCache: widget.attachmentOpenCache,
     );
     _lifecycle = AppLifecycleListener(onExitRequested: _requestExit);
+    _desktopEvents = _desktop?.events.listen((event) async {
+      if (event == 'trayExit' && !_exitFromTray) {
+        _exitFromTray = true;
+        try {
+          if (widget.requestApplicationExit != null) {
+            await widget.requestApplicationExit!();
+          } else {
+            await ServicesBinding.instance.exitApplication(
+              AppExitType.cancelable,
+            );
+          }
+        } finally {
+          _exitFromTray = false;
+        }
+      }
+    });
+    unawaited(_viewModel.initializeAttachmentCache());
     _viewModel.operationResultNotifier.addListener(_showOperationFailure);
   }
 
@@ -101,6 +136,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<AppExitResponse> _resolveExit() async {
     try {
+      if (!_shutdownStarted &&
+          !_exitFromTray &&
+          _desktop != null &&
+          _viewModel.settings.minimizeToTrayOnClose) {
+        final hidden = await _desktop!.minimizeToTray();
+        if (hidden.isSuccess)
+          await _viewModel.pauseAttachmentViewers();
+        else if (mounted)
+          _showShutdownNotice(
+            hidden.message ??
+                'Could not minimize to tray. The window remains open.',
+          );
+        return AppExitResponse.cancel;
+      }
       if (!_shutdownStarted) {
         final result = await _viewModel.prepareToExit();
         if (!mounted || !result.isSuccess) {
@@ -108,6 +157,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
       }
       final close = widget.onClose;
+      await _viewModel.closeAttachmentCache();
       if (close == null) {
         return AppExitResponse.exit;
       }
@@ -180,6 +230,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
+    unawaited(_desktopEvents?.cancel());
+    unawaited(_desktop?.dispose());
     _lifecycle.dispose();
     _viewModel.operationResultNotifier.removeListener(_showOperationFailure);
     _viewModel.dispose();
@@ -686,6 +738,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 // Theme Setting
+                if (Platform.isWindows)
+                  SwitchListTile(
+                    title: const Text('Minimize to tray on Close'),
+                    subtitle: const Text(
+                      'Keep attachment operations running in the background.',
+                    ),
+                    value: settings.minimizeToTrayOnClose,
+                    onChanged: (enabled) => _persistSetting(
+                      () => settings.setMinimizeToTrayOnClose(enabled),
+                      context,
+                      setState,
+                    ),
+                  ),
                 ListTile(
                   leading: Icon(
                     Icons.color_lens_outlined,

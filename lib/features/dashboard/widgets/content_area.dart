@@ -9,6 +9,7 @@ import 'attachment_job_panel.dart';
 import 'attachment_strip.dart';
 import 'attachment_mentions.dart';
 import 'attachment_preview.dart';
+import 'hover_formatting_bar.dart';
 import '../../../core/routing/fnotes_uri.dart';
 import '../models/note_model.dart';
 import 'password_dialog.dart';
@@ -151,18 +152,33 @@ class _ContentAreaState extends State<ContentArea> {
                 ValueListenableBuilder<bool>(
                   valueListenable: viewModel.isLockedNotifier,
                   builder: (context, isLocked, child) {
-                    if (isLocked) {
+                    if (isLocked || viewModel.isHtmlMode) {
                       return const SizedBox.shrink();
                     }
                     return IgnorePointer(
                       ignoring: viewModel.isLibraryCutover,
-                      child: AppReveal(
-                        key: ValueKey((
-                          viewModel.draftSession.generation,
-                          viewModel.currentContentPath,
-                        )),
-                        visible: !viewModel.isHtmlMode,
-                        child: _buildFloatingToolbar(isMobile),
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: isMobile ? 12 : 20,
+                          vertical: 8,
+                        ),
+                        child: HoverFormattingBar(
+                          key: ValueKey((
+                            viewModel.draftSession.generation,
+                            viewModel.currentContentPath,
+                          )),
+                          surfaceColor: colors.toolbarIsland,
+                          outlineColor: colors.divider.withValues(alpha: .3),
+                          restoreEditorFocus: _restoreEditorFocus,
+                          primaryToolbar: _buildFloatingToolbar(
+                            isMobile,
+                            primary: true,
+                          ),
+                          toolbar: _buildFloatingToolbar(
+                            isMobile,
+                            primary: false,
+                          ),
+                        ),
                       ),
                     );
                   },
@@ -480,63 +496,25 @@ class _ContentAreaState extends State<ContentArea> {
   );
 
   /// Floating toolbar "island" with grouped formatting tools
-  Widget _buildFloatingToolbar(bool isMobile) {
+  Widget _buildFloatingToolbar(bool isMobile, {required bool primary}) {
     return AbsorbPointer(
-      absorbing: viewModel.isImportCutover || !viewModel.draftSession.canWrite,
-      child: Container(
-        margin: EdgeInsets.symmetric(
-          horizontal: isMobile ? 12 : 20,
-          vertical: 8,
-        ),
-        decoration: BoxDecoration(
-          color: colors.toolbarIsland,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: colors.divider.withOpacity(0.3), width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.15),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        // Always allow horizontal scroll to prevent overflow, even on larger screens if constrained
-        child: Row(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  child: isMobile
-                      ? Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _buildToolbarRow1(),
-                            _buildVerticalDivider(),
-                            _buildToolbarRow2(),
-                          ],
-                        )
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _buildToolbarRow1(),
-                            Divider(
-                              color: colors.divider.withOpacity(0.3),
-                              height: 1,
-                            ),
-                            _buildToolbarRow2(),
-                          ],
-                        ),
-                ),
+      absorbing:
+          viewModel.isLibraryCutover ||
+          viewModel.isImportCutover ||
+          !viewModel.draftSession.canWrite,
+      // Always allow horizontal scroll to prevent overflow, even on larger screens if constrained
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: primary ? _buildToolbarRow1() : _buildToolbarRow2(),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

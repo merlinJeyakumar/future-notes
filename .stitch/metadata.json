@@ -220,6 +220,36 @@
       "purpose": "Caret popup with filename, type, size and duplicate ID; synthetic names only. Existing layout unchanged.",
       "localHtml": ".stitch/designs/attachment-mentions-20261016.html",
       "localScreenshot": ".stitch/designs/attachment-mentions-20261016.png"
+    },
+    {
+      "id": "33d8c22a959d4d6aad4efbacb0d6052f",
+      "title": "Future Notes - Hover formatting toolbar",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Slim hover/keyboard/tap reveal with floating formatting controls; preserve editor geometry and focus. Synthetic content only.",
+      "localHtml": ".stitch/designs/hover-formatting-20261016.html",
+      "localScreenshot": ".stitch/designs/hover-formatting-20261016.png"
+    },
+    {
+      "id": "6d0e477bd822461ea1795d929385e87f",
+      "title": "Future Notes - Single row formatting",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Persistent primary row and floating secondary controls on hover; unchanged editor geometry and focus. Synthetic content only.",
+      "localHtml": ".stitch/designs/single-row-formatting-20261016.html",
+      "localScreenshot": ".stitch/designs/single-row-formatting-20261016.png"
+    },
+    {
+      "id": "1f9f7a475e5243ce83a567e039362ff5",
+      "title": "Future Notes - Connected formatting toolbar",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Single-card hover expansion reference; final implementation removes the disclosure arrow and reveals extra controls inside the same card. Synthetic content only; no editor reflow.",
+      "localHtml": ".stitch/designs/unified-formatting-20261016.html",
+      "localScreenshot": ".stitch/designs/unified-formatting-20261016.png"
     }
   ]
 }

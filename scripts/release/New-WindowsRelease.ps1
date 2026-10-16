@@ -13,7 +13,7 @@ try {
     $releaseVersion = $version.Split('+')[0]
     $revision = (git rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Git revision unavailable.' }
-    git diff --exit-code HEAD -- lib pubspec.yaml pubspec.lock windows/CMakeLists.txt windows/runner scripts/release
+    git diff --exit-code HEAD -- lib pubspec.yaml pubspec.lock windows/CMakeLists.txt windows/document_preview.cmake windows/runner licenses scripts/release
     if ($LASTEXITCODE -ne 0) { throw 'Commit the reviewed release inputs before building.' }
     if (@(Get-Process -Name FutureNotes,flutter_application_1 -ErrorAction SilentlyContinue).Count -gt 0) { throw 'Close Future Notes normally before building.' }
     $bundle = Join-Path $workspace "build/releases/FutureNotes-$releaseVersion-windows-x64"
@@ -34,11 +34,18 @@ try {
       '',
       'Included native files (embedded file/product versions; exact bytes pinned in release-manifest.json):')
     $lockText = Get-Content -LiteralPath 'pubspec.lock' -Raw
-    foreach ($package in @('media_kit','media_kit_video','media_kit_libs_video','media_kit_libs_windows_video')) {
+    foreach ($package in @('media_kit','media_kit_video','media_kit_libs_video','media_kit_libs_windows_video','pdfrx','pdfrx_engine','pdfium_flutter','pdfium_dart','flutter_widget_from_html_core')) {
         $packageVersion = [regex]::Match($lockText, '(?ms)^  ' + $package + ':\r?\n.*?^    version: "([^"\r\n]+)"')
         if (!$packageVersion.Success) { throw "Missing pinned native package: $package" }
         $runtimeText += "$package`: $($packageVersion.Groups[1].Value)"
     }
+    $officeRecipe = Get-Content -LiteralPath 'windows/document_preview.cmake' -Raw
+    $officeVersion = [regex]::Match($officeRecipe, 'office_oxide/releases/download/v([^/]+)/')
+    $pdfRecipe = Get-Content -LiteralPath 'windows/flutter/ephemeral/.plugin_symlinks/pdfium_flutter/windows/CMakeLists.txt' -Raw
+    $pdfVersion = [regex]::Match($pdfRecipe, 'set\(PDFIUM_RELEASE ([^)]+)\)')
+    if (!$officeVersion.Success -or !$pdfVersion.Success) { throw 'Native document reader versions unavailable.' }
+    $runtimeText += "Office Oxide native parser: $($officeVersion.Groups[1].Value)"
+    $runtimeText += "PDFium native renderer: $([Uri]::UnescapeDataString($pdfVersion.Groups[1].Value))"
     foreach ($dll in @(Get-ChildItem -LiteralPath $source -Filter '*.dll' -File | Sort-Object Name)) {
         $fileVersion = $dll.VersionInfo.FileVersion
         if ([string]::IsNullOrWhiteSpace($fileVersion)) { $fileVersion = 'not embedded; use manifest SHA-256' }

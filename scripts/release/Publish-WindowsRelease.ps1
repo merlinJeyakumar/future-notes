@@ -5,7 +5,7 @@ $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 Push-Location $workspace
 try {
     if ((git branch --show-current).Trim() -ne 'development') { throw 'Promotion must start from reviewed development.' }
-    git diff --exit-code HEAD -- lib pubspec.yaml pubspec.lock windows/CMakeLists.txt windows/runner scripts/release
+    git diff --exit-code HEAD -- lib pubspec.yaml pubspec.lock windows/CMakeLists.txt windows/document_preview.cmake windows/runner licenses scripts/release
     if ($LASTEXITCODE -ne 0) { throw 'Release inputs changed after build.' }
     $versionLine = Select-String -LiteralPath 'pubspec.yaml' -Pattern '^version: (\d+\.\d+\.\d+)\+(\d+)$'
     $version = $versionLine.Matches[0].Groups[1].Value
@@ -22,7 +22,7 @@ try {
     # identical runtime, package construction and distributed text inputs.
     git merge-base --is-ancestor $manifest.gitRevision $revision
     if ($LASTEXITCODE -ne 0) { throw 'Build revision is not an ancestor of the reviewed tag.' }
-    git diff --exit-code $manifest.gitRevision $revision -- lib pubspec.yaml pubspec.lock windows/CMakeLists.txt windows/runner scripts/release/windows_bundle.py scripts/release/New-WindowsRelease.ps1 scripts/release/Download-FutureNotes.ps1 scripts/release/README.txt scripts/release/THIRD-PARTY-NOTICES.txt scripts/release/RELEASE_NOTES.md
+    git diff --exit-code $manifest.gitRevision $revision -- lib pubspec.yaml pubspec.lock windows/CMakeLists.txt windows/document_preview.cmake windows/runner licenses scripts/release/windows_bundle.py scripts/release/New-WindowsRelease.ps1 scripts/release/Download-FutureNotes.ps1 scripts/release/README.txt scripts/release/THIRD-PARTY-NOTICES.txt scripts/release/RELEASE_NOTES.md
     if ($LASTEXITCODE -ne 0) { throw 'Runtime/package inputs changed after build.' }
     $oldLocalTag = (git rev-parse refs/tags/v1.0.0).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Existing local release tag could not be verified.' }

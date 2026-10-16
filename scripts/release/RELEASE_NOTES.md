@@ -1,27 +1,24 @@
-Future Notes 1.4.0 is the protected Windows x64 portable release (build 7).
+Future Notes 1.4.1 is the protected Windows x64 portable release (build 8).
 
-Changes since 1.3.0:
+Changes since 1.4.0:
 
-- Type @ in Rich text or HTML to suggest committed attachments from the current
-  note. Filter filenames, including spaces, and choose with the mouse or
-  Up/Down and Enter/Tab. Duplicate names show a short identity suffix.
-- Rich text mentions use standard links: Ctrl+click opens the attachment through
-  the existing decrypted-file cache. HTML inserts editable fnotes:// source.
-  Suggestions never decrypt attachment payloads. Stable mention identities survive
-  Save, password changes, export/import, Duplicate and Back up & Replace.
-- Drop Explorer files anywhere on the dashboard window, including the sidebar
-  and note header, to attach them to the selected editable note.
-- The in-app title bar provides Minimize, Maximize/Restore and confirmed Exit,
-  with dragging, double-click maximize and edge resizing. The notification-area
-  tray icon is removed; Close follows the confirmed application-exit flow.
-- Dialogs, sidebar, viewers and attachment panels use consistent transitions
-  with reduced-motion support. Note selection no longer dims the whole editor;
-  refresh preserves the sidebar list position. Locking removes protected content
-  immediately, without retaining it for an exit animation.
-- Media information appears on hover and hides when the pointer leaves.
-  Non-media previews use an Info button. GIF playback has subtle play/pause
-  controls. Returning focus to Rich text or HTML collapses expanded attachments
-  while preserving typing focus.
+- The formatting toolbar stays compact in one card and reveals its remaining
+  controls on hover. Expanded controls keep the editor below the toolbar rather
+  than covering it. Natural collapsed height removes the empty bottom strip;
+  editor margins are tighter, with no extra chevron or horizontal scrolling.
+- All/More attachments uses modest, consistent margins and responsive columns
+  that fill complete rows. The title, search and cards share a left edge;
+  filtered results and incomplete rows stay at the top-left.
+- Export and other auxiliary operations use compact progress rows instead of
+  tall, mostly empty cards. Progress, byte counts and relevant actions remain
+  visible; multiple rows scroll vertically within a bounded panel.
+- Export attachment-source checking now reports its stage and byte progress and
+  responds to cancellation through the existing owned reader. A cancelled
+  export preserves the note and existing destination, and another export can
+  start afterward. Integrity checks and recoverable publication are retained.
+- Closing a saved, idle app no longer asks for an extra exit confirmation.
+  Required draft and active-work decisions remain, and finalizing work and
+  resource cleanup still complete before exit.
 
 The normal editor, existing storage backend, encryption formats, note/settings
 locations, attachment processing and cache lifetime are retained. Opening notes
@@ -39,7 +36,7 @@ Dynamic-code prohibition and Microsoft-only DLL policies remain disabled for
 Flutter/native-library compatibility. The application is unsigned.
 
 Download **Download-FutureNotes.ps1**, run it in Windows PowerShell, then read
-**RUN-ME.txt** in the verified `FutureNotes-1.4.0-windows-x64` folder and open
+**RUN-ME.txt** in the verified `FutureNotes-1.4.1-windows-x64` folder and open
 **FutureNotes.exe**. The helper reconstructs the folder from individual release
 assets and verifies SHA-256 hashes. No ZIP, installer, administrator rights,
 Flutter/Dart SDK, Microsoft Office or separate Visual C++ installation is needed.
@@ -55,7 +52,9 @@ app folder. Transfer notes with backup or package export/import and reselect a
 custom library if its path differs on another PC. Existing release tags and
 previous GitHub release assets are preserved.
 
-The application changes passed their affected automated suites and user checks.
+The application changes passed their affected automated suites. The toolbar,
+gallery and compact export/cancellation changes also received user acceptance;
+the close guard has automated lifecycle coverage.
 Release promotion additionally verifies packaging, native imports, private-symbol
 exclusion, hashes and portable-folder startup. Same-machine checks do not prove
 clean second-PC/VM compatibility. The existing Flutter Windows accessibility-tree

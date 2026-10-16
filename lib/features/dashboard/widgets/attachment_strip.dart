@@ -385,6 +385,7 @@ class _AttachmentTileState extends State<_AttachmentTile> {
 
     final expanded = widget.expanded;
     final failed = state?.phase == AttachmentJobPhase.failed;
+    final showMore = !active && (attachment != null || (!expanded && failed));
     final canOpen = attachment != null && !active;
     final nameStyle = Theme.of(context).textTheme.labelMedium;
     final progressLabel = state == null
@@ -396,9 +397,6 @@ class _AttachmentTileState extends State<_AttachmentTile> {
       enabled: attachment != null && !active,
       canRemove: attachment != null && !widget.model.hasAttachmentJobs,
       onSelected: action,
-      onCancel: !expanded && (state?.cancellable ?? false)
-          ? () => widget.model.cancelAttachmentJob(state!.id)
-          : null,
       onRetry: !expanded && attachment == null && failed
           ? () => widget.model.retryAttachmentJob(state!.id)
           : null,
@@ -437,7 +435,9 @@ class _AttachmentTileState extends State<_AttachmentTile> {
                             child: Row(
                               children: [
                                 Expanded(
-                                  child: failed
+                                  child: active
+                                      ? const SizedBox.shrink()
+                                      : failed
                                       ? const Icon(
                                           Icons.error_outline,
                                           size: 20,
@@ -457,7 +457,16 @@ class _AttachmentTileState extends State<_AttachmentTile> {
                                         )
                                       : Icon(icon, size: 20),
                                 ),
-                                SizedBox(width: 20, height: 28, child: more),
+                                if (active && (state?.cancellable ?? false))
+                                  _jobButton(
+                                    'Cancel attachment',
+                                    Icons.close,
+                                    () => widget.model.cancelAttachmentJob(
+                                      state!.id,
+                                    ),
+                                  )
+                                else if (showMore)
+                                  SizedBox(width: 20, height: 28, child: more),
                               ],
                             ),
                           ),
@@ -486,22 +495,23 @@ class _AttachmentTileState extends State<_AttachmentTile> {
                           child: Stack(
                             fit: StackFit.expand,
                             children: [
-                              cached != null &&
-                                      kind == AttachmentVisualKind.image
-                                  ? TickerMode(
-                                      enabled: false,
-                                      child: Image.file(
-                                        File(cached.path),
-                                        fit: BoxFit.cover,
-                                        cacheWidth: 320,
-                                        cacheHeight: 160,
-                                        errorBuilder: (_, _, _) => Icon(
-                                          icon,
-                                          size: expanded ? 24.0 : 18.0,
+                              if (!active)
+                                cached != null &&
+                                        kind == AttachmentVisualKind.image
+                                    ? TickerMode(
+                                        enabled: false,
+                                        child: Image.file(
+                                          File(cached.path),
+                                          fit: BoxFit.cover,
+                                          cacheWidth: 320,
+                                          cacheHeight: 160,
+                                          errorBuilder: (_, _, _) => Icon(
+                                            icon,
+                                            size: expanded ? 24.0 : 18.0,
+                                          ),
                                         ),
-                                      ),
-                                    )
-                                  : Icon(icon, size: expanded ? 24.0 : 18.0),
+                                      )
+                                    : Icon(icon, size: expanded ? 24.0 : 18.0),
                               if (state?.cancellable ?? false)
                                 Positioned(
                                   left: 0,
@@ -539,15 +549,16 @@ class _AttachmentTileState extends State<_AttachmentTile> {
                                     ],
                                   ),
                                 ),
-                              Positioned(
-                                right: 0,
-                                top: 0,
-                                child: SizedBox(
-                                  width: 28,
-                                  height: 28,
-                                  child: more,
+                              if (showMore)
+                                Positioned(
+                                  right: 0,
+                                  top: 0,
+                                  child: SizedBox(
+                                    width: 28,
+                                    height: 28,
+                                    child: more,
+                                  ),
                                 ),
-                              ),
                             ],
                           ),
                         ),

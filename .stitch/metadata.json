@@ -160,6 +160,16 @@
       "purpose": "Two off-by-default viewing scans within the existing performance settings; synthetic content only",
       "localHtml": ".stitch/designs/attachment-open-options-20261016.html",
       "localScreenshot": ".stitch/designs/attachment-open-options-20261016.png"
+    },
+    {
+      "id": "3692fb90f45a4190b93d476daa94f1d8",
+      "title": "Future Notes - Processing attachment actions",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Hide unavailable Play and More while processing; retain safe direct cancellation. Synthetic names only.",
+      "localHtml": ".stitch/designs/attachment-processing-actions-20261016.html",
+      "localScreenshot": ".stitch/designs/attachment-processing-actions-20261016.png"
     }
   ]
 }

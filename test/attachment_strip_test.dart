@@ -446,10 +446,14 @@ void main() {
           final job = h.editor.attachmentJobsNotifier.value.single;
           final initial = job.progress.value;
           for (final phase in [
+            AttachmentJobPhase.queued,
             AttachmentJobPhase.preparing,
             AttachmentJobPhase.decrypting,
+            AttachmentJobPhase.encrypting,
             AttachmentJobPhase.verifying,
             AttachmentJobPhase.finalizing,
+            AttachmentJobPhase.cancelling,
+            AttachmentJobPhase.completed,
             AttachmentJobPhase.failed,
           ]) {
             job.update(
@@ -476,12 +480,31 @@ void main() {
                 reason: phase.name,
               );
             }
-            if (!collapsed) {
-              expect(
-                find.byTooltip('Cancel attachment'),
-                job.progress.value.cancellable ? findsOneWidget : findsNothing,
-              );
-            }
+            expect(
+              find.byTooltip('Cancel attachment'),
+              job.progress.value.cancellable ? findsOneWidget : findsNothing,
+            );
+            expect(
+              find.descendant(
+                of: cards.first,
+                matching: find.byIcon(Icons.play_circle_outline),
+              ),
+              job.progress.value.active ||
+                      (collapsed && phase == AttachmentJobPhase.failed)
+                  ? findsNothing
+                  : findsOneWidget,
+            );
+            expect(
+              find.descendant(
+                of: cards.first,
+                matching: find.byType(AttachmentMoreButton),
+              ),
+              job.progress.value.active ? findsNothing : findsOneWidget,
+            );
+            expect(
+              find.byType(AttachmentMoreButton),
+              findsNWidgets(job.progress.value.active ? 3 : 4),
+            );
             if (phase == AttachmentJobPhase.decrypting) {
               if (collapsed) {
                 expect(find.text('Decrypting'), findsNothing);
@@ -937,11 +960,9 @@ void main() {
         await tester.pump();
         expect(find.text('Encrypting'), findsNothing);
         expect(find.byType(LinearProgressIndicator), findsOneWidget);
-        await tester.tap(find.byTooltip('More actions for pending.mp4'));
-        await tester.pumpAndSettle();
-        expect(find.text('Cancel attachment'), findsOneWidget);
-        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-        await tester.pumpAndSettle();
+        expect(find.byType(AttachmentMoreButton), findsNothing);
+        expect(find.byIcon(Icons.play_circle_outline), findsNothing);
+        expect(find.byTooltip('Cancel attachment'), findsOneWidget);
         expect(h.editor.attachments, isEmpty);
         job.update(
           const AttachmentJobSnapshot(
@@ -1212,7 +1233,7 @@ void main() {
     },
   );
   testWidgets(
-    'pending first attachment has inline phases, More and cancellation without a dialog',
+    'pending first attachment hides unavailable actions and retains inline cancellation',
     (tester) async {
       final harness = await EditorHarness.create();
       final job = AttachmentJobState(
@@ -1244,7 +1265,8 @@ void main() {
           isNull,
         );
         expect(find.byType(Dialog), findsNothing);
-        expect(find.byType(AttachmentMoreButton), findsOneWidget);
+        expect(find.byType(AttachmentMoreButton), findsNothing);
+        expect(find.byIcon(Icons.play_circle_outline), findsNothing);
         expect(find.byTooltip('Cancel attachment'), findsOneWidget);
         job.update(
           const AttachmentJobSnapshot(
@@ -1257,6 +1279,8 @@ void main() {
         await tester.pump();
         expect(find.text('Finishing safely…'), findsOneWidget);
         expect(find.byTooltip('Cancel attachment'), findsNothing);
+        expect(find.byType(AttachmentMoreButton), findsNothing);
+        expect(find.byIcon(Icons.play_circle_outline), findsNothing);
         job.update(
           const AttachmentJobSnapshot(
             id: 'synthetic',
@@ -1271,6 +1295,8 @@ void main() {
         await tester.pump();
         expect(find.byType(Dialog), findsNothing);
         expect(find.text('Finishing safely…'), findsNothing);
+        expect(find.byType(AttachmentMoreButton), findsOneWidget);
+        expect(find.byIcon(Icons.play_circle_outline), findsOneWidget);
         harness.editor.isLockedNotifier.value = true;
         await tester.pump();
         expect(find.byType(AttachmentMoreButton), findsNothing);

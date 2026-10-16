@@ -39,6 +39,35 @@ runtime dependencies on user computers, or changes an existing tag.
 The app is unsigned. No signing certificate is created or publisher trust
 claimed. No other-machine result is inferred from local build/dependency checks.
 
+Release hardening (applies to new builds, not existing published assets):
+- The release script enables Flutter `--obfuscate` and `--split-debug-info`,
+  retaining the name map and crash symbols in fresh `.private-release-symbols/`
+  directories accessible to the build user and SYSTEM. Back these up privately
+  with the exact version and source revision. They are never release assets.
+  The installed Flutter SDK determines whether crash files are SYMBOLS or PDB.
+- Packaging/verification rejects private symbol and map files at every depth.
+  Do not add symbol paths to assets or upload the private directory to GitHub.
+- Release runners use /GS, CFG, DEP, ASLR and high-entropy ASLR. The build verifies
+  actual PE flags, CFG metadata and static-import DLL search flags before staging.
+- At entry, Release runners restrict default DLL search to the application and
+  System32 directories, prefer System32, reject remote/low-integrity DLLs, disable
+  legacy extension points and enable permanent strict-handle checks. Failure
+  stops before COM, engine/plugin initialization and note storage. Windows still
+  resolves static imports before entry; /DEPENDENTLOADFLAG limits the runner's
+  static import search. Prebuilt DLLs are not recompiled by these switches.
+- Run the portable app from a local folder with normal Windows permissions.
+  Network-share execution, low-integrity DLLs and legacy injected hooks/IMEs can
+  be incompatible. Modern text input and accessibility need manual acceptance.
+- Dynamic-code prohibition and Microsoft-only DLL policies are intentionally
+  excluded: they can break Flutter and the unsigned third-party native libraries.
+  Debug stays debuggable. No anti-debug tricks, binary packers, machine-wide
+  exploit-policy changes or new runtime dependencies are introduced.
+- This reduces selected exploit/injection paths. It does not prevent a process
+  with sufficient access from writing memory, creating remote threads, loading
+  an explicitly named trusted-location DLL, changing binaries, or reading keys
+  already needed by an unlocked note. Obfuscation does not encrypt assets.
+  The app remains unsigned; these controls are not a tamper-proof trust boundary.
+
 Private repositories need authenticated asset downloads. The bootstrap supports
 an existing GH_TOKEN/GITHUB_TOKEN or a masked token prompt and uses the repository
 API's asset IDs. It never persists credentials or changes repository visibility.

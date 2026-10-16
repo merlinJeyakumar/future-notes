@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 from windows_bundle import EXE, MANIFEST, CRT, pe_imports, sha256, stage, verify
+from windows_hardening import check_runner
 
 
 def binary(imports=(), delay=False, machine=0x8664):
@@ -115,6 +116,38 @@ class BundleTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             self.stage()
         self.assertEqual(sentinel.read_bytes(), b"preserve")
+
+    def test_private_symbols_rejected_even_inside_assets(self):
+        for name in ("app.pdb", "app.windows-x64.symbols", "obfuscation-map.json", "app.map.json"):
+            with self.subTest(name=name):
+                path = self.source / "data/flutter_assets" / name
+                path.write_bytes(b"private symbols")
+                with self.assertRaisesRegex(ValueError, "Private symbols"):
+                    self.stage()
+                self.assertFalse(self.bundle.exists())
+                path.unlink()
+
+    def test_runner_hardening_checks_actual_pe_and_rejects_missing_bits(self):
+        data = binary()
+        struct.pack_into("<H", data, 152 + 70, 0x4160)
+        struct.pack_into("<II", data, 152 + 112 + 10 * 8, 4096, 148)
+        struct.pack_into("<I", data, 512, 148)
+        struct.pack_into("<H", data, 512 + 78, 0xA00)
+        struct.pack_into("<Q", data, 512 + 88, 0x140001000)
+        struct.pack_into("<Q", data, 512 + 136, 3)
+        struct.pack_into("<I", data, 512 + 144, 0x500)
+        runner = self.source / EXE
+        runner.write_bytes(data)
+        self.assertTrue(check_runner(runner)["cfg"])
+        for offset, fmt, value in ((152 + 70, "H", 0x160), (512 + 78, "H", 0),
+                                   (512 + 88, "Q", 0), (512 + 136, "Q", 0),
+                                   (512 + 144, "I", 0)):
+            with self.subTest(offset=offset):
+                invalid = bytearray(data)
+                struct.pack_into("<" + fmt, invalid, offset, value)
+                runner.write_bytes(invalid)
+                with self.assertRaises(ValueError):
+                    check_runner(runner)
 
     def test_tampering_and_extra_files_rejected(self):
         self.stage()

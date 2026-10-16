@@ -19,9 +19,14 @@ try {
     $bundle = Join-Path $workspace "build/releases/FutureNotes-$releaseVersion-windows-x64"
     $documents = Join-Path $workspace "build/releases/metadata-$releaseVersion"
     if ((Test-Path -LiteralPath $bundle) -or (Test-Path -LiteralPath $documents)) { throw 'Release output already exists; previous artifacts are never replaced.' }
-    & $FlutterPath build windows --release --no-pub -t lib/main.dart
+    . (Join-Path $PSScriptRoot 'Private-ReleaseSymbols.ps1')
+    $symbols = New-PrivateReleaseSymbols -Workspace $workspace -Version $version -Revision $revision
+    & $FlutterPath build windows --release --no-pub -t lib/main.dart --obfuscate "--split-debug-info=$symbols" "--extra-gen-snapshot-options=--save-obfuscation-map=$symbols/obfuscation-map.json"
     if ($LASTEXITCODE -ne 0) { throw 'Windows Release build failed.' }
+    Assert-PrivateReleaseSymbols -Directory $symbols
     $source = Join-Path $workspace 'build/windows/x64/runner/Release'
+    & $PythonPath (Join-Path $PSScriptRoot 'windows_hardening.py') (Join-Path $source 'FutureNotes.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'Runner mitigation metadata verification failed.' }
     $info = (Get-Item -LiteralPath (Join-Path $source 'FutureNotes.exe')).VersionInfo
     if ($info.ProductVersion -ne $version -or $info.OriginalFilename -ne 'FutureNotes.exe') { throw 'Executable version/name mismatch.' }
     New-Item -ItemType Directory -Path $documents | Out-Null

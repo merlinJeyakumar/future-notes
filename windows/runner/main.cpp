@@ -1,12 +1,27 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
+#include <cstdio>
 
 #include "flutter_window.h"
 #include "utils.h"
+#include "process_hardening.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+#if defined(FN_RELEASE_HARDENING)
+  const auto security = ApplyProcessHardening();
+  if (!security.ok()) {
+    std::fprintf(stderr, "Windows security initialization failed (%s, %lu).\n",
+                 security.failed_stage, security.error);
+    MessageBoxW(nullptr,
+                L"Windows security protections could not be initialized. "
+                L"No note library was opened.",
+                L"Future Notes", MB_OK | MB_ICONERROR);
+    return EXIT_FAILURE;
+  }
+  std::fprintf(stderr, "Windows process protections initialized.\n");
+#endif
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {

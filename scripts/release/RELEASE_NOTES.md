@@ -1,44 +1,50 @@
-Future Notes 1.2.0 is a Windows x64 portable release (build 3).
+Future Notes 1.2.1 is the protected Windows x64 portable release (build 4).
 
-Changes since 1.1.0:
+Changes since 1.2.0:
 
-- Open PDF, DOC, DOCX, XLS and XLSX attachments inside Future Notes, locally and
-  offline. PDF has page navigation and zoom. Word and spreadsheet previews have
-  clearer page spacing, table styling and scrolling. Office layouts are reading
-  previews of text/tables; embedded images/objects and exact Office layout are
-  not reproduced. Complex or oversized files retain Open in system app/Save As.
-- Expanded attachments show every file in wrapped rows. The dock stays left
-  aligned; Show all opens a searchable filename dialog. Collapsed notes retain
-  the small-icon row. Opening/unlocking a note keeps attachments collapsed.
-- Exports retain note identity. Reimporting a matching note offers Duplicate,
-  Back up & Replace, or Ignore in a dedicated dialog.
-- Unlock protected notes directly in the editor with automatic password focus.
-  Sidebar lock icons retain the correct state when switching notes. Sidebar
-  subtitles show updated time and the final five ID characters.
+- Dart code is compiled with name obfuscation. Crash symbols and the name map
+  remain in private build storage and are excluded from downloadable files.
+- The native Release runner enables Control Flow Guard, stack cookies, DEP,
+  ASLR and high-entropy ASLR. Build tooling checks the actual executable flags.
+- DLL loading excludes the working directory and PATH, prefers System32 and
+  rejects remote/low-integrity images. Legacy extension points are disabled and
+  strict handle checks enabled before normal engine/plugin/storage startup.
+- The normal editor, storage backend, note formats and existing functionality
+  are retained. Notes, settings, encryption and library locations are unchanged.
+
+These are compatible exploit mitigations, not complete memory-injection
+prevention. Obfuscation does not encrypt resources or prevent reverse
+engineering. An administrator/debugger or process with sufficient rights can
+still inspect or modify memory. Prebuilt third-party DLLs are not recompiled by
+runner protections. Dynamic-code prohibition and Microsoft-only DLL policies
+are not enabled because they can break Flutter and bundled native libraries.
+The application remains unsigned.
 
 Download **Download-FutureNotes.ps1**, run it in Windows PowerShell, then read
-**RUN-ME.txt** in the verified `FutureNotes-1.2.0-windows-x64` folder and open
+**RUN-ME.txt** in the verified `FutureNotes-1.2.1-windows-x64` folder and open
 **FutureNotes.exe**. The helper reconstructs the folder from individual release
 assets and verifies SHA-256 hashes. No ZIP, installer, administrator rights,
 Flutter/Dart SDK, Microsoft Office or separate Visual C++ installation is needed.
 Keep the EXE, all DLLs and the data folder together; the EXE alone is insufficient.
 
-**RUNTIMES.txt** lists exact bundled versions, including Office Oxide and PDFium.
-The target is Windows 10 (1809+) or Windows 11 x64 with its normal graphics/audio
-components. The application is unsigned; an unknown-publisher warning is possible.
+**RUNTIMES.txt** lists the bundled versions. Use a local folder on Windows 10
+(1809+) or Windows 11 x64 with normal graphics/audio components. Network-share
+execution, low-integrity DLLs and legacy injected hooks/IMEs may be incompatible
+with the protected build. An unknown-publisher warning is possible.
 
-Your notes/settings are not distributed. Existing file locations and encryption
-formats remain compatible. Keep a separate notes backup and the previous app
-folder. Transfer notes using backup or package export/import, and reselect a
-custom library if its path differs on another PC. Existing release tags,
-including `v1.0.0` and `v1.1.0`, remain unchanged.
+Notes/settings are not distributed. Keep a separate notes backup and the prior
+app folder. Transfer notes using backup or package export/import, and reselect
+a custom library if its path differs on another PC. Existing release tags and
+previous release assets, including v1.2.0, are preserved.
 
-Validation covers synthetic document/attachment regressions, release-tool tests,
-Windows Release compilation, app-local DLL dependency and SHA-256 verification,
-and local copied-folder startup. Document viewing and Office styling were
-manually checked; the newest Show all dialog has regression/startup coverage.
-Clean second-PC/VM execution has not been performed, so graphics/playback and
-full workflow compatibility on another computer are not claimed as tested.
+The hardening candidate passed 49 affected Flutter regressions, 15 release-tool
+tests, native loader/policy tests and actual executable-mitigation checks.
+Windows policy readback confirmed the protections active in the running app;
+captured logs showed no errors. The user accepted existing notes, typing,
+Save/reopen, attachment playback/document preview and locking. Version 1.2.1
+uses that same runtime code with updated release identity and a new obfuscated
+build. Packaging validates native imports and file hashes. Clean second-PC/VM
+execution and dedicated IME/accessibility compatibility are not claimed tested.
 
 This repository is private. Download the helper while signed in to GitHub. It
 uses GH_TOKEN/GITHUB_TOKEN or prompts for a hidden repository-access token to

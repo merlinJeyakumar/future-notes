@@ -47,6 +47,12 @@ def inventory(root):
             entry = Path(directory) / name
             no_link(entry)
             relative = entry.relative_to(root).as_posix()
+            # Crash symbols and the name map must never be distributed, even
+            # when accidentally nested under otherwise allowed Flutter assets.
+            lowered = name.lower()
+            if (lowered.endswith((".pdb", ".symbols", ".map", ".map.json", ".dsym")) or
+                    "obfuscation-map" in lowered or lowered == ".private-release-symbols"):
+                raise ValueError("Private symbols must never enter a release")
             if any(p.lower().startswith(("note_", ".future-notes")) or
                    p.lower() in {"userdata", "settings.json", "attachmentcache"}
                    for p in entry.relative_to(root).parts):

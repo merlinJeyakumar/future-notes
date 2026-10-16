@@ -1,4 +1,4 @@
-Future Notes 1.3.0 - Protected Windows x64 build
+Future Notes 1.4.0 - Protected Windows x64 build
 
 Run FutureNotes.exe from this folder. Keep the DLLs and data folder
 beside it. Flutter, Dart, Visual Studio, Python and a separate Visual C++ runtime
@@ -12,7 +12,7 @@ unchanged because the Windows loader references them by those names.
 
 For GitHub downloads without an archive: download Download-FutureNotes.ps1 and
 run it in Windows PowerShell. It downloads the individual release files into a
-new FutureNotes-1.3.0-windows-x64 folder and checks their SHA-256 hashes. Then open
+new FutureNotes-1.4.0-windows-x64 folder and checks their SHA-256 hashes. Then open
 FutureNotes.exe yourself. No SDK, runtime installer or administrator access is
 required. If Windows blocks a downloaded script, inspect it and use Properties
 > Unblock only after confirming it came from this project's release page.

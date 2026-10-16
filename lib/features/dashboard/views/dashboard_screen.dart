@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/content_area.dart';
+import '../widgets/desktop_attachment_drop_zone.dart';
 import '../viewmodels/content_viewmodel.dart';
 import '../services/file_service.dart';
 import '../services/encryption_service.dart';
@@ -874,7 +875,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildDashboard(BuildContext context) {
     final theme = Theme.of(context);
     return ListenableBuilder(
-      listenable: _viewModel,
+      listenable: Listenable.merge([
+        _viewModel,
+        _viewModel.isLockedNotifier,
+        _viewModel.attachmentJobsNotifier,
+      ]),
       builder: (context, _) {
         return CallbackShortcuts(
           bindings: {
@@ -891,80 +896,92 @@ class _DashboardScreenState extends State<DashboardScreen> {
               }
             },
           },
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final isDesktop = constraints.maxWidth > 800;
-              return Scaffold(
-                key: _scaffoldKey,
-                resizeToAvoidBottomInset: true,
-                appBar: isDesktop
-                    ? null
-                    : AppBar(
-                        backgroundColor: theme.appSidebar,
-                        title: Text(
-                          'Dashboard',
-                          style: TextStyle(color: theme.appTextPrimary),
-                        ),
-                        iconTheme: IconThemeData(color: theme.appTextPrimary),
-                        titleTextStyle: TextStyle(
-                          color: theme.appTextPrimary,
-                          fontSize: 15.552,
-                        ),
-                        actions: [
-                          IconButton(
-                            icon: const Icon(Icons.settings),
-                            onPressed: () => _showMasterSettings(context),
-                          ),
-                        ],
-                      ),
-                drawer: isDesktop
-                    ? null
-                    : Drawer(child: _buildSidebar(drawer: true)),
-                body: Stack(
-                  children: [
-                    Column(
-                      children: [
-                        Expanded(
-                          child: Row(
-                            children: [
-                              if (isDesktop && _isSidebarVisible)
-                                _buildSidebar(drawer: false),
-                              Expanded(
-                                child: ContentArea(viewModel: _viewModel),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (isDesktop) _buildSidebarToggle(theme),
-                      ],
-                    ),
-                    if (_viewModel.isBusy)
-                      Container(
-                        color: Colors.black54,
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              CircularProgressIndicator(
-                                color: theme.colorScheme.primary,
-                              ),
-                              const SizedBox(height: 16),
-                              const Text(
-                                "Processing...",
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13.824,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+          child: DesktopAttachmentDropZone(
+            enabled:
+                !_shutdownStarted &&
+                !_viewModel.isBusy &&
+                _viewModel.canAcceptAttachmentDrop,
+            onDrop: (paths) async {
+              await _viewModel.attachDroppedFiles(
+                paths,
+                waitForCompletion: false,
               );
             },
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isDesktop = constraints.maxWidth > 800;
+                return Scaffold(
+                  key: _scaffoldKey,
+                  resizeToAvoidBottomInset: true,
+                  appBar: isDesktop
+                      ? null
+                      : AppBar(
+                          backgroundColor: theme.appSidebar,
+                          title: Text(
+                            'Dashboard',
+                            style: TextStyle(color: theme.appTextPrimary),
+                          ),
+                          iconTheme: IconThemeData(color: theme.appTextPrimary),
+                          titleTextStyle: TextStyle(
+                            color: theme.appTextPrimary,
+                            fontSize: 15.552,
+                          ),
+                          actions: [
+                            IconButton(
+                              icon: const Icon(Icons.settings),
+                              onPressed: () => _showMasterSettings(context),
+                            ),
+                          ],
+                        ),
+                  drawer: isDesktop
+                      ? null
+                      : Drawer(child: _buildSidebar(drawer: true)),
+                  body: Stack(
+                    children: [
+                      Column(
+                        children: [
+                          Expanded(
+                            child: Row(
+                              children: [
+                                if (isDesktop && _isSidebarVisible)
+                                  _buildSidebar(drawer: false),
+                                Expanded(
+                                  child: ContentArea(viewModel: _viewModel),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (isDesktop) _buildSidebarToggle(theme),
+                        ],
+                      ),
+                      if (_viewModel.isBusy)
+                        Container(
+                          color: Colors.black54,
+                          child: Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                CircularProgressIndicator(
+                                  color: theme.colorScheme.primary,
+                                ),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  "Processing...",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13.824,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ),
         );
       },

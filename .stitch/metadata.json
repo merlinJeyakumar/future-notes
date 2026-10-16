@@ -170,6 +170,16 @@
       "purpose": "Hide unavailable Play and More while processing; retain safe direct cancellation. Synthetic names only.",
       "localHtml": ".stitch/designs/attachment-processing-actions-20261016.html",
       "localScreenshot": ".stitch/designs/attachment-processing-actions-20261016.png"
+    },
+    {
+      "id": "e6dde3c0462c4e749d131de6124ceaef",
+      "title": "Future Notes - Window-wide attachment drop",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Extend existing file drop hover to all dashboard client areas with one selected-note handler; synthetic content only.",
+      "localHtml": ".stitch/designs/window-drop-20261016.html",
+      "localScreenshot": ".stitch/designs/window-drop-20261016.png"
     }
   ]
 }

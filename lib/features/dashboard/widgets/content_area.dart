@@ -8,7 +8,6 @@ import 'attachment_strip.dart';
 import '../models/note_model.dart';
 import 'password_dialog.dart';
 import 'note_unlock_form.dart';
-import 'desktop_attachment_drop_zone.dart';
 import '../../../core/theme/app_theme.dart';
 
 import 'package:code_text_field/code_text_field.dart';
@@ -122,26 +121,7 @@ class _ContentAreaState extends State<ContentArea> {
                 ),
 
                 // Spacious Editor Area
-                Expanded(
-                  child: ListenableBuilder(
-                    listenable: Listenable.merge([
-                      viewModel,
-                      viewModel.isLockedNotifier,
-                      viewModel.attachmentJobsNotifier,
-                    ]),
-                    child: _buildInputArea(context),
-                    builder: (context, child) => DesktopAttachmentDropZone(
-                      enabled: viewModel.canAcceptAttachmentDrop,
-                      onDrop: (paths) async {
-                        await viewModel.attachDroppedFiles(
-                          paths,
-                          waitForCompletion: false,
-                        );
-                      },
-                      child: child!,
-                    ),
-                  ),
-                ),
+                Expanded(child: _buildInputArea(context)),
 
                 AttachmentJobPanel(viewModel: viewModel, auxiliaryOnly: true),
                 ValueListenableBuilder(

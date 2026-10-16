@@ -1,3 +1,5 @@
+import '../../../core/theme/app_tooltip.dart';
+import '../../../core/theme/app_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import '../models/note_model.dart';
@@ -49,6 +51,7 @@ class Sidebar extends StatelessWidget {
       width: 280,
       color: theme.appSidebar,
       child: CustomScrollView(
+        primary: false,
         key: const PageStorageKey('notes-sidebar'),
         slivers: [
           SliverPadding(
@@ -112,27 +115,38 @@ class Sidebar extends StatelessWidget {
                       border: const OutlineInputBorder(),
                     ),
                   ),
-                  Row(
+                  Stack(
                     children: [
-                      const Expanded(child: Text('FILES')),
-                      if (onRefresh != null)
-                        IconButton(
-                          tooltip: 'Refresh notes',
-                          onPressed: onRefresh,
-                          icon: const Icon(Icons.refresh),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              state?.updating == true
+                                  ? state!.isFiltering
+                                        ? 'Searching…'
+                                        : 'Updating notes…'
+                                  : 'FILES',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (onRefresh != null)
+                            IconButton(
+                              tooltip: 'Refresh notes',
+                              onPressed: onRefresh,
+                              icon: const Icon(Icons.refresh),
+                            ),
+                        ],
+                      ),
+                      if (state?.updating ?? false)
+                        const Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: LinearProgressIndicator(minHeight: 2),
                         ),
                     ],
                   ),
-                  if (state?.updating ?? false) ...[
-                    const LinearProgressIndicator(),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        state!.isFiltering ? 'Searching…' : 'Updating notes…',
-                        style: theme.textTheme.labelSmall,
-                      ),
-                    ),
-                  ],
                   if (state?.error != null)
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -174,6 +188,13 @@ class Sidebar extends StatelessWidget {
           else
             SliverList.builder(
               itemCount: files.length,
+              findChildIndexCallback: (key) {
+                if (key is! ValueKey<String>) return null;
+                final index = files.indexWhere(
+                  (file) => file.fullPath == key.value,
+                );
+                return index < 0 ? null : index;
+              },
               itemBuilder: (context, index) {
                 final file = files[index];
                 final subtitle = _subtitle(file);
@@ -202,7 +223,7 @@ class Sidebar extends StatelessWidget {
                                 : Icons.lock_rounded
                           : Icons.description_outlined,
                   }),
-                  title: Tooltip(
+                  title: AppTooltip(
                     message: file.title,
                     child: Text(
                       file.title,
@@ -230,7 +251,7 @@ class Sidebar extends StatelessWidget {
                   trailing: IconButton(
                     tooltip: 'More actions for ${file.title}',
                     icon: const Icon(Icons.more_vert),
-                    onPressed: () => showDialog<void>(
+                    onPressed: () => showAppDialog<void>(
                       context: context,
                       builder: (_) => FileDetailsDialog(
                         file: file,

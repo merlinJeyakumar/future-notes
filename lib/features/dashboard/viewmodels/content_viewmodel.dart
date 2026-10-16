@@ -235,6 +235,9 @@ class ContentViewModel extends BaseViewModel {
   bool _publishing = false;
   bool _autoSavePaused = false;
   bool _loading = false;
+
+  /// Note reads keep their busy guards without a dashboard-wide dimming scrim.
+  bool get isOpeningNote => _loading;
   int _activeLoads = 0;
   int _persistedCredentialGeneration = 0;
   String _observedHtml = '';

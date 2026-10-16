@@ -190,6 +190,16 @@
       "purpose": "Compact global caption, taskbar minimize, maximize/restore and confirmed safe Close; remove notification-area tray, synthetic content only.",
       "localHtml": ".stitch/designs/window-chrome-20261016.html",
       "localScreenshot": ".stitch/designs/window-chrome-20261016.png"
+    },
+    {
+      "id": "6687591b37184ef785cc968e886eba36",
+      "title": "Future Notes - Polished in-app motion",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Reversible panels, scale/fade dialogs, incoming content and reduced-motion reference. Existing layout and workflows unchanged; synthetic content only.",
+      "localHtml": ".stitch/designs/app-motion-20261016.html",
+      "localScreenshot": ".stitch/designs/app-motion-20261016.png"
     }
   ]
 }

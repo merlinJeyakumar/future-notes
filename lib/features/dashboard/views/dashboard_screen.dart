@@ -1,3 +1,5 @@
+import '../../../core/theme/app_motion.dart';
+import '../../../core/theme/app_dialog.dart';
 import '../models/note_import.dart';
 import '../widgets/note_import_dialog.dart';
 import '../models/note_list_ui_state.dart';
@@ -11,6 +13,7 @@ import 'package:file_picker/file_picker.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/content_area.dart';
 import '../widgets/desktop_attachment_drop_zone.dart';
+import '../widgets/note_opening_overlay.dart';
 import '../viewmodels/content_viewmodel.dart';
 import '../services/file_service.dart';
 import '../services/encryption_service.dart';
@@ -179,7 +182,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<DraftDecision> _showDraftDecision(DraftDecisionRequest request) async {
     if (!mounted) return DraftDecision.cancel;
-    final decision = await showDialog<DraftDecision>(
+    final decision = await showAppDialog<DraftDecision>(
       context: context,
       barrierDismissible: false,
       builder: (_) => DraftDecisionDialog(request: request),
@@ -265,7 +268,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<bool> _confirmExit() async =>
-      await showDialog<bool>(
+      await showAppDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: const Text('Exit Future Notes?'),
@@ -352,7 +355,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (_viewModel.usesOwnedStorage) {
       final reference = await _viewModel.reviewDeletion(file.path);
       if (!mounted || reference == null) return;
-      final confirmed = await showDialog<bool>(
+      final confirmed = await showAppDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: const Text('Delete Note?'),
@@ -392,7 +395,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
       final captured = review.value!;
       if (!_viewModel.exportHasVerifiedCredential(captured)) {
-        final verified = await showDialog<String>(
+        final verified = await showAppDialog<String>(
           context: context,
           builder: (_) => PasswordDialog(
             title: 'Verify password for export',
@@ -405,7 +408,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
         if (!mounted || verified == null) return;
       }
-      final options = await showDialog<ExportOptions>(
+      final options = await showAppDialog<ExportOptions>(
         context: context,
         builder: (_) => ExportOptionsDialog(
           hasAttachments: captured.note.note.attachments.isNotEmpty,
@@ -472,7 +475,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!mounted) return;
 
     // Show export options dialog
-    final options = await showDialog<ExportOptions>(
+    final options = await showAppDialog<ExportOptions>(
       context: context,
       builder: (context) => ExportOptionsDialog(
         hasAttachments: _viewModel.attachments.isNotEmpty,
@@ -539,7 +542,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final passwordController = TextEditingController();
     String? errorText;
 
-    final result = await showDialog<bool>(
+    final result = await showAppDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
@@ -648,7 +651,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     // Show confirmation dialog
-    final shouldImport = await showDialog<bool>(
+    final shouldImport = await showAppDialog<bool>(
       context: context,
       builder: (context) => ImportConfirmationDialog(
         fileName: file.name,
@@ -669,7 +672,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
         if (password == null || !mounted) return;
       }
-      final result = await showDialog<OperationResult<NoteImportResult>>(
+      final result = await showAppDialog<OperationResult<NoteImportResult>>(
         context: context,
         barrierDismissible: false,
         builder: (_) => NoteImportDialog(
@@ -756,7 +759,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<String?> _showPackPasswordDialog({bool isRequired = false}) async {
     final passwordController = TextEditingController();
 
-    final result = await showDialog<String>(
+    final result = await showAppDialog<String>(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
@@ -828,7 +831,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _showMasterSettings(BuildContext context) {
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (_) => AppSettingsDialog(
         settings: _viewModel.settings,
@@ -922,8 +925,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           Expanded(
                             child: Row(
                               children: [
-                                if (isDesktop && _isSidebarVisible)
-                                  _buildSidebar(drawer: false),
+                                if (isDesktop)
+                                  AppReveal(
+                                    visible: _isSidebarVisible,
+                                    axis: Axis.horizontal,
+                                    duration: AppMotion.dialogIn,
+                                    reverseDuration: AppMotion.dialogOut,
+                                    child: _buildSidebar(drawer: false),
+                                  ),
                                 Expanded(
                                   child: ContentArea(viewModel: _viewModel),
                                 ),
@@ -933,7 +942,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           if (isDesktop) _buildSidebarToggle(theme),
                         ],
                       ),
-                      if (_viewModel.isBusy)
+                      if (_viewModel.isBusy && _viewModel.isOpeningNote)
+                        const Positioned.fill(child: NoteOpeningOverlay())
+                      else if (_viewModel.isBusy)
                         Container(
                           color: Colors.black54,
                           child: Center(

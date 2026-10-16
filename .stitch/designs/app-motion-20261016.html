@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Future Notes - Desktop Workspace</title>
+<!-- Google Fonts: Public Sans & Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS v3 with Forms & Container Queries -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            surface: {
+              DEFAULT: "#111318",
+              container: "#161920",
+              "container-low": "#13151c",
+              "container-high": "#1c202a",
+              "container-highest": "#242936"
+            },
+            "on-surface": "#e2e6ee",
+            "on-surface-variant": "#9aa2b2",
+            outline: "#343b4c",
+            "outline-variant": "#252b38",
+            primary: {
+              DEFAULT: "#4299e1",
+              container: "#1e3a5f"
+            },
+            "on-primary": "#ffffff",
+            "on-primary-container": "#bee3f8",
+            secondary: {
+              DEFAULT: "#2b3240",
+              container: "#232938"
+            },
+            "on-secondary-container": "#dce3f1"
+          },
+          borderRadius: {
+            DEFAULT: "0.25rem",
+            lg: "0.5rem",
+            xl: "0.75rem",
+            full: "9999px"
+          },
+          fontFamily: {
+            headline: ["Public Sans", "sans-serif"],
+            display: ["Public Sans", "sans-serif"],
+            body: ["Public Sans", "sans-serif"],
+            label: ["Public Sans", "sans-serif"]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+      font-size: 18px;
+      line-height: 1;
+      display: inline-block;
+      user-select: none;
+      vertical-align: middle;
+    }
+    .material-symbols-outlined.fill {
+      font-variation-settings: 'FILL' 1;
+    }
+    /* Custom subtle scrollbars for Windows desktop feel */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #111318;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #252b38;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #343b4c;
+    }
+  </style>
+<style id="fn-motion-system">
+  /* Motion timing tokens */
+  :root {
+    --fn-ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);
+    --fn-ease-exit: cubic-bezier(0.7, 0, 0.84, 0);
+    --fn-menu-ease-in: cubic-bezier(0, 0, 0.2, 1);
+    --fn-menu-ease-out: cubic-bezier(0.4, 0, 1, 1);
+  }
+
+  /* Sidebar horizontal clipped reveal */
+  #sidebar-panel {
+    transition: width 220ms var(--fn-ease-entrance), margin-left 220ms var(--fn-ease-entrance), opacity 180ms ease-out;
+    will-change: width, margin-left;
+  }
+  #sidebar-panel.fn-sidebar-closed {
+    width: 0px !important;
+    min-width: 0px !important;
+    margin-left: 0px !important;
+    overflow: hidden !important;
+    border-right-width: 0px !important;
+    opacity: 0;
+    transition: width 160ms var(--fn-ease-exit), margin-left 160ms var(--fn-ease-exit), opacity 140ms ease-in;
+    pointer-events: none;
+  }
+
+  /* Modal backdrop fade */
+  .fn-modal-backdrop {
+    transition: opacity 220ms var(--fn-ease-entrance), visibility 220ms;
+    will-change: opacity;
+  }
+  .fn-modal-backdrop.fn-closed {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    transition: opacity 160ms var(--fn-ease-exit), visibility 160ms !important;
+  }
+
+  /* Modal dialog card entrance (220ms 0.97->1.0) & exit (160ms 1.0->0.97) */
+  .fn-modal-card {
+    transition: transform 220ms var(--fn-ease-entrance), opacity 220ms var(--fn-ease-entrance);
+    transform: scale(1) translateY(0);
+    opacity: 1;
+    will-change: transform, opacity;
+  }
+  .fn-modal-backdrop.fn-closed .fn-modal-card {
+    transform: scale(0.97) translateY(4px) !important;
+    opacity: 0 !important;
+    transition: transform 160ms var(--fn-ease-exit), opacity 160ms var(--fn-ease-exit) !important;
+  }
+
+  /* Menus & popups (120ms ease-out / 90ms ease-in) */
+  .fn-popup-menu {
+    transition: transform 120ms var(--fn-menu-ease-in), opacity 120ms var(--fn-menu-ease-in);
+    transform-origin: top right;
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+  .fn-popup-menu.fn-popup-closed {
+    transform: scale(0.96) translateY(-4px) !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transition: transform 90ms var(--fn-menu-ease-out), opacity 90ms var(--fn-menu-ease-out) !important;
+  }
+
+  /* Attachment dock height expansion & disclosure chevron transition */
+  #attachment-dock {
+    transition: max-height 200ms cubic-bezier(0.16, 1, 0.3, 1), padding 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: max-height;
+  }
+  #dock-toggle-icon {
+    transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    display: inline-block;
+  }
+  #dock-toggle-icon.fn-dock-rotated {
+    transform: rotate(180deg);
+  }
+
+  /* Incoming editor content lift (160ms ease-out, 6px upward lift) */
+  @keyframes fnContentLift {
+    0% {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .fn-content-enter {
+    animation: fnContentLift 160ms cubic-bezier(0, 0, 0.2, 1) forwards;
+    will-change: opacity, transform;
+  }
+
+  /* Strict prefers-reduced-motion support */
+  @media (prefers-reduced-motion: reduce) {
+    *, ::before, ::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+    .fn-content-enter {
+      animation: none !important;
+      transform: none !important;
+    }
+    .fn-modal-card, .fn-popup-menu {
+      transform: none !important;
+    }
+  }
+</style></head>
+<body class="bg-[#111318] text-on-surface font-body antialiased select-none h-screen flex flex-col overflow-hidden">
+<!-- ==================== 1. WINDOWS TITLEBAR & TOP SYSTEM SHELL ==================== -->
+<header class="h-9 bg-[#13151c] border-b border-outline-variant/50 flex items-center justify-between shrink-0 select-none z-50 relative" style="height: 36px;"><div class="flex items-center pl-3 shrink-0" style="-webkit-app-region: no-drag;"><span class="text-xs font-medium text-slate-300 tracking-tight font-sans">Future Notes</span></div><div class="flex-1 h-full" style="-webkit-app-region: drag; app-region: drag;"></div><div class="flex items-center h-full shrink-0" style="-webkit-app-region: no-drag;"><button class="flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/50 focus:outline-none transition-colors" style="width: 46px; height: 36px;" title="Minimize to Windows taskbar" type="button"><svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="1.5" viewbox="0 0 10 10"><path d="M1 5h8"></path></svg></button><button class="flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/50 focus:outline-none transition-colors" style="width: 46px; height: 36px;" title="Maximize" type="button"><svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="1.2" viewbox="0 0 10 10"><rect height="7" width="7" x="1.5" y="1.5"></rect></svg></button><button class="flex items-center justify-center text-slate-400 hover:text-white hover:bg-[#c42b1c] focus:outline-none transition-colors" style="width: 46px; height: 36px;" title="Close (Exit Future Notes)" type="button"><svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="1.2" viewbox="0 0 10 10"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"></path></svg></button></div></header>
+<!-- ==================== MAIN WORKSPACE AREA ==================== -->
+<div class="flex-1 flex overflow-hidden relative">
+<!-- ==================== 2. LEFT NOTES SIDEBAR (~250px) ==================== -->
+<aside class="w-[252px] bg-[#13151c] border-r border-outline-variant/40 flex flex-col shrink-0" id="sidebar-panel">
+<!-- Sidebar Top Action & Search -->
+<div class="p-3 border-b border-outline-variant/30 space-y-2.5">
+<!-- Prominent labeled button '+ New note' -->
+<button class="w-full flex items-center justify-center gap-2 py-1.5 px-3 rounded-md bg-primary hover:bg-[#3b87c8] active:scale-[0.99] text-white text-xs font-semibold shadow-sm transition-all">
+<span class="material-symbols-outlined" style="font-size: 16px;">add</span>
+<span>+ New note</span>
+</button>
+<!-- Persistent 'Search notes' input box -->
+<div class="relative">
+<span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm pointer-events-none">search</span>
+<input class="w-full bg-[#181c24] border border-outline-variant/50 rounded-md pl-8 pr-3 py-1.5 text-xs text-on-surface placeholder:text-slate-500 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors" placeholder="Search notes" type="text"/>
+</div>
+</div>
+<!-- Notes List -->
+<div class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5"><div class="sidebar-note-item group relative flex flex-col p-2 rounded-lg bg-surface-container-high/90 border border-primary/40 shadow-sm cursor-pointer transition-colors" onclick="switchNote('Project notes', 'Draft your ideas here', false)"><div class="flex items-center justify-between mb-0.5"><span class="font-medium text-[11px] text-white truncate pr-1">Project notes</span></div><div class="flex items-center justify-between text-[10px] text-slate-400"><span class="truncate text-slate-300">Draft your ideas here</span><span class="shrink-0 text-[9px] text-slate-400 font-mono">Today, 14:15</span></div><div class="active-bar absolute left-0 top-2 bottom-2 w-1 bg-primary rounded-r"></div></div><div class="sidebar-note-item group flex flex-col p-2 rounded-lg hover:bg-surface-container-high/50 border border-transparent cursor-pointer transition-colors" onclick="switchNote('Meeting notes', 'Sprint planning &amp; roadmap sync', false)"><div class="flex items-center justify-between mb-0.5"><span class="font-normal text-[11px] text-slate-300 truncate pr-1">Meeting notes</span></div><div class="flex items-center justify-between text-[10px] text-slate-500"><span class="truncate">Sprint planning &amp; roadmap sync</span><span class="shrink-0 text-[9px] font-mono">Yesterday</span></div></div><div class="sidebar-note-item group flex flex-col p-2 rounded-lg hover:bg-surface-container-high/50 border border-transparent cursor-pointer transition-colors" onclick="switchNote('Project ideas', 'Desktop widget &amp; quick notes', false)"><div class="flex items-center justify-between mb-0.5"><span class="font-normal text-[11px] text-slate-300 truncate pr-1">Project ideas</span></div><div class="flex items-center justify-between text-[10px] text-slate-500"><span class="truncate">Desktop widget &amp; quick notes</span><span class="shrink-0 text-[9px] font-mono">Oct 12</span></div></div><div class="sidebar-note-item group flex flex-col p-2 rounded-lg hover:bg-surface-container-high/50 border border-transparent cursor-pointer transition-colors" onclick="switchNote('Reading list', 'Articles and documentation', false)"><div class="flex items-center justify-between mb-0.5"><span class="font-normal text-[11px] text-slate-300 truncate pr-1">Reading list</span></div><div class="flex items-center justify-between text-[10px] text-slate-500"><span class="truncate">Articles and documentation</span><span class="shrink-0 text-[9px] font-mono">Sep 28</span></div></div><div class="sidebar-note-item group flex flex-col p-2 rounded-lg hover:bg-surface-container-high/50 border border-transparent cursor-pointer transition-colors" onclick="switchNote('Personal draft', 'Locked note', true)"><div class="flex items-center justify-between mb-0.5"><span class="font-normal text-[11px] text-slate-300 truncate pr-1">Personal draft</span><span class="material-symbols-outlined text-amber-400/90 text-[11px] shrink-0" title="Locked note">lock</span></div><div class="flex items-center justify-between text-[10px] text-slate-500"><span class="truncate italic text-slate-500">Locked note</span><span class="shrink-0 text-[9px] font-mono">Aug 14</span></div></div></div>
+<!-- Sidebar Bottom Docked Actions -->
+<div class="border-t border-outline-variant/40 bg-[#111318] flex flex-col shrink-0"><div class="p-1.5 space-y-0.5"><button class="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-surface-container-high text-[11px] text-on-surface-variant hover:text-white transition-colors"><span class="material-symbols-outlined" style="font-size: 15px;">file_upload</span><span>Import note</span></button><button class="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-surface-container-high text-[11px] text-on-surface-variant hover:text-white transition-colors" onclick="openSettingsDialog()"><span class="material-symbols-outlined" style="font-size: 15px;">settings</span><span>App settings</span></button></div><div class="h-8 border-t border-outline-variant/30 px-2 flex items-center justify-between bg-[#12151b]"><button aria-label="Hide notes" class="w-7 h-7 flex items-center justify-center rounded-md hover:bg-surface-container-high/60 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer" onclick="toggleSidebar()" title="Hide notes (Ctrl+B)"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.75" viewbox="0 0 24 24"><rect height="18" rx="2" width="18" x="3" y="3"></rect><path d="M9 3v18"></path></svg></button><span class="text-[10px] text-slate-500 font-mono">Ctrl+B</span></div></div>
+</aside>
+<!-- ==================== 3 & 4. MAIN EDITING CANVAS ==================== -->
+<main class="flex-1 flex flex-col bg-[#111318] overflow-hidden"><div class="hidden h-7 bg-[#13151c] border-b border-outline-variant/40 px-3 items-center gap-2 select-none z-10 shrink-0" id="sidebar-reopen-bar"><button class="flex items-center gap-1.5 text-[11px] text-slate-300 hover:text-white px-2 py-0.5 rounded hover:bg-surface-container-high transition-colors" onclick="toggleSidebar(true)"><span class="material-symbols-outlined text-[15px] text-primary">side_navigation</span><span>Show notes (Ctrl+B)</span></button></div>
+<!-- 3. MAIN NOTE HEADER -->
+<div class="h-14 px-6 border-b border-outline-variant/40 bg-[#13151c]/70 flex items-center justify-between shrink-0"><div class="flex items-center gap-2.5 min-w-0 flex-1"><input class="bg-transparent text-base font-semibold tracking-tight text-white border-0 focus:ring-1 focus:ring-primary rounded px-1.5 py-0.5 w-36 truncate hover:bg-[#181c24] focus:bg-[#181c24] transition-colors" type="text" value="Project notes"/><div class="h-3 w-px bg-outline-variant/60 shrink-0"></div><span class="text-[11px] text-slate-400 shrink-0">Created Oct 14 <span class="text-slate-500">•</span> Edited today, 14:15</span><div class="h-3 w-px bg-outline-variant/60 shrink-0"></div><div class="flex items-center p-0.5 rounded-md bg-[#181c24] border border-outline-variant/60 text-[11px]"><button class="px-2 py-0.5 rounded text-on-surface-variant hover:text-white transition-colors">Rich text</button><button class="px-2 py-0.5 rounded bg-secondary text-white font-medium shadow-sm transition-all flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-primary"></span><span>HTML</span></button></div></div><div class="flex items-center gap-2 shrink-0"><button class="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-slate-300 hover:text-white bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant/50 transition-colors" title="Format HTML markup"><span class="material-symbols-outlined text-[14px] text-primary">auto_fix_high</span><span>Format HTML</span></button><button class="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-slate-300 hover:text-white bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant/50 transition-colors" onclick="openAttachmentPreview('sample-document.pdf', 'document')"><span class="material-symbols-outlined text-[14px]">attach_file</span><span>Attach file</span></button><div class="relative"><button class="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-slate-300 hover:text-white bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant/50 transition-colors" id="note-actions-trigger" onclick="toggleNoteActionsMenu(event)" title="Note actions"><span class="material-symbols-outlined text-[14px]">tune</span><span>Note actions</span><span class="material-symbols-outlined text-[12px]">arrow_drop_down</span></button><div class="fn-popup-menu fn-popup-closed absolute right-0 top-full mt-1.5 w-44 bg-[#181c24] border border-outline-variant/70 rounded-lg shadow-2xl p-1 z-50 text-[11px] space-y-0.5" id="note-actions-popup"><button class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded hover:bg-surface-container-high text-slate-300 hover:text-white text-left transition-colors" onclick="alertNoteStatus('Exported HTML markup'); closeNoteActionsMenu();"><span class="material-symbols-outlined text-sm text-primary">download</span><span>Export note</span></button><button class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded hover:bg-surface-container-high text-slate-300 hover:text-white text-left transition-colors" onclick="alertNoteStatus('Note duplicated'); closeNoteActionsMenu();"><span class="material-symbols-outlined text-sm text-slate-400">content_copy</span><span>Duplicate note</span></button><button class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded hover:bg-surface-container-high text-slate-300 hover:text-white text-left transition-colors" onclick="openSettingsDialog(); closeNoteActionsMenu();"><span class="material-symbols-outlined text-sm text-slate-400">settings</span><span>Note settings</span></button><div class="h-px bg-outline-variant/50 my-1"></div><button class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded hover:bg-rose-950/40 text-rose-300 text-left transition-colors" onclick="lockCurrentNote(); closeNoteActionsMenu();"><span class="material-symbols-outlined text-sm text-rose-400">lock</span><span>Lock this note</span></button></div></div><button class="flex items-center gap-1 px-3 py-1 rounded-md text-[11px] font-medium text-slate-400 bg-surface-container-high/60 border border-outline-variant/50 opacity-40 cursor-not-allowed pointer-events-none transition-all" disabled=""><span class="material-symbols-outlined text-[14px]">save</span><span>Save</span></button></div></div>
+<!-- 4. WRITING AREA (DOMINATES USABLE SCREEN HEIGHT) -->
+<div class="flex-1 flex flex-col overflow-hidden">
+<!-- Formatting Toolbar -->
+<div class="h-9 px-6 bg-[#161920] border-b border-outline-variant/30 flex items-center gap-1 shrink-0 text-slate-400"><div class="flex items-center gap-0.5"><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Undo (Ctrl+Z)"><span class="material-symbols-outlined text-xs">undo</span></button><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Redo (Ctrl+Y)"><span class="material-symbols-outlined text-xs">redo</span></button></div><div class="h-3 w-px bg-outline-variant/60 mx-1"></div><div class="flex items-center gap-1"><button class="flex items-center gap-1 px-1.5 py-0.5 hover:bg-[#202532] hover:text-white rounded text-[11px] transition-colors" title="Heading Level"><span class="font-medium text-[10px] text-slate-300">Paragraph</span><span class="material-symbols-outlined text-[11px]">expand_more</span></button><button class="flex items-center gap-1 px-1.5 py-0.5 hover:bg-[#202532] hover:text-white rounded text-[11px] transition-colors" title="Font Size"><span class="font-medium text-[10px] text-slate-300">14px</span><span class="material-symbols-outlined text-[11px]">expand_more</span></button></div><div class="h-3 w-px bg-outline-variant/60 mx-1"></div><div class="flex items-center gap-0.5"><button class="p-1 bg-[#202532] text-white rounded transition-colors" title="Bold (Ctrl+B)"><span class="material-symbols-outlined text-xs">format_bold</span></button><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Italic (Ctrl+I)"><span class="material-symbols-outlined text-xs">format_italic</span></button><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Underline (Ctrl+U)"><span class="material-symbols-outlined text-xs">format_underlined</span></button><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Strikethrough"><span class="material-symbols-outlined text-xs">strikethrough_s</span></button></div><div class="h-3 w-px bg-outline-variant/60 mx-1"></div><div class="flex items-center gap-0.5"><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Text color"><span class="material-symbols-outlined text-xs">format_color_text</span></button><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Highlight color"><span class="material-symbols-outlined text-xs">border_color</span></button></div><div class="h-3 w-px bg-outline-variant/60 mx-1"></div><div class="flex items-center gap-0.5"><button class="p-1 bg-[#202532] text-white rounded transition-colors" title="Align left"><span class="material-symbols-outlined text-xs">format_align_left</span></button><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Align center"><span class="material-symbols-outlined text-xs">format_align_center</span></button><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Align right"><span class="material-symbols-outlined text-xs">format_align_right</span></button></div><div class="h-3 w-px bg-outline-variant/60 mx-1"></div><div class="flex items-center gap-0.5"><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Bulleted list"><span class="material-symbols-outlined text-xs">format_list_bulleted</span></button><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Numbered list"><span class="material-symbols-outlined text-xs">format_list_numbered</span></button><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Checklist"><span class="material-symbols-outlined text-xs">checklist</span></button></div><div class="h-3 w-px bg-outline-variant/60 mx-1"></div><div class="flex items-center gap-0.5"><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Quote"><span class="material-symbols-outlined text-xs">format_quote</span></button><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Code block"><span class="material-symbols-outlined text-xs">code</span></button><button class="p-1 hover:bg-[#202532] hover:text-white rounded transition-colors" title="Insert link"><span class="material-symbols-outlined text-xs">link</span></button></div></div>
+<!-- Document Viewport Content -->
+<div class="flex-1 overflow-hidden relative select-text flex flex-col bg-[#111318] fn-content-enter" id="note-editor-viewport"><div class="flex-1 overflow-y-auto flex font-mono text-[13px] leading-6"><div class="w-12 py-4 select-none text-right pr-4 text-slate-600 bg-[#12151c]/80 border-r border-outline-variant/40 flex flex-col shrink-0 font-mono text-xs"><span class="leading-6">1</span><span class="leading-6">2</span><span class="leading-6">3</span><span class="leading-6">4</span><span class="leading-6">5</span><span class="leading-6">6</span><span class="leading-6">7</span><span class="leading-6">8</span><span class="leading-6">9</span><span class="leading-6">10</span><span class="leading-6">11</span><span class="leading-6">12</span></div><div class="flex-1 p-4 pl-6 text-slate-200 overflow-x-auto"><div class="leading-6"><span class="text-slate-500">&lt;</span><span class="text-primary font-medium">section</span> <span class="text-cyan-400">class</span><span class="text-slate-400">=</span><span class="text-emerald-400">"note-container"</span><span class="text-slate-500">&gt;</span></div><div class="leading-6 pl-4"><span class="text-slate-500">&lt;</span><span class="text-primary font-medium">h2</span><span class="text-slate-500">&gt;</span><span class="text-white font-medium">Sample note</span><span class="text-slate-500">&lt;/</span><span class="text-primary font-medium">h2</span><span class="text-slate-500">&gt;</span></div><div class="leading-6 pl-4"><span class="text-slate-500">&lt;</span><span class="text-primary font-medium">p</span><span class="text-slate-500">&gt;</span><span class="text-slate-300">Draft text.</span><span class="text-slate-500">&lt;/</span><span class="text-primary font-medium">p</span><span class="text-slate-500">&gt;</span></div><div class="leading-6 pl-4"><span class="text-slate-500">&lt;</span><span class="text-primary font-medium">div</span> <span class="text-cyan-400">class</span><span class="text-slate-400">=</span><span class="text-emerald-400">"meta-block"</span><span class="text-slate-500">&gt;</span></div><div class="leading-6 pl-8"><span class="text-slate-500">&lt;</span><span class="text-primary font-medium">span</span><span class="text-slate-500">&gt;</span><span class="text-slate-400">Last updated locally</span><span class="text-slate-500">&lt;/</span><span class="text-primary font-medium">span</span><span class="text-slate-500">&gt;</span></div><div class="leading-6 pl-4"><span class="text-slate-500">&lt;/</span><span class="text-primary font-medium">div</span><span class="text-slate-500">&gt;</span></div><div class="leading-6"><span class="text-slate-500">&lt;/</span><span class="text-primary font-medium">section</span><span class="text-slate-500">&gt;</span></div><div class="mt-8 pt-4 border-t border-outline-variant/30 text-xs font-sans text-slate-500 flex items-center gap-2"><span class="material-symbols-outlined text-sm">check_circle</span><span>HTML syntax validated • UTF-8 • Unlocked and ready for editing</span></div></div></div></div>
+</div>
+<!-- ==================== 5. BOTTOM ATTACHMENT DOCK (~90-100px) ==================== -->
+<footer class="relative bg-[#13151c] border-t border-outline-variant/50 px-6 py-2.5 flex flex-col shrink-0 transition-all duration-300" id="attachment-dock">
+<!-- Dock Header -->
+<div class="flex items-center justify-between text-xs text-slate-400 mb-2.5">
+<div class="flex items-center gap-3"><button class="flex items-center gap-1 px-2 py-0.5 rounded bg-primary/20 hover:bg-primary/30 text-primary border border-primary/40 text-[10px] font-semibold transition-colors cursor-pointer" onclick="document.getElementById('all-attachments-modal').classList.remove('hidden'); const inp = document.getElementById('modal-search-input'); if(inp){inp.focus(); inp.select();}" type="button"><span class="material-symbols-outlined text-[13px]">grid_view</span><span>Show all</span></button>
+<div class="flex items-center gap-1.5 cursor-pointer hover:text-slate-200 transition-colors" onclick="toggleDockExpansion()">
+<span class="material-symbols-outlined text-[15px] text-slate-300" id="dock-toggle-icon">keyboard_arrow_down</span>
+<span class="font-semibold text-slate-200 text-[11px]">Attachments (6)</span>
+<span class="text-slate-500 text-[10px]">•</span>
+<span class="text-primary font-medium text-[11px]">1 processing</span>
+<span class="text-slate-500 text-[10px]">•</span>
+<span class="text-rose-400 font-medium text-[11px]">1 failed</span>
+</div>
+<div class="h-3 w-px bg-outline-variant/60"></div>
+<!-- View mode switch pill -->
+<button class="flex items-center gap-1 px-2 py-0.5 rounded bg-surface-container-high/60 hover:bg-surface-container-high border border-outline-variant/40 text-[10px] text-slate-300 hover:text-white transition-colors" onclick="toggleDockExpansion()" title="Toggle compact thumbnail vs expanded preview mode" type="button">
+<span class="material-symbols-outlined text-[13px] text-primary">view_comfy</span>
+<span id="view-mode-text">Expanded</span>
+</button>
+</div>
+<div class="flex items-center gap-2">
+<button class="flex items-center gap-1 text-[11px] font-medium text-slate-300 hover:text-white transition-colors px-2.5 py-1 rounded bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant/50">
+<span class="material-symbols-outlined text-[13px]">add</span>
+<span>+ Add files</span>
+</button>
+</div>
+</div>
+<!-- 1. EXPANDED PREVIEW MODE (Default visual display) -->
+<div class="grid grid-cols-5 gap-3" id="attachment-dock-expanded">
+<!-- Card 1: demo-video.mp4 -->
+<div class="bg-[#181c24] border border-outline-variant/60 rounded-md p-2 flex flex-col justify-between hover:border-slate-500/50 transition-colors group relative h-28">
+<div class="flex items-start justify-between gap-1">
+<div class="flex items-center gap-2 min-w-0">
+<div class="w-9 h-9 rounded bg-[#202532] border border-outline-variant/80 flex items-center justify-center text-primary shrink-0 relative overflow-hidden">
+<span class="material-symbols-outlined text-base">videocam</span>
+<div class="absolute bottom-0 right-0 left-0 h-1 bg-primary/40"></div>
+</div>
+<div class="min-w-0">
+<div class="text-xs font-medium text-slate-200 truncate" title="demo-video.mp4">demo-video.mp4</div>
+<div class="text-[10px] text-slate-400 font-mono">18.4 MB · MP4</div>
+</div>
+</div>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735] transition-colors shrink-0" title="More options">
+<span class="material-symbols-outlined text-sm">more_vert</span>
+</button>
+</div>
+<div class="flex items-center justify-between mt-auto pt-1.5 border-t border-outline-variant/30 text-[10px]">
+<span class="inline-flex items-center gap-1 text-emerald-400 font-medium"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Ready</span>
+<button class="px-2 py-0.5 rounded bg-[#222735] hover:bg-[#2b3244] text-[10px] font-medium text-slate-200 transition-colors" onclick="openAttachmentPreview('demo-video.mp4', 'video')">Open</button>
+</div>
+</div>
+<!-- Card 2: sample-image.png with synthetic cached graphic -->
+<div class="bg-[#181c24] border border-outline-variant/60 rounded-md p-2 flex flex-col justify-between hover:border-slate-500/50 transition-colors group relative h-28">
+<div class="flex items-start justify-between gap-1">
+<div class="flex items-center gap-2 min-w-0">
+<div class="w-9 h-9 rounded bg-[#1c2a38] border border-teal-500/30 flex items-center justify-center text-teal-400 shrink-0 relative overflow-hidden">
+<svg class="w-6 h-6 text-teal-400/80" fill="currentColor" viewbox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"></path></svg>
+</div>
+<div class="min-w-0">
+<div class="text-xs font-medium text-slate-200 truncate" title="sample-image.png">sample-image.png</div>
+<div class="text-[10px] text-slate-400 font-mono">2.1 MB · PNG</div>
+</div>
+</div>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735] transition-colors shrink-0" title="More options">
+<span class="material-symbols-outlined text-sm">more_vert</span>
+</button>
+</div>
+<div class="flex items-center justify-between mt-auto pt-1.5 border-t border-outline-variant/30 text-[10px]">
+<span class="inline-flex items-center gap-1 text-emerald-400 font-medium"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Ready</span>
+<button class="px-2 py-0.5 rounded bg-[#222735] hover:bg-[#2b3244] text-[10px] font-medium text-slate-200 transition-colors" onclick="openAttachmentPreview('sample-image.png', 'image')">Open</button>
+</div>
+</div>
+<!-- Card 3: sample-document.pdf (INLINE PROCESSING PROGRESS) -->
+<div class="bg-[#1a1e28] border border-primary/50 rounded-md p-2 flex flex-col justify-between shadow-inner h-28 relative">
+<div class="flex items-start justify-between gap-1">
+<div class="flex items-center gap-2 min-w-0 flex-1">
+<div class="w-9 h-9 rounded bg-primary/20 border border-primary/30 flex items-center justify-center text-primary shrink-0 animate-pulse">
+<span class="material-symbols-outlined text-base">sync</span>
+</div>
+<div class="min-w-0 flex-1">
+<div class="text-xs font-medium text-slate-200 truncate" title="sample-document.pdf">sample-document.pdf</div>
+<div class="flex items-center justify-between text-[10px] text-primary font-semibold mt-0.5">
+<span>Preparing</span>
+<span class="font-mono">42%</span>
+</div>
+</div>
+</div>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735] transition-colors shrink-0" title="More options">
+<span class="material-symbols-outlined text-sm">more_vert</span>
+</button>
+</div>
+<div class="space-y-1 mt-auto pt-1">
+<div class="w-full bg-[#12151b] rounded-full h-1.5 overflow-hidden border border-outline-variant/40">
+<div class="bg-primary h-full rounded-full transition-all duration-300" style="width: 42%;"></div>
+</div>
+<div class="flex items-center justify-between text-[9px]">
+<span class="font-mono text-slate-400">420 MiB / 1.0 GiB</span>
+<button class="text-rose-400 hover:text-rose-300 font-medium hover:underline">Cancel</button>
+</div>
+</div>
+</div>
+<!-- Card 4: sample-archive.zip (FAILED STATE WITH RETRY) -->
+<div class="bg-[#20181c] border border-rose-500/40 rounded-md p-2 flex flex-col justify-between h-28 relative">
+<div class="flex items-start justify-between gap-1">
+<div class="flex items-center gap-2 min-w-0">
+<div class="w-9 h-9 rounded bg-rose-950/40 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0">
+<span class="material-symbols-outlined text-base">error_outline</span>
+</div>
+<div class="min-w-0">
+<div class="text-xs font-medium text-slate-200 truncate" title="sample-archive.zip">sample-archive.zip</div>
+<div class="text-[10px] text-rose-400 font-medium">Sync failed · Timeout</div>
+</div>
+</div>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735] transition-colors shrink-0" title="More options">
+<span class="material-symbols-outlined text-sm">more_vert</span>
+</button>
+</div>
+<div class="flex items-center justify-between mt-auto pt-1.5 border-t border-rose-500/20 text-[10px]">
+<button class="px-2 py-0.5 rounded bg-rose-950/50 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 text-[10px] font-medium transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-[11px]">refresh</span><span>Retry</span>
+</button>
+<button class="text-slate-400 hover:text-slate-200 text-[10px] transition-colors">Cancel</button>
+</div>
+</div>
+<!-- Card 5: '+2 more' OVERFLOW TILE -->
+<div class="bg-[#161a22] border border-dashed border-outline-variant/80 hover:border-primary/60 rounded-md p-2 flex flex-col items-center justify-center cursor-pointer hover:bg-surface-container-high/60 transition-all text-center group h-28" onclick="document.getElementById('all-attachments-modal').classList.remove('hidden'); const inp = document.getElementById('modal-search-input'); if(inp){inp.focus(); inp.select();}">
+<div class="w-8 h-8 rounded-full bg-[#202532] border border-outline-variant flex items-center justify-center text-primary mb-1 group-hover:scale-105 transition-transform">
+<span class="material-symbols-outlined text-base">grid_view</span>
+</div>
+<div class="text-xs font-semibold text-slate-200 group-hover:text-primary transition-colors">+2 more</div>
+<div class="text-[9px] text-slate-400 mt-0.5">6 total files · View all</div>
+</div>
+</div>
+<!-- 2. COLLAPSED THUMBNAIL MODE (Compact square tiles view) -->
+<div class="hidden grid grid-cols-5 gap-3" id="attachment-dock-collapsed">
+<!-- Compact Tile 1: demo-video.mp4 -->
+<div class="h-12 bg-[#181c24] border border-outline-variant/60 rounded-md px-2.5 py-1 flex items-center justify-between hover:border-slate-500/50 transition-colors group relative">
+<div class="flex items-center gap-2 min-w-0">
+<div class="w-7 h-7 rounded bg-[#202532] border border-outline-variant/80 flex items-center justify-center text-primary shrink-0">
+<span class="material-symbols-outlined text-sm">videocam</span>
+</div>
+<div class="min-w-0">
+<div class="text-[11px] font-medium text-slate-200 truncate">demo-video.mp4</div>
+<div class="text-[9px] text-emerald-400 font-mono">Ready · 18.4 MB</div>
+</div>
+</div>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735] transition-colors shrink-0" title="More options">
+<span class="material-symbols-outlined text-sm">more_vert</span>
+</button>
+</div>
+<!-- Compact Tile 2: sample-image.png -->
+<div class="h-12 bg-[#181c24] border border-outline-variant/60 rounded-md px-2.5 py-1 flex items-center justify-between hover:border-slate-500/50 transition-colors group relative">
+<div class="flex items-center gap-2 min-w-0">
+<div class="w-7 h-7 rounded bg-[#1c2a38] border border-teal-500/30 flex items-center justify-center text-teal-400 shrink-0">
+<span class="material-symbols-outlined text-sm">image</span>
+</div>
+<div class="min-w-0">
+<div class="text-[11px] font-medium text-slate-200 truncate">sample-image.png</div>
+<div class="text-[9px] text-emerald-400 font-mono">Ready · 2.1 MB</div>
+</div>
+</div>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735] transition-colors shrink-0" title="More options">
+<span class="material-symbols-outlined text-sm">more_vert</span>
+</button>
+</div>
+<!-- Compact Tile 3: sample-document.pdf (Processing with mini radial/indicator) -->
+<div class="h-12 bg-[#1a1e28] border border-primary/50 rounded-md px-2.5 py-1 flex items-center justify-between relative">
+<div class="flex items-center gap-2 min-w-0">
+<div class="w-7 h-7 rounded bg-primary/20 border border-primary/40 flex items-center justify-center text-primary shrink-0 relative animate-pulse">
+<span class="material-symbols-outlined text-sm">sync</span>
+</div>
+<div class="min-w-0">
+<div class="text-[11px] font-medium text-slate-200 truncate">sample-document.pdf</div>
+<div class="text-[9px] text-primary font-mono">42% · 420 MiB</div>
+</div>
+</div>
+<div class="flex items-center gap-0.5 shrink-0">
+<button class="text-[10px] text-rose-400 hover:text-rose-300 font-medium px-1" title="Cancel processing">✕</button>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735] transition-colors" title="More options">
+<span class="material-symbols-outlined text-sm">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Compact Tile 4: sample-archive.zip (Failed with indicator) -->
+<div class="h-12 bg-[#20181c] border border-rose-500/40 rounded-md px-2.5 py-1 flex items-center justify-between relative">
+<div class="flex items-center gap-2 min-w-0">
+<div class="w-7 h-7 rounded bg-rose-950/40 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0">
+<span class="material-symbols-outlined text-sm">error_outline</span>
+</div>
+<div class="min-w-0">
+<div class="text-[11px] font-medium text-slate-200 truncate">sample-archive.zip</div>
+<div class="text-[9px] text-rose-400 font-mono">Failed · Retry</div>
+</div>
+</div>
+<div class="flex items-center gap-0.5 shrink-0">
+<button class="text-[10px] text-rose-300 hover:text-white px-1" title="Retry">↻</button>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735] transition-colors" title="More options">
+<span class="material-symbols-outlined text-sm">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Compact Tile 5: '+2 more' overflow tile -->
+<div class="h-12 bg-[#161a22] border border-dashed border-outline-variant/80 hover:border-primary/60 rounded-md px-2.5 py-1 flex items-center justify-center cursor-pointer hover:bg-surface-container-high/60 transition-all text-center group" onclick="document.getElementById('all-attachments-modal').classList.remove('hidden'); const inp = document.getElementById('modal-search-input'); if(inp){inp.focus(); inp.select();}">
+<span class="material-symbols-outlined text-sm text-primary mr-1">grid_view</span>
+<span class="text-[11px] font-semibold text-slate-200 group-hover:text-primary transition-colors">+2 more (6)</span>
+</div>
+</div>
+<!-- 3. OVERFLOW ATTACHMENT GALLERY FLYOUT / MODAL SHEET -->
+<div class="hidden absolute bottom-full left-6 right-6 mb-2 bg-[#181c24] border border-outline rounded-lg shadow-xl z-50 p-4 max-h-80 overflow-y-auto backdrop-blur-md" id="overflow-gallery-flyout">
+<div class="flex items-center justify-between pb-2 mb-3 border-b border-outline-variant/50">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-base">folder_open</span>
+<span class="font-semibold text-xs text-white">All Attachments (6 files)</span>
+<span class="text-[10px] text-slate-400 font-mono">· 4 attached, 1 processing, 1 failed</span>
+</div>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735] transition-colors" onclick="document.getElementById('overflow-gallery-flyout').classList.add('hidden');" type="button">
+<span class="material-symbols-outlined text-sm">close</span>
+</button>
+</div>
+<div class="grid grid-cols-3 gap-2.5">
+<!-- Item 1 -->
+<div class="bg-[#13151c] border border-outline-variant/50 rounded p-2 flex items-center justify-between hover:border-slate-500 transition-colors">
+<div class="flex items-center gap-2 min-w-0">
+<span class="material-symbols-outlined text-primary text-base shrink-0">videocam</span>
+<div class="min-w-0">
+<div class="text-xs text-slate-200 truncate">demo-video.mp4</div>
+<div class="text-[9px] text-slate-400 font-mono">18.4 MB · Ready</div>
+</div>
+</div>
+<div class="flex items-center gap-1 shrink-0">
+<button class="px-2 py-0.5 rounded bg-[#222735] hover:bg-[#2b3244] text-[10px] text-slate-200">Open</button>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735]" title="More options"><span class="material-symbols-outlined text-xs">more_vert</span></button>
+</div>
+</div>
+<!-- Item 2 -->
+<div class="bg-[#13151c] border border-outline-variant/50 rounded p-2 flex items-center justify-between hover:border-slate-500 transition-colors">
+<div class="flex items-center gap-2 min-w-0">
+<span class="material-symbols-outlined text-teal-400 text-base shrink-0">image</span>
+<div class="min-w-0">
+<div class="text-xs text-slate-200 truncate">sample-image.png</div>
+<div class="text-[9px] text-slate-400 font-mono">2.1 MB · Ready</div>
+</div>
+</div>
+<div class="flex items-center gap-1 shrink-0">
+<button class="px-2 py-0.5 rounded bg-[#222735] hover:bg-[#2b3244] text-[10px] text-slate-200">Open</button>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735]" title="More options"><span class="material-symbols-outlined text-xs">more_vert</span></button>
+</div>
+</div>
+<!-- Item 3: sample-landscape.png -->
+<div class="bg-[#13151c] border border-outline-variant/50 rounded p-2 flex items-center justify-between hover:border-slate-500 transition-colors">
+<div class="flex items-center gap-2 min-w-0">
+<span class="material-symbols-outlined text-teal-400 text-base shrink-0">landscape</span>
+<div class="min-w-0">
+<div class="text-xs text-slate-200 truncate">sample-landscape.png</div>
+<div class="text-[9px] text-slate-400 font-mono">3.8 MB · Ready</div>
+</div>
+</div>
+<div class="flex items-center gap-1 shrink-0">
+<button class="px-2 py-0.5 rounded bg-[#222735] hover:bg-[#2b3244] text-[10px] text-slate-200">Open</button>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735]" title="More options"><span class="material-symbols-outlined text-xs">more_vert</span></button>
+</div>
+</div>
+<!-- Item 4: sample-document.pdf -->
+<div class="bg-[#1a1e28] border border-primary/40 rounded p-2 flex items-center justify-between">
+<div class="flex items-center gap-2 min-w-0">
+<span class="material-symbols-outlined text-primary text-base shrink-0 animate-pulse">sync</span>
+<div class="min-w-0">
+<div class="text-xs text-slate-200 truncate">sample-document.pdf</div>
+<div class="text-[9px] text-primary font-mono">42% (420 MiB / 1.0 GiB)</div>
+</div>
+</div>
+<div class="flex items-center gap-1 shrink-0">
+<button class="px-2 py-0.5 rounded text-rose-400 hover:bg-rose-950/40 text-[10px]">Cancel</button>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735]" title="More options"><span class="material-symbols-outlined text-xs">more_vert</span></button>
+</div>
+</div>
+<!-- Item 5: sample-archive.zip -->
+<div class="bg-[#20181c] border border-rose-500/30 rounded p-2 flex items-center justify-between">
+<div class="flex items-center gap-2 min-w-0">
+<span class="material-symbols-outlined text-rose-400 text-base shrink-0">error_outline</span>
+<div class="min-w-0">
+<div class="text-xs text-slate-200 truncate">sample-archive.zip</div>
+<div class="text-[9px] text-rose-400 font-mono">Failed · 8.4 MB</div>
+</div>
+</div>
+<div class="flex items-center gap-1 shrink-0">
+<button class="px-2 py-0.5 rounded bg-rose-950/50 hover:bg-rose-900/60 text-rose-300 text-[10px]">Retry</button>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735]" title="More options"><span class="material-symbols-outlined text-xs">more_vert</span></button>
+</div>
+</div>
+<!-- Item 6: sample-audio.wav -->
+<div class="bg-[#13151c] border border-outline-variant/50 rounded p-2 flex items-center justify-between hover:border-slate-500 transition-colors">
+<div class="flex items-center gap-2 min-w-0">
+<span class="material-symbols-outlined text-amber-400/90 text-base shrink-0">audiotrack</span>
+<div class="min-w-0">
+<div class="text-xs text-slate-200 truncate">sample-audio.wav</div>
+<div class="text-[9px] text-slate-400 font-mono">14.2 MB · Ready</div>
+</div>
+</div>
+<div class="flex items-center gap-1 shrink-0">
+<button class="px-2 py-0.5 rounded bg-[#222735] hover:bg-[#2b3244] text-[10px] text-slate-200">Open</button>
+<button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#222735]" title="More options"><span class="material-symbols-outlined text-xs">more_vert</span></button>
+</div>
+</div>
+</div>
+</div>
+</footer>
+</main>
+<div class="absolute inset-2 border-2 border-dashed border-primary/70 bg-primary/10 backdrop-blur-[1px] rounded-xl flex flex-col items-center justify-center pointer-events-none transition-all duration-300 shadow-2xl z-50"><div class="bg-[#181c24]/95 border border-primary/50 shadow-2xl rounded-xl px-6 py-4 flex flex-col items-center text-center gap-2 max-w-sm"><div class="w-12 h-12 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center text-primary"><span class="material-symbols-outlined text-2xl">upload_file</span></div><div><div class="text-sm font-semibold text-white tracking-tight">Drop files to attach</div><div class="text-xs text-slate-300 mt-0.5">Release to upload into Project notes</div></div><div class="flex items-center gap-1.5 mt-1 px-2.5 py-1 rounded-full bg-surface-container-high border border-outline-variant/60 text-[10px] text-slate-300"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span><span class="font-medium">Note unlocked</span><span class="text-slate-500">•</span><span>Accepts all document types</span></div></div></div></div>
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 hidden" id="all-attachments-modal"><div aria-labelledby="all-attachments-title" aria-modal="true" class="bg-[#181c24] border border-outline rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[85vh] overflow-hidden" role="dialog"><div class="px-6 py-4 border-b border-outline-variant/60 flex items-center justify-between bg-[#161920]"><div><div class="flex items-center gap-2"><span class="material-symbols-outlined text-primary text-xl">folder_open</span><h2 class="text-base font-semibold text-white tracking-tight" id="all-attachments-title">All attachments</h2><span class="text-[11px] font-mono text-slate-400 bg-surface-container-high px-2 py-0.5 rounded border border-outline-variant/60">4 files</span></div><p class="text-xs text-slate-400 mt-0.5">Browse and manage all files attached to this note</p></div><div class="flex items-center gap-2"><span class="text-[11px] font-mono text-slate-500 hidden sm:inline">Esc to close</span><button class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-surface-container-high border border-transparent hover:border-outline-variant/60 transition-colors" onclick="document.getElementById('all-attachments-modal').classList.add('hidden');" title="Close (Esc)" type="button"><span class="material-symbols-outlined text-lg">close</span></button></div></div><div class="p-4 border-b border-outline-variant/50 bg-[#13151c]/90"><div class="relative flex items-center"><span class="material-symbols-outlined absolute left-3 text-slate-400 text-lg pointer-events-none">search</span><input autofocus="" class="w-full bg-[#181c24] border border-outline-variant/70 rounded-lg pl-10 pr-9 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors" id="modal-search-input" oninput="const val = this.value.toLowerCase().trim(); const clearBtn = document.getElementById('modal-search-clear'); if (clearBtn) clearBtn.style.display = val ? 'flex' : 'none'; const cards = document.querySelectorAll('.attachment-search-item'); let count = 0; cards.forEach(c =&gt; { const name = (c.getAttribute('data-filename') || '').toLowerCase(); if (name.includes(val)) { c.style.display = ''; count++; } else { c.style.display = 'none'; } }); const empty = document.getElementById('modal-no-results'); const term = document.getElementById('modal-search-term'); if (empty) { if (count === 0) { empty.style.display = 'flex'; if (term) term.innerText = this.value; } else { empty.style.display = 'none'; } }" placeholder="Search filenames..." type="text"/><button class="absolute right-2.5 p-1 text-slate-400 hover:text-white rounded hover:bg-[#202532] transition-colors" id="modal-search-clear" onclick="const inp = document.getElementById('modal-search-input'); if(inp){ inp.value = ''; inp.dispatchEvent(new Event('input')); inp.focus(); }" style="display: none;" title="Clear search" type="button"><span class="material-symbols-outlined text-base">close</span></button></div></div><div class="flex-1 overflow-y-auto p-6 bg-[#161a22]"><div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5" id="attachment-modal-grid"><div class="attachment-search-item bg-[#181c24] border border-outline-variant/80 hover:border-slate-500/60 rounded-lg p-3 flex flex-col justify-between transition-colors shadow-sm relative group" data-filename="Project overview.pdf"><div class="flex items-start justify-between gap-2"><div class="flex items-start gap-3 min-w-0 flex-1"><div class="w-10 h-10 rounded-lg bg-rose-950/40 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0"><span class="material-symbols-outlined text-xl">picture_as_pdf</span></div><div class="min-w-0 flex-1"><div class="text-xs font-semibold text-white truncate" title="Project overview.pdf">Project overview.pdf</div><div class="text-[10px] text-slate-400 mt-0.5 font-mono">1.2 MB · PDF</div><div class="text-[10px] text-slate-500 mt-0.5">Stored 15/10/26 14:15</div></div></div><button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#202532] transition-colors shrink-0" title="More options" type="button"><span class="material-symbols-outlined text-sm">more_vert</span></button></div><div class="flex items-center justify-between mt-3 pt-2 border-t border-outline-variant/40 text-[10px]"><span class="inline-flex items-center gap-1.5 text-emerald-400 font-medium"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Ready</span><button class="px-2.5 py-1 rounded bg-[#202532] hover:bg-[#2b3244] text-[11px] font-medium text-slate-200 hover:text-white transition-colors cursor-pointer" type="button">Open</button></div></div><div class="attachment-search-item bg-[#181c24] border border-outline-variant/80 hover:border-slate-500/60 rounded-lg p-3 flex flex-col justify-between transition-colors shadow-sm relative group" data-filename="Budget.xlsx"><div class="flex items-start justify-between gap-2"><div class="flex items-start gap-3 min-w-0 flex-1"><div class="w-10 h-10 rounded-lg bg-emerald-950/40 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0"><span class="material-symbols-outlined text-xl">table_chart</span></div><div class="min-w-0 flex-1"><div class="text-xs font-semibold text-white truncate" title="Budget.xlsx">Budget.xlsx</div><div class="text-[10px] text-slate-400 mt-0.5 font-mono">840 KB · XLSX</div><div class="text-[10px] text-slate-500 mt-0.5">Stored 15/10/26 11:20</div></div></div><button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#202532] transition-colors shrink-0" title="More options" type="button"><span class="material-symbols-outlined text-sm">more_vert</span></button></div><div class="flex items-center justify-between mt-3 pt-2 border-t border-outline-variant/40 text-[10px]"><span class="inline-flex items-center gap-1.5 text-emerald-400 font-medium"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Ready</span><button class="px-2.5 py-1 rounded bg-[#202532] hover:bg-[#2b3244] text-[11px] font-medium text-slate-200 hover:text-white transition-colors cursor-pointer" type="button">Open</button></div></div><div class="attachment-search-item bg-[#181c24] border border-outline-variant/80 hover:border-slate-500/60 rounded-lg p-3 flex flex-col justify-between transition-colors shadow-sm relative group" data-filename="Demo video.mp4"><div class="flex items-start justify-between gap-2"><div class="flex items-start gap-3 min-w-0 flex-1"><div class="w-10 h-10 rounded-lg bg-[#202532] border border-outline-variant/80 flex items-center justify-center text-primary shrink-0 relative overflow-hidden"><span class="material-symbols-outlined text-xl">videocam</span></div><div class="min-w-0 flex-1"><div class="text-xs font-semibold text-white truncate" title="Demo video.mp4">Demo video.mp4</div><div class="text-[10px] text-slate-400 mt-0.5 font-mono">18.4 MB · MP4</div><div class="text-[10px] text-slate-500 mt-0.5">Stored 15/10/26 14:30</div></div></div><button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#202532] transition-colors shrink-0" title="More options" type="button"><span class="material-symbols-outlined text-sm">more_vert</span></button></div><div class="flex items-center justify-between mt-3 pt-2 border-t border-outline-variant/40 text-[10px]"><span class="inline-flex items-center gap-1.5 text-emerald-400 font-medium"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Ready</span><button class="px-2.5 py-1 rounded bg-[#202532] hover:bg-[#2b3244] text-[11px] font-medium text-slate-200 hover:text-white transition-colors cursor-pointer" type="button">Open</button></div></div><div class="attachment-search-item bg-[#1a1e28] border border-primary/50 rounded-lg p-3 flex flex-col justify-between transition-colors shadow-sm relative group" data-filename="Notes.docx"><div class="flex items-start justify-between gap-2"><div class="flex items-start gap-3 min-w-0 flex-1"><div class="w-10 h-10 rounded-lg bg-primary/20 border border-primary/40 flex items-center justify-center text-primary shrink-0 animate-pulse"><span class="material-symbols-outlined text-xl">description</span></div><div class="min-w-0 flex-1"><div class="text-xs font-semibold text-white truncate" title="Notes.docx">Notes.docx</div><div class="flex items-center justify-between text-[10px] text-primary font-semibold mt-0.5"><span>Syncing</span><span class="font-mono">42%</span></div><div class="text-[10px] text-slate-400 mt-0.5 font-mono">420 KB / 1.0 MB</div></div></div><button class="p-1 text-slate-400 hover:text-white rounded hover:bg-[#202532] transition-colors shrink-0" title="More options" type="button"><span class="material-symbols-outlined text-sm">more_vert</span></button></div><div class="space-y-1.5 mt-3 pt-2 border-t border-outline-variant/40"><div class="w-full bg-[#12151b] rounded-full h-1.5 overflow-hidden border border-outline-variant/40"><div class="bg-primary h-full rounded-full transition-all duration-300" style="width: 42%;"></div></div><div class="flex items-center justify-between text-[10px]"><span class="text-slate-400">In-flight transfer</span><div class="flex items-center gap-2"><button class="text-rose-400 hover:text-rose-300 font-medium hover:underline" type="button">Cancel</button><button class="px-2 py-0.5 rounded bg-[#202532] hover:bg-[#2b3244] text-slate-200 text-[10px] font-medium" type="button">Open</button></div></div></div></div></div><div class="flex-col items-center justify-center py-12 text-center" id="modal-no-results" style="display: none;"><div class="w-12 h-12 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-slate-400 mb-3"><span class="material-symbols-outlined text-2xl">search_off</span></div><div class="text-sm font-semibold text-slate-200 mb-1">No matching attachments</div><div class="text-xs text-slate-400 max-w-sm">No attachments matching “<span class="text-slate-200 font-mono" id="modal-search-term"></span>”. Try a different search term.</div></div></div></div></div><!-- ==================== SETTINGS DIALOG (220ms / 160ms scale 0.97-1.0) ==================== -->
+<div class="fn-modal-backdrop fn-closed fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4" id="app-settings-dialog">
+<div aria-labelledby="settings-dialog-title" aria-modal="true" class="fn-modal-card bg-[#181c24] border border-outline rounded-xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden" role="dialog">
+<div class="px-6 py-4 border-b border-outline-variant/60 flex items-center justify-between bg-[#161920]">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-xl">settings</span>
+<h2 class="text-base font-semibold text-white tracking-tight" id="settings-dialog-title">App settings</h2>
+</div>
+<button class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-surface-container-high border border-transparent transition-colors" onclick="closeSettingsDialog()" title="Close (Esc)" type="button">
+<span class="material-symbols-outlined text-lg">close</span>
+</button>
+</div>
+<div class="p-6 space-y-4 bg-[#161a22] text-xs text-slate-300">
+<div class="flex items-center justify-between p-3 rounded-lg bg-[#181c24] border border-outline-variant/50">
+<div>
+<div class="font-medium text-white">Windows Motion &amp; Animations</div>
+<div class="text-[11px] text-slate-400 mt-0.5">Smooth 220ms curves for sidebar, dialogs, and popups</div>
+</div>
+<span class="text-[11px] font-mono text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-500/30">Enabled</span>
+</div>
+<div class="flex items-center justify-between p-3 rounded-lg bg-[#181c24] border border-outline-variant/50">
+<div>
+<div class="font-medium text-white">Default Note View Mode</div>
+<div class="text-[11px] text-slate-400 mt-0.5">Switch between Code/HTML and formatted rich text</div>
+</div>
+<span class="text-[11px] font-mono text-primary bg-primary/20 px-2 py-0.5 rounded border border-primary/40">HTML Mode</span>
+</div>
+<div class="flex items-center justify-between p-3 rounded-lg bg-[#181c24] border border-outline-variant/50">
+<div>
+<div class="font-medium text-white">Attachment Auto-sync</div>
+<div class="text-[11px] text-slate-400 mt-0.5">Maintain local cache for media and attachments</div>
+</div>
+<span class="text-[11px] font-mono text-slate-300 bg-surface-container-high px-2 py-0.5 rounded border border-outline-variant/60">Local storage</span>
+</div>
+</div>
+<div class="px-6 py-3 border-t border-outline-variant/60 bg-[#161920] flex items-center justify-end gap-2">
+<button class="px-3 py-1.5 rounded-md text-xs font-medium text-slate-300 hover:text-white bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant/50 transition-colors" onclick="closeSettingsDialog()" type="button">Close</button>
+<button class="px-4 py-1.5 rounded-md text-xs font-semibold text-white bg-primary hover:bg-[#3b87c8] shadow-sm transition-all" onclick="closeSettingsDialog()" type="button">Done</button>
+</div>
+</div>
+</div>
+<!-- ==================== ATTACHMENT PREVIEW DIALOG (220ms / 160ms scale 0.97-1.0) ==================== -->
+<div class="fn-modal-backdrop fn-closed fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4" id="attachment-preview-dialog">
+<div aria-labelledby="attachment-preview-title" aria-modal="true" class="fn-modal-card bg-[#181c24] border border-outline rounded-xl shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden" role="dialog">
+<div class="px-6 py-3.5 border-b border-outline-variant/60 flex items-center justify-between bg-[#161920]">
+<div class="flex items-center gap-2 min-w-0">
+<span class="material-symbols-outlined text-primary text-xl" id="preview-modal-icon">videocam</span>
+<h2 class="text-sm font-semibold text-white tracking-tight truncate" id="attachment-preview-title">demo-video.mp4</h2>
+<span class="text-[10px] font-mono text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-500/30" id="preview-modal-badge">Ready</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-[11px] font-mono text-slate-500 hidden sm:inline">Esc to dismiss</span>
+<button class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-surface-container-high border border-transparent transition-colors" onclick="closeAttachmentPreview()" title="Close (Esc)" type="button">
+<span class="material-symbols-outlined text-lg">close</span>
+</button>
+</div>
+</div>
+<div class="p-6 bg-[#111318] flex flex-col items-center justify-center min-h-[280px] text-center select-none" id="attachment-preview-content">
+<!-- Dynamic preview target -->
+<div class="w-16 h-16 rounded-2xl bg-[#202532] border border-outline-variant/80 flex items-center justify-center text-primary mb-3 shadow-inner">
+<span class="material-symbols-outlined text-3xl">videocam</span>
+</div>
+<div class="text-sm font-medium text-slate-200">demo-video.mp4</div>
+<div class="text-xs text-slate-400 font-mono mt-1">18.4 MB · MP4 (H.264 / AAC) · Stored locally</div>
+<div class="mt-4 flex items-center gap-2">
+<button class="px-3 py-1.5 rounded bg-primary/20 hover:bg-primary/30 text-primary border border-primary/40 text-xs font-semibold transition-colors flex items-center gap-1.5">
+<span class="material-symbols-outlined text-sm">play_arrow</span><span>Play preview</span>
+</button>
+<button class="px-3 py-1.5 rounded bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant/50 text-xs font-medium text-slate-300 hover:text-white transition-colors flex items-center gap-1.5">
+<span class="material-symbols-outlined text-sm">download</span><span>Download</span>
+</button>
+</div>
+</div>
+<div class="px-6 py-2.5 border-t border-outline-variant/50 bg-[#161a22] flex items-center justify-between text-xs text-slate-400">
+<span class="text-[11px]">Encrypted local attachment cache</span>
+<button class="px-3 py-1 rounded bg-surface-container-high text-xs text-slate-200 hover:text-white border border-outline-variant/50 transition-colors" onclick="closeAttachmentPreview()" type="button">Close</button>
+</div>
+</div>
+</div>
+<!-- ==================== MOTION INTERACTIVE CONTROLLER ==================== -->
+<script id="fn-interactive-motion-controller">
+  /* Sidebar horizontal clipped reveal (220ms ease-out / 160ms ease-in) */
+  function toggleSidebar(forceOpen) {
+    const sb = document.getElementById('sidebar-panel');
+    const reopenBar = document.getElementById('sidebar-reopen-bar');
+    if (!sb) return;
+    const isClosed = sb.classList.contains('fn-sidebar-closed');
+    const shouldClose = forceOpen !== undefined ? !forceOpen : !isClosed;
+
+    if (shouldClose) {
+      sb.classList.add('fn-sidebar-closed');
+      if (reopenBar) reopenBar.classList.remove('hidden');
+    } else {
+      sb.classList.remove('fn-sidebar-closed');
+      if (reopenBar) reopenBar.classList.add('hidden');
+    }
+  }
+
+  /* Note actions menu toggle (120ms entrance / 90ms exit) */
+  function toggleNoteActionsMenu(e) {
+    if (e) e.stopPropagation();
+    const menu = document.getElementById('note-actions-popup');
+    if (!menu) return;
+    const isClosed = menu.classList.contains('fn-popup-closed');
+    if (isClosed) {
+      menu.classList.remove('fn-popup-closed');
+    } else {
+      menu.classList.add('fn-popup-closed');
+    }
+  }
+  function closeNoteActionsMenu() {
+    const menu = document.getElementById('note-actions-popup');
+    if (menu) menu.classList.add('fn-popup-closed');
+  }
+
+  /* Settings dialog open/close (220ms entrance / 160ms exit) */
+  function openSettingsDialog() {
+    const dlg = document.getElementById('app-settings-dialog');
+    if (dlg) dlg.classList.remove('fn-closed');
+  }
+  function closeSettingsDialog() {
+    const dlg = document.getElementById('app-settings-dialog');
+    if (dlg) dlg.classList.add('fn-closed');
+  }
+
+  /* Attachment preview modal (220ms entrance / 160ms exit) */
+  function openAttachmentPreview(filename, type) {
+    const dlg = document.getElementById('attachment-preview-dialog');
+    const titleEl = document.getElementById('attachment-preview-title');
+    const iconEl = document.getElementById('preview-modal-icon');
+    const contentEl = document.getElementById('attachment-preview-content');
+    if (!dlg) return;
+
+    if (titleEl) titleEl.innerText = filename;
+    if (iconEl) iconEl.innerText = type === 'video' ? 'videocam' : (type === 'image' ? 'image' : 'description');
+
+    if (contentEl) {
+      if (type === 'image') {
+        contentEl.innerHTML = `
+          <div class="w-24 h-24 rounded-xl bg-[#1c2a38] border border-teal-500/40 flex items-center justify-center text-teal-400 mb-3 shadow-lg">
+            <svg class="w-12 h-12 text-teal-400/80" fill="currentColor" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"></path></svg>
+          </div>
+          <div class="text-sm font-semibold text-slate-100">${filename}</div>
+          <div class="text-xs text-slate-400 font-mono mt-1">2.1 MB · PNG (1920 × 1080)</div>
+          <div class="mt-4 flex items-center gap-2">
+            <button class="px-3 py-1.5 rounded bg-primary text-white text-xs font-semibold shadow-sm hover:bg-[#3b87c8] transition-colors">View full image</button>
+          </div>
+        `;
+      } else if (type === 'video') {
+        contentEl.innerHTML = `
+          <div class="w-20 h-20 rounded-2xl bg-[#202532] border border-outline-variant flex items-center justify-center text-primary mb-3 shadow-inner">
+            <span class="material-symbols-outlined text-4xl">videocam</span>
+          </div>
+          <div class="text-sm font-semibold text-slate-100">${filename}</div>
+          <div class="text-xs text-slate-400 font-mono mt-1">18.4 MB · MP4 (H.264 / AAC)</div>
+          <div class="mt-4 flex items-center gap-2">
+            <button class="px-3.5 py-1.5 rounded bg-primary text-white text-xs font-semibold hover:bg-[#3b87c8] transition-colors flex items-center gap-1.5">
+              <span class="material-symbols-outlined text-sm">play_arrow</span><span>Play media</span>
+            </button>
+          </div>
+        `;
+      } else {
+        contentEl.innerHTML = `
+          <div class="w-20 h-20 rounded-2xl bg-[#202532] border border-outline-variant flex items-center justify-center text-primary mb-3 shadow-inner">
+            <span class="material-symbols-outlined text-4xl">description</span>
+          </div>
+          <div class="text-sm font-semibold text-slate-100">${filename}</div>
+          <div class="text-xs text-slate-400 font-mono mt-1">PDF Document · Stored locally</div>
+        `;
+      }
+    }
+    dlg.classList.remove('fn-closed');
+  }
+  function closeAttachmentPreview() {
+    const dlg = document.getElementById('attachment-preview-dialog');
+    if (dlg) dlg.classList.add('fn-closed');
+  }
+
+  /* Attachment dock height expansion & disclosure chevron rotation (200ms / 150ms) */
+  function toggleDockExpansion() {
+    const exp = document.getElementById('attachment-dock-expanded');
+    const col = document.getElementById('attachment-dock-collapsed');
+    const viewTxt = document.getElementById('view-mode-text');
+    const chevron = document.getElementById('dock-toggle-icon');
+    if (!exp || !col) return;
+
+    const isCurrentlyExp = !exp.classList.contains('hidden');
+    if (isCurrentlyExp) {
+      exp.classList.add('hidden');
+      col.classList.remove('hidden');
+      if (viewTxt) viewTxt.innerText = 'Compact';
+      if (chevron) chevron.classList.add('fn-dock-rotated');
+    } else {
+      exp.classList.remove('hidden');
+      col.classList.add('hidden');
+      if (viewTxt) viewTxt.innerText = 'Expanded';
+      if (chevron) chevron.classList.remove('fn-dock-rotated');
+    }
+  }
+
+  /* Note switcher: Incoming editor content lift in 160ms ease-out (6px upward lift) */
+  function switchNote(title, subtitle, isLocked) {
+    const items = document.querySelectorAll('.sidebar-note-item');
+    items.forEach(el => {
+      const t = el.querySelector('span');
+      if (t && t.innerText.trim() === title) {
+        el.className = 'sidebar-note-item group relative flex flex-col p-2 rounded-lg bg-surface-container-high/90 border border-primary/40 shadow-sm cursor-pointer transition-colors';
+        if (!el.querySelector('.active-bar')) {
+          const bar = document.createElement('div');
+          bar.className = 'active-bar absolute left-0 top-2 bottom-2 w-1 bg-primary rounded-r';
+          el.appendChild(bar);
+        }
+      } else {
+        el.className = 'sidebar-note-item group flex flex-col p-2 rounded-lg hover:bg-surface-container-high/50 border border-transparent cursor-pointer transition-colors';
+        const bar = el.querySelector('.active-bar');
+        if (bar) bar.remove();
+      }
+    });
+
+    const titleInput = document.querySelector('main input[value]');
+    if (titleInput) titleInput.value = title;
+
+    const viewport = document.getElementById('note-editor-viewport');
+    if (!viewport) return;
+
+    if (isLocked) {
+      // Lock note immediately removes content without trailing ghosting
+      viewport.innerHTML = `
+        <div class="flex-1 flex flex-col items-center justify-center text-center p-6 bg-[#111318] select-none fn-content-enter">
+          <div class="w-12 h-12 rounded-full bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400 mb-2">
+            <span class="material-symbols-outlined text-2xl">lock</span>
+          </div>
+          <div class="text-sm font-semibold text-white">Personal draft is locked</div>
+          <div class="text-xs text-slate-400 mt-1 max-w-xs">Enter your workspace passkey or biometric credential to view and edit this note.</div>
+          <button onclick="unlockCurrentNote()" class="mt-4 px-3 py-1.5 rounded bg-primary hover:bg-[#3b87c8] text-white text-xs font-semibold shadow-sm transition-all">
+            Unlock note
+          </button>
+        </div>
+      `;
+    } else {
+      // Clean replace + 160ms 6px upward lift
+      viewport.classList.remove('fn-content-enter');
+      void viewport.offsetWidth; // Trigger reflow for clean re-animation
+      viewport.innerHTML = `
+        <div class="flex-1 overflow-y-auto flex font-mono text-[13px] leading-6 fn-content-enter">
+          <div class="w-12 py-4 select-none text-right pr-4 text-slate-600 bg-[#12151c]/80 border-r border-outline-variant/40 flex flex-col shrink-0 font-mono text-xs">
+            <span class="leading-6">1</span><span class="leading-6">2</span><span class="leading-6">3</span><span class="leading-6">4</span><span class="leading-6">5</span><span class="leading-6">6</span><span class="leading-6">7</span><span class="leading-6">8</span><span class="leading-6">9</span><span class="leading-6">10</span><span class="leading-6">11</span><span class="leading-6">12</span>
+          </div>
+          <div class="flex-1 p-4 pl-6 text-slate-200 overflow-x-auto">
+            <div class="leading-6"><span class="text-slate-500">&lt;</span><span class="text-primary font-medium">section</span> <span class="text-cyan-400">class</span><span class="text-slate-400">=</span><span class="text-emerald-400">"note-container"</span><span class="text-slate-500">&gt;</span></div>
+            <div class="leading-6 pl-4"><span class="text-slate-500">&lt;</span><span class="text-primary font-medium">h2</span><span class="text-slate-500">&gt;</span><span class="text-white font-medium">${title}</span><span class="text-slate-500">&lt;/</span><span class="text-primary font-medium">h2</span><span class="text-slate-500">&gt;</span></div>
+            <div class="leading-6 pl-4"><span class="text-slate-500">&lt;</span><span class="text-primary font-medium">p</span><span class="text-slate-500">&gt;</span><span class="text-slate-300">${subtitle}</span><span class="text-slate-500">&lt;/</span><span class="text-primary font-medium">p</span><span class="text-slate-500">&gt;</span></div>
+            <div class="leading-6 pl-4"><span class="text-slate-500">&lt;</span><span class="text-primary font-medium">div</span> <span class="text-cyan-400">class</span><span class="text-slate-400">=</span><span class="text-emerald-400">"meta-block"</span><span class="text-slate-500">&gt;</span></div>
+            <div class="leading-6 pl-8"><span class="text-slate-500">&lt;</span><span class="text-primary font-medium">span</span><span class="text-slate-500">&gt;</span><span class="text-slate-400">Last updated locally</span><span class="text-slate-500">&lt;/</span><span class="text-primary font-medium">span</span><span class="text-slate-500">&gt;</span></div>
+            <div class="leading-6 pl-4"><span class="text-slate-500">&lt;/</span><span class="text-primary font-medium">div</span><span class="text-slate-500">&gt;</span></div>
+            <div class="leading-6"><span class="text-slate-500">&lt;/</span><span class="text-primary font-medium">section</span><span class="text-slate-500">&gt;</span></div>
+            <div class="mt-8 pt-4 border-t border-outline-variant/30 text-xs font-sans text-slate-500 flex items-center gap-2">
+              <span class="material-symbols-outlined text-sm">check_circle</span>
+              <span>HTML syntax validated • UTF-8 • Unlocked and ready for editing</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  function lockCurrentNote() {
+    switchNote('Personal draft', 'Locked note', true);
+  }
+  function unlockCurrentNote() {
+    switchNote('Project notes', 'Draft your ideas here', false);
+  }
+  function alertNoteStatus(msg) {
+    console.info('[Future Notes]: ' + msg);
+  }
+
+  /* Keyboard shortcut bindings (Ctrl+B, Esc) */
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      closeSettingsDialog();
+      closeAttachmentPreview();
+      closeNoteActionsMenu();
+      const allModal = document.getElementById('all-attachments-modal');
+      if (allModal) allModal.classList.add('hidden');
+    }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
+      e.preventDefault();
+      toggleSidebar();
+    }
+  });
+
+  /* Dismiss popup when clicking outside */
+  document.addEventListener('click', function(e) {
+    const menu = document.getElementById('note-actions-popup');
+    const trigger = document.getElementById('note-actions-trigger');
+    if (menu && !menu.contains(e.target) && trigger && !trigger.contains(e.target)) {
+      closeNoteActionsMenu();
+    }
+  });
+</script></body></html>

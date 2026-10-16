@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'features/dashboard/views/dashboard_screen.dart';
 import 'features/dashboard/services/settings_service.dart';
 import 'core/theme/app_theme.dart';
+import 'core/theme/motion_frame_log.dart';
 import 'core/storage/storage_environment.dart';
 import 'core/storage/owned_app_services.dart';
 import 'core/storage/storage_startup_failure.dart';
@@ -93,15 +94,23 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   late final _settings = widget.settings ?? SettingsService();
+  MotionFrameLog? _motionFrameLog;
 
   @override
   void initState() {
     super.initState();
+    if (const bool.fromEnvironment('FN_MOTION_DIAGNOSTICS')) {
+      final views = WidgetsBinding.instance.platformDispatcher.views;
+      _motionFrameLog = MotionFrameLog(
+        refreshRate: views.isEmpty ? 60 : views.first.display.refreshRate,
+      )..start();
+    }
     _settings.themeModeNotifier.addListener(_onThemeChanged);
   }
 
   @override
   void dispose() {
+    _motionFrameLog?.stop();
     _settings.themeModeNotifier.removeListener(_onThemeChanged);
     unawaited(widget.windowActions?.dispose());
     super.dispose();

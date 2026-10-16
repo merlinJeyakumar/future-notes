@@ -1,3 +1,5 @@
+import '../../../core/theme/app_tooltip.dart';
+import '../../../core/theme/app_motion.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -9,6 +11,7 @@ import '../viewmodels/content_viewmodel.dart';
 import '../../../core/storage/attachment_open_cache.dart';
 import 'attachment_presentation.dart';
 import 'attachment_document_preview.dart';
+import 'attachment_media_overlay.dart';
 
 abstract class AttachmentMediaPlayer {
   Widget build(BuildContext context);
@@ -194,9 +197,9 @@ class GifAttachmentPlayer implements AttachmentMediaPlayer {
           );
           if (_image != image) _image?.evict();
           _image = image;
-          final label = playing ? 'Pause GIF' : 'Play GIF';
-          return Tooltip(
-            message: label,
+          final label = playing ? 'Pause' : 'Play';
+          return Semantics(
+            label: playing ? 'Pause animation' : 'Play animation',
             child: InkWell(
               key: const ValueKey('gif-playback-preview'),
               onTap: () => _playing.value = !playing,
@@ -214,10 +217,22 @@ class GifAttachmentPlayer implements AttachmentMediaPlayer {
                       ),
                     ),
                   ),
-                  if (!playing)
-                    const Center(
-                      child: Icon(Icons.play_circle_outline, size: 48),
+                  Positioned(
+                    right: 12,
+                    bottom: 12,
+                    child: Material(
+                      color: Colors.black.withValues(alpha: .45),
+                      borderRadius: BorderRadius.circular(8),
+                      child: IconButton(
+                        key: const ValueKey('gif-playback-toggle'),
+                        tooltip: label,
+                        iconSize: 20,
+                        color: Colors.white.withValues(alpha: .85),
+                        onPressed: () => _playing.value = !playing,
+                        icon: Icon(playing ? Icons.pause : Icons.play_arrow),
+                      ),
                     ),
+                  ),
                 ],
               ),
             ),
@@ -243,7 +258,7 @@ class AudioAttachmentThumbnail extends StatelessWidget {
     final theme = Theme.of(context);
     final label = playing ? 'Pause audio' : 'Play audio';
     return Center(
-      child: Tooltip(
+      child: AppTooltip(
         message: label,
         child: Material(
           color: theme.colorScheme.surfaceContainerHighest,
@@ -312,6 +327,7 @@ class AttachmentMoreButton extends StatelessWidget {
   final VoidCallback? onRemovePending;
   @override
   Widget build(BuildContext context) => PopupMenuButton<VoidCallback>(
+    popUpAnimationStyle: AppMotion.menu(context),
     padding: compact ? EdgeInsets.zero : const EdgeInsets.all(8),
     tooltip: fileName == null
         ? 'More attachment actions'
@@ -373,14 +389,19 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
   AttachmentMediaPlayer? _player;
   AttachmentDocumentRenderer? _document;
   Future<void>? _closing;
+  Future<void>? _resources;
+  bool _dismissing = false;
+  bool _revoked = false;
   bool _playbackFailed = false;
   bool _documentFailed = false;
   bool _systemOpening = false;
   String? _systemError;
   ImageProvider? _previewImage;
+  late final Future<DateTime?> _storedDate;
   @override
   void initState() {
     super.initState();
+    _storedDate = widget.viewModel.attachmentStoredDate(widget.attachment.id);
     if (attachmentSupportsPlayback(widget.attachment.fileName)) {
       try {
         _player =
@@ -435,24 +456,48 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
 
   Future<void> close() => _closing ??= _close();
   Future<void> _close() async {
+    // Security/storage joins bypass the ordinary visual closing transition.
+    if (mounted) setState(() => _revoked = true);
+    if (mounted) {
+      final route = ModalRoute.of(context);
+      if (route != null && route.isActive) {
+        Navigator.of(context).removeRoute(route);
+      }
+    }
+    await _disposeResources();
+  }
+
+  Future<void> _disposeResources() => _resources ??= _releaseResources();
+  Future<void> _releaseResources() async {
     widget.viewModel.unregisterAttachmentViewer(close);
     widget.viewModel.unregisterAttachmentPauser(pause);
     await _player?.dispose();
     await _document?.dispose();
     await _previewImage?.evict();
-    if (mounted) {
-      final route = ModalRoute.of(context);
-      if (route != null) Navigator.of(context).removeRoute(route);
+  }
+
+  Future<void> _dismiss() async {
+    if (_dismissing || _closing != null || !mounted) return;
+    setState(() => _dismissing = true);
+    try {
+      await pause();
+    } catch (_) {
+      // A failed native pause must not leave an unclosable playing preview.
+      await close();
+      return;
     }
+    if (!mounted || _revoked) return;
+    final route = ModalRoute.of(context);
+    Navigator.of(context).pop();
+    if (route != null) await route.completed;
+    await _disposeResources();
   }
 
   @override
   void dispose() {
     widget.viewModel.unregisterAttachmentViewer(close);
     widget.viewModel.unregisterAttachmentPauser(pause);
-    _player?.dispose();
-    _document?.dispose();
-    _previewImage?.evict();
+    unawaited(_disposeResources().catchError((Object _, StackTrace _) {}));
     super.dispose();
   }
 
@@ -492,19 +537,34 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
     }
   }
 
+  Widget _withInformation(Widget preview) {
+    final name = widget.attachment.fileName;
+    if (!attachmentSupportsPlayback(name) &&
+        attachmentVisualKind(name) != AttachmentVisualKind.image) {
+      return preview;
+    }
+    return AttachmentMediaOverlay(
+      attachment: widget.attachment,
+      length: widget.file.length,
+      storedDate: _storedDate,
+      child: preview,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_revoked) return const SizedBox.shrink();
     final extension = widget.attachment.fileName.split('.').last.toLowerCase();
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): () {
-          close();
+          unawaited(_dismiss());
         },
       },
       child: PopScope(
-        canPop: false,
+        canPop: _dismissing,
         onPopInvokedWithResult: (didPop, result) {
-          if (!didPop) close();
+          if (!didPop) unawaited(_dismiss());
         },
         child: Dialog(
           child: SizedBox(
@@ -530,7 +590,7 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
                     ),
                     IconButton(
                       tooltip: 'Close preview',
-                      onPressed: close,
+                      onPressed: _dismissing ? null : _dismiss,
                       icon: const Icon(Icons.close),
                     ),
                   ],
@@ -544,68 +604,71 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
                     ),
                   ),
                 Expanded(
-                  child: _playbackFailed
-                      ? AttachmentPreviewFallback(
-                          message: 'Playback unavailable.',
-                          onOpenSystem: _openSystem,
-                        )
-                      : _player != null
-                      ? _player!.build(context)
-                      : _documentFailed
-                      ? AttachmentPreviewFallback(
-                          message: 'Document preview unavailable.',
-                          onOpenSystem: _openSystem,
-                        )
-                      : _document != null
-                      ? _document!.build(context)
-                      : [
-                          'jpg',
-                          'jpeg',
-                          'png',
-                          'webp',
-                          'gif',
-                          'bmp',
-                        ].contains(extension)
-                      ? LayoutBuilder(
-                          builder: (context, constraints) {
-                            final ratio = MediaQuery.devicePixelRatioOf(
-                              context,
-                            );
-                            // Bound initial decoded pixels. Zoom magnifies this preview;
-                            // the original file remains available through system Open.
-                            final width = (constraints.maxWidth * ratio)
-                                .clamp(1, 2048)
-                                .round();
-                            final height = (constraints.maxHeight * ratio)
-                                .clamp(1, 2048)
-                                .round();
-                            final image = ResizeImage.resizeIfNeeded(
-                              width,
-                              height,
-                              FileImage(File(widget.file.path)),
-                            );
-                            if (_previewImage != image) _previewImage?.evict();
-                            _previewImage = image;
-                            return InteractiveViewer(
-                              child: Image(
-                                image: image,
-                                fit: BoxFit.contain,
-                                semanticLabel: widget.attachment.fileName,
-                                errorBuilder: (_, error, stack) =>
-                                    AttachmentPreviewFallback(
-                                      message: 'Image preview unavailable.',
-                                      onOpenSystem: _openSystem,
-                                    ),
-                              ),
-                            );
-                          },
-                        )
-                      : AttachmentPreviewFallback(
-                          message: _playbackFailed
-                              ? 'Playback unavailable.'
-                              : 'No in-app preview for this file.',
-                          onOpenSystem: _openSystem,
-                        ),
+                  child: _withInformation(
+                    _playbackFailed
+                        ? AttachmentPreviewFallback(
+                            message: 'Playback unavailable.',
+                            onOpenSystem: _openSystem,
+                          )
+                        : _player != null
+                        ? _player!.build(context)
+                        : _documentFailed
+                        ? AttachmentPreviewFallback(
+                            message: 'Document preview unavailable.',
+                            onOpenSystem: _openSystem,
+                          )
+                        : _document != null
+                        ? _document!.build(context)
+                        : [
+                            'jpg',
+                            'jpeg',
+                            'png',
+                            'webp',
+                            'gif',
+                            'bmp',
+                          ].contains(extension)
+                        ? LayoutBuilder(
+                            builder: (context, constraints) {
+                              final ratio = MediaQuery.devicePixelRatioOf(
+                                context,
+                              );
+                              // Bound initial decoded pixels. Zoom magnifies this preview;
+                              // the original file remains available through system Open.
+                              final width = (constraints.maxWidth * ratio)
+                                  .clamp(1, 2048)
+                                  .round();
+                              final height = (constraints.maxHeight * ratio)
+                                  .clamp(1, 2048)
+                                  .round();
+                              final image = ResizeImage.resizeIfNeeded(
+                                width,
+                                height,
+                                FileImage(File(widget.file.path)),
+                              );
+                              if (_previewImage != image)
+                                _previewImage?.evict();
+                              _previewImage = image;
+                              return InteractiveViewer(
+                                child: Image(
+                                  image: image,
+                                  fit: BoxFit.contain,
+                                  semanticLabel: widget.attachment.fileName,
+                                  errorBuilder: (_, error, stack) =>
+                                      AttachmentPreviewFallback(
+                                        message: 'Image preview unavailable.',
+                                        onOpenSystem: _openSystem,
+                                      ),
+                                ),
+                              );
+                            },
+                          )
+                        : AttachmentPreviewFallback(
+                            message: _playbackFailed
+                                ? 'Playback unavailable.'
+                                : 'No in-app preview for this file.',
+                            onOpenSystem: _openSystem,
+                          ),
+                  ),
                 ),
               ],
             ),

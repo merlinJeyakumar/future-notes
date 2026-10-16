@@ -90,6 +90,7 @@ void main() {
         expect(find.text('Cancel'), findsNothing);
         await tester.tap(find.text('Background operations: 1 active'));
         await tester.pump();
+        await tester.pumpAndSettle();
         expect(find.text('Finishing'), findsOneWidget);
         expect(find.text('Finishing safely…'), findsNothing);
       } finally {

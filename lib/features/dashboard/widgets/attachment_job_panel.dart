@@ -1,3 +1,5 @@
+import '../../../core/theme/app_tooltip.dart';
+import '../../../core/theme/app_motion.dart';
 import 'attachment_presentation.dart';
 import 'package:flutter/material.dart';
 
@@ -23,8 +25,18 @@ class _AttachmentJobPanelState extends State<AttachmentJobPanel> {
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<bool>(
     valueListenable: widget.viewModel.isLockedNotifier,
-    builder: (context, locked, _) =>
-        locked ? const SizedBox.shrink() : _buildJobs(context),
+    builder: (context, locked, _) => locked
+        ? const SizedBox.shrink()
+        : AnimatedSize(
+            key: ValueKey((
+              widget.viewModel.draftSession.generation,
+              widget.viewModel.currentContentPath,
+            )),
+            duration: AppMotion.duration(context, AppMotion.panelIn),
+            reverseDuration: AppMotion.duration(context, AppMotion.panelOut),
+            alignment: Alignment.topLeft,
+            child: _buildJobs(context),
+          ),
   );
 
   Widget _buildJobs(
@@ -86,9 +98,7 @@ class _AttachmentJobPanelState extends State<AttachmentJobPanel> {
                   children: [
                     TextButton.icon(
                       onPressed: () => setState(() => expanded = !expanded),
-                      icon: Icon(
-                        expanded ? Icons.expand_less : Icons.expand_more,
-                      ),
+                      icon: AppDisclosure(expanded: expanded),
                       label: Text(
                         active.isEmpty
                             ? operation
@@ -112,8 +122,9 @@ class _AttachmentJobPanelState extends State<AttachmentJobPanel> {
                 );
               },
             ),
-            if (expanded)
-              SizedBox(
+            AppReveal(
+              visible: expanded,
+              child: SizedBox(
                 height: 160 * MediaQuery.textScalerOf(context).scale(1),
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
@@ -123,6 +134,7 @@ class _AttachmentJobPanelState extends State<AttachmentJobPanel> {
                       _JobCard(job: jobs[index], viewModel: widget.viewModel),
                 ),
               ),
+            ),
           ],
         ),
       );
@@ -160,7 +172,7 @@ class _JobCard extends StatelessWidget {
                 ),
                 Text(label, style: Theme.of(context).textTheme.labelSmall),
                 if (state.error != null)
-                  Tooltip(
+                  AppTooltip(
                     message: state.error!,
                     child: Text(
                       state.error!,

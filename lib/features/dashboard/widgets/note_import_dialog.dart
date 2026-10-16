@@ -1,3 +1,4 @@
+import '../../../core/theme/app_tooltip.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -246,7 +247,7 @@ class _NoteImportDialogState extends State<NoteImportDialog> {
                 ],
               ),
               const SizedBox(height: 8),
-              Tooltip(
+              AppTooltip(
                 message: widget.fileName,
                 child: Text(widget.fileName, softWrap: true),
               ),

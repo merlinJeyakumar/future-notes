@@ -162,11 +162,12 @@ void main() {
         expect(find.text('synthetic-completed.txt'), findsNothing);
         await tester.tap(find.textContaining('Attachments ('));
         await tester.pump();
+        await tester.pumpAndSettle();
         expect(find.text('synthetic-completed.txt'), findsOneWidget);
         expect(find.text('synthetic-failed.txt'), findsOneWidget);
         expect(find.byTooltip('Retry'), findsOneWidget);
         expect(find.text('Dismiss'), findsNothing);
-        expect(find.byType(AttachmentMoreButton), findsNWidgets(2));
+        expect(find.byType(AttachmentMoreButton), findsOneWidget);
         expect(
           tester.widget<TextField>(find.byType(TextField).first).readOnly,
           isFalse,

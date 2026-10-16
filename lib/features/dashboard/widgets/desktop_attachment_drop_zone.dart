@@ -1,3 +1,4 @@
+import '../../../core/theme/app_motion.dart';
 import 'dart:async';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/foundation.dart';
@@ -66,31 +67,37 @@ class _DesktopAttachmentDropZoneState extends State<DesktopAttachmentDropZone> {
         fit: StackFit.expand,
         children: [
           widget.child,
-          if (enabled && _hovering)
+          if (enabled)
             Positioned.fill(
               child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    border: Border.all(color: accent, width: 2),
-                    color: accent.withValues(alpha: .06),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Center(
-                    child: Material(
-                      color: Theme.of(context).colorScheme.surface,
+                child: AppReveal(
+                  visible: _hovering,
+                  fade: true,
+                  duration: AppMotion.quickIn,
+                  reverseDuration: AppMotion.quickOut,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: accent, width: 2),
+                      color: accent.withValues(alpha: .06),
                       borderRadius: BorderRadius.circular(8),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.attach_file, color: accent, size: 18),
-                            const SizedBox(width: 8),
-                            const Text('Drop files to attach'),
-                          ],
+                    ),
+                    child: Center(
+                      child: Material(
+                        color: Theme.of(context).colorScheme.surface,
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.attach_file, color: accent, size: 18),
+                              const SizedBox(width: 8),
+                              const Text('Drop files to attach'),
+                            ],
+                          ),
                         ),
                       ),
                     ),

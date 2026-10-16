@@ -1,3 +1,4 @@
+import '../../../core/theme/app_tooltip.dart';
 import 'package:flutter/material.dart';
 
 import '../models/note_import.dart';
@@ -51,7 +52,7 @@ class NoteReplacementDialog extends StatelessWidget {
               ),
               if (fileName != null) ...[
                 const SizedBox(height: 8),
-                Tooltip(
+                AppTooltip(
                   message: fileName!,
                   child: Text(fileName!, softWrap: true),
                 ),

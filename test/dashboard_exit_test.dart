@@ -96,6 +96,7 @@ void main() {
       expect(find.byIcon(Icons.chevron_left), findsNothing);
       await tester.tap(hide);
       await tester.pump();
+      await tester.pumpAndSettle();
       expect(find.byType(Sidebar), findsNothing);
       expect(tester.getRect(find.byTooltip('Show notes')).bottom, 1000);
       expect(tester.state(find.byType(ContentArea)), same(areaState));

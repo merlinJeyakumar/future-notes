@@ -1,3 +1,4 @@
+import '../../../core/theme/app_dialog.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -193,7 +194,7 @@ class FileDetailsDialog extends StatelessWidget {
       folderPath = file.path;
     }
 
-    showDialog(
+    showAppDialog(
       context: context,
       builder: (context) {
         final theme = Theme.of(context);
@@ -262,7 +263,7 @@ class FileDetailsDialog extends StatelessWidget {
   }
 
   void _showDeleteConfirmation(BuildContext context, RecentFile file) {
-    showDialog(
+    showAppDialog(
       context: context,
       builder: (context) {
         final theme = Theme.of(context);

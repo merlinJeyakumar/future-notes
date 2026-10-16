@@ -1,3 +1,6 @@
+import '../../../core/theme/app_tooltip.dart';
+import '../../../core/theme/app_motion.dart';
+import '../../../core/theme/app_dialog.dart';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:intl/intl.dart';
@@ -97,7 +100,7 @@ class _AttachmentStripState extends State<AttachmentStrip> {
             action == AttachmentAction.system) {
           return;
         }
-        await showDialog<void>(
+        await showAppDialog<void>(
           context: context,
           builder: (_) => AttachmentViewer(
             viewModel: model,
@@ -123,7 +126,7 @@ class _AttachmentStripState extends State<AttachmentStrip> {
     final owner = model.draftSession.generation;
     final credentials = model.draftSession.credentialGeneration;
     final path = model.currentContentPath;
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       builder: (_) => _AttachmentGallery(
         model: model,
@@ -137,162 +140,171 @@ class _AttachmentStripState extends State<AttachmentStrip> {
   }
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
-    valueListenable: model.isLockedNotifier,
-    builder: (_, locked, _) => locked
-        ? const SizedBox.shrink()
-        : ListenableBuilder(
-            listenable: Listenable.merge([
-              model.attachmentsNotifier,
-              model.attachmentJobsNotifier,
-              model.attachmentCacheNotifier,
-            ]),
-            builder: (context, _) {
-              final entries = _entries(model);
-              if (entries.isEmpty) return const SizedBox.shrink();
-              final jobs = model.attachmentJobsNotifier.value
-                  .where(
-                    (j) =>
-                        j.progress.value.owner == model.draftSession.generation,
-                  )
-                  .toList();
-              final attachments = model.attachmentsNotifier.value;
-              final scale = MediaQuery.textScalerOf(context).scale(1);
-              return Container(
-                width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        TextButton.icon(
-                          onPressed: () => _showRemaining(0),
-                          icon: const Icon(Icons.grid_view, size: 16),
-                          label: const Text('Show all'),
-                        ),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: ListenableBuilder(
-                            listenable: Listenable.merge(
-                              jobs.map((j) => j.phase),
-                            ),
-                            builder: (context, _) {
-                              final active = jobs
-                                  .where((j) => j.progress.value.active)
-                                  .length;
-                              final label =
-                                  'Attachments (${attachments.length})${active == 0 ? '' : ' · $active background operation${active == 1 ? '' : 's'}'}';
-                              return Tooltip(
-                                message: label,
-                                child: TextButton.icon(
-                                  onPressed: () =>
-                                      setState(() => expanded = !expanded),
-                                  icon: Icon(
-                                    expanded
-                                        ? Icons.expand_less
-                                        : Icons.expand_more,
-                                  ),
-                                  label: Text(
-                                    label,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              );
-                            },
+  Widget build(BuildContext context) => AnimatedSize(
+    key: ValueKey((model.draftSession.generation, model.currentContentPath)),
+    duration: AppMotion.duration(context, AppMotion.panelIn),
+    reverseDuration: AppMotion.duration(context, AppMotion.panelOut),
+    curve: expanded ? AppMotion.enterCurve : AppMotion.exitCurve,
+    alignment: Alignment.topLeft,
+    child: ValueListenableBuilder<bool>(
+      valueListenable: model.isLockedNotifier,
+      builder: (_, locked, _) => locked
+          ? const SizedBox.shrink()
+          : ListenableBuilder(
+              listenable: Listenable.merge([
+                model.attachmentsNotifier,
+                model.attachmentJobsNotifier,
+                model.attachmentCacheNotifier,
+              ]),
+              builder: (context, _) {
+                final entries = _entries(model);
+                if (entries.isEmpty) return const SizedBox.shrink();
+                final jobs = model.attachmentJobsNotifier.value
+                    .where(
+                      (j) =>
+                          j.progress.value.owner ==
+                          model.draftSession.generation,
+                    )
+                    .toList();
+                final attachments = model.attachmentsNotifier.value;
+                final scale = MediaQuery.textScalerOf(context).scale(1);
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          TextButton.icon(
+                            onPressed: () => _showRemaining(0),
+                            icon: const Icon(Icons.grid_view, size: 16),
+                            label: const Text('Show all'),
                           ),
-                        ),
-                      ],
-                    ),
-                    ConstrainedBox(
-                      key: const ValueKey('attachment-dock-items'),
-                      constraints: BoxConstraints(
-                        maxHeight: expanded
-                            ? math.max(
-                                _tileHeight(true) * scale,
-                                math.min(
-                                  280,
-                                  MediaQuery.sizeOf(context).height * .35,
-                                ),
-                              )
-                            : _tileHeight(false) * scale,
-                      ),
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final maxSlots = ((constraints.maxWidth + 8) / 64)
-                              .floor()
-                              .clamp(2, 5);
-                          final maximumVisible = math.min(4, maxSlots);
-                          final visibleCount = expanded
-                              ? entries.length
-                              : entries.length > maximumVisible
-                              ? math.min(4, maxSlots - 1)
-                              : entries.length;
-                          final hidden = entries.length - visibleCount;
-                          final slots = visibleCount + (hidden > 0 ? 1 : 0);
-                          final width = expanded
-                              ? math.min(96.0, constraints.maxWidth)
-                              : math.min(
-                                  56.0,
-                                  (constraints.maxWidth - (slots - 1) * 8) /
-                                      slots,
-                                );
-                          return SingleChildScrollView(
-                            primary: false,
-                            child: Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                for (var index = 0; index < slots; index++) ...[
-                                  SizedBox(
-                                    width: width,
-                                    height: _tileHeight(expanded) * scale,
-                                    child: index == visibleCount
-                                        ? Tooltip(
-                                            message:
-                                                'Show $hidden more attachments',
-                                            child: OutlinedButton(
-                                              style: OutlinedButton.styleFrom(
-                                                padding: EdgeInsets.zero,
-                                                minimumSize: Size.zero,
-                                              ),
-                                              key: const ValueKey(
-                                                'attachment-overflow',
-                                              ),
-                                              onPressed: () =>
-                                                  _showRemaining(visibleCount),
-                                              child: FittedBox(
-                                                fit: BoxFit.scaleDown,
-                                                child: Text('+$hidden'),
-                                              ),
-                                            ),
-                                          )
-                                        : _AttachmentTile(
-                                            key: ValueKey(
-                                              '${model.draftSession.generation}/${entries[index].id}',
-                                            ),
-                                            model: model,
-                                            attachment:
-                                                entries[index].attachment,
-                                            job: entries[index].job,
-                                            expanded: expanded,
-                                            onAction: _action,
-                                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: ListenableBuilder(
+                              listenable: Listenable.merge(
+                                jobs.map((j) => j.phase),
+                              ),
+                              builder: (context, _) {
+                                final active = jobs
+                                    .where((j) => j.progress.value.active)
+                                    .length;
+                                final label =
+                                    'Attachments (${attachments.length})${active == 0 ? '' : ' · $active background operation${active == 1 ? '' : 's'}'}';
+                                return AppTooltip(
+                                  message: label,
+                                  child: TextButton.icon(
+                                    onPressed: () =>
+                                        setState(() => expanded = !expanded),
+                                    icon: AppDisclosure(expanded: expanded),
+                                    label: Text(
+                                      label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
-                                ],
-                              ],
+                                );
+                              },
                             ),
-                          );
-                        },
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
+                      ConstrainedBox(
+                        key: const ValueKey('attachment-dock-items'),
+                        constraints: BoxConstraints(
+                          maxHeight: expanded
+                              ? math.max(
+                                  _tileHeight(true) * scale,
+                                  math.min(
+                                    280,
+                                    MediaQuery.sizeOf(context).height * .35,
+                                  ),
+                                )
+                              : _tileHeight(false) * scale,
+                        ),
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final maxSlots = ((constraints.maxWidth + 8) / 64)
+                                .floor()
+                                .clamp(2, 5);
+                            final maximumVisible = math.min(4, maxSlots);
+                            final visibleCount = expanded
+                                ? entries.length
+                                : entries.length > maximumVisible
+                                ? math.min(4, maxSlots - 1)
+                                : entries.length;
+                            final hidden = entries.length - visibleCount;
+                            final slots = visibleCount + (hidden > 0 ? 1 : 0);
+                            final width = expanded
+                                ? math.min(96.0, constraints.maxWidth)
+                                : math.min(
+                                    56.0,
+                                    (constraints.maxWidth - (slots - 1) * 8) /
+                                        slots,
+                                  );
+                            return SingleChildScrollView(
+                              primary: false,
+                              child: Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (
+                                    var index = 0;
+                                    index < slots;
+                                    index++
+                                  ) ...[
+                                    SizedBox(
+                                      width: width,
+                                      height: _tileHeight(expanded) * scale,
+                                      child: index == visibleCount
+                                          ? AppTooltip(
+                                              message:
+                                                  'Show $hidden more attachments',
+                                              child: OutlinedButton(
+                                                style: OutlinedButton.styleFrom(
+                                                  padding: EdgeInsets.zero,
+                                                  minimumSize: Size.zero,
+                                                ),
+                                                key: const ValueKey(
+                                                  'attachment-overflow',
+                                                ),
+                                                onPressed: () => _showRemaining(
+                                                  visibleCount,
+                                                ),
+                                                child: FittedBox(
+                                                  fit: BoxFit.scaleDown,
+                                                  child: Text('+$hidden'),
+                                                ),
+                                              ),
+                                            )
+                                          : _AttachmentTile(
+                                              key: ValueKey(
+                                                '${model.draftSession.generation}/${entries[index].id}',
+                                              ),
+                                              model: model,
+                                              attachment:
+                                                  entries[index].attachment,
+                                              job: entries[index].job,
+                                              expanded: expanded,
+                                              onAction: _action,
+                                            ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+    ),
   );
 }
 
@@ -409,7 +421,7 @@ class _AttachmentTileState extends State<_AttachmentTile> {
       child: Card(
         margin: EdgeInsets.zero,
         clipBehavior: Clip.antiAlias,
-        child: Tooltip(
+        child: AppTooltip(
           message: !expanded && (active || failed)
               ? '$name\n$progressLabel${state?.error == null ? '' : '\n${state!.error}'}'
               : name,
@@ -601,7 +613,7 @@ class _AttachmentTileState extends State<_AttachmentTile> {
                           ),
                           if (active) LinearProgressIndicator(value: fraction),
                           if (state.error != null)
-                            Tooltip(
+                            AppTooltip(
                               message: '$name\n${state.error!}',
                               child: Text(
                                 state.error!,

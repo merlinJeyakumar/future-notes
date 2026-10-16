@@ -142,7 +142,12 @@ void main() {
         await tester.pump(const Duration(milliseconds: 250));
         final viewer = find.byType(AttachmentViewer);
         await _decodeReady(tester, viewer);
-        expect(find.byTooltip('Pause GIF'), findsOneWidget);
+        expect(find.byTooltip('Pause GIF'), findsNothing);
+        expect(find.byTooltip('Pause'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('gif-playback-toggle')),
+          findsOneWidget,
+        );
         final provider =
             tester
                     .widget<Image>(
@@ -157,12 +162,12 @@ void main() {
         expect(await _pixel(tester, strip), thumbnail);
         await tester.tap(find.byKey(const ValueKey('gif-playback-preview')));
         await tester.pump();
-        expect(find.byTooltip('Play GIF'), findsOneWidget);
+        expect(find.byTooltip('Play'), findsOneWidget);
         final paused = await _pixel(tester, viewer);
         for (var i = 0; i < 6; i++)
           await _advance(tester, const Duration(milliseconds: 100));
         expect(await _pixel(tester, viewer), paused);
-        await tester.tap(find.byKey(const ValueKey('gif-playback-preview')));
+        await tester.tap(find.byKey(const ValueKey('gif-playback-toggle')));
         await tester.pump();
         await _expectChanged(tester, viewer, paused);
         await h.editor.pauseAttachmentViewers();

@@ -1,0 +1,18 @@
+{
+  "outputComponents": [
+    {
+      "text": "I have prepared the targeted refinements for the **Future Notes** workspace in accordance with your specifications:\n\n### Planned Refinements & Architecture:\n\n1. **Non-Shifting Sidebar Refresh**:\n   - **Footprint Retention**: The indeterminate refresh spinner is placed within the existing `FILES` / sidebar header line without displacing or pushing down note items.\n   - **Overlay Status**: Status text renders as an absolute overlay badge/scrim above the header rather than an inserted block-level layout element, preventing list row jumps.\n\n2. **Stabilized Note Selection & Editor Layout**:\n   - **One-Time Identity Commit**: Selecting a note instantly swaps content and commits the layout without re-triggering dock or toolbar height morph animations across different note identities.\n   - **Zero Vertical Bounce**: Removed vertical bouncing or multi-phase container resizes during note switching, keeping the editor viewport fixed and steady.\n\n3. **Media Viewer Controls for `sample-animation.gif`**:\n   - **Removed Central Tooltip**: Removed the prominent `'Pause GIF'` center overlay badge.\n   - **Bottom-Right Toggle**: Integrated a subtle, low-contrast visible play/pause icon button at the bottom-right corner of the media frame.\n   - **Image Click Toggle**: Retained direct clicking on the image surface to toggle playback.\n\n4. **Transient Media-Information Ribbon**:\n   - **Safe Synthetic Metadata**: Displays synthetic filename (`sample-animation.gif`), format (`GIF`), and size (`1.8 MB`), strictly avoiding any decrypted or local filesystem paths.\n   - **Visibility & Transitions**: The thin overlay ribbon at the top of the preview appears for the first 3 seconds upon open and remains visible while hovered or keyboard-focused, fading out smoothly without altering or resizing the media container.\n   - **Consistent Media Integration**: Applied the identical ribbon presentation to video and audio dialogs while preserving existing playback sliders and scrubbers."
+    },
+    {
+      "suggestion": "Apply the media viewer ribbon and GIF play/pause changes to Future Notes"
+    },
+    {
+      "suggestion": "Preview the non-shifting sidebar refresh state with indeterminate progress"
+    },
+    {
+      "suggestion": "Demonstrate stabilized note switching between unlocked and locked notes"
+    }
+  ],
+  "projectId": "6056916933162144137",
+  "sessionId": "10871734945830681749"
+}

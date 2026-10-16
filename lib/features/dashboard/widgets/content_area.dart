@@ -1,3 +1,5 @@
+import '../../../core/theme/app_motion.dart';
+import '../../../core/theme/app_dialog.dart';
 import '../models/save_ui_state.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -110,18 +112,39 @@ class _ContentAreaState extends State<ContentArea> {
                 ValueListenableBuilder<bool>(
                   valueListenable: viewModel.isLockedNotifier,
                   builder: (context, isLocked, child) {
-                    if (isLocked || viewModel.isHtmlMode) {
+                    if (isLocked) {
                       return const SizedBox.shrink();
                     }
                     return IgnorePointer(
                       ignoring: viewModel.isLibraryCutover,
-                      child: _buildFloatingToolbar(isMobile),
+                      child: AppReveal(
+                        key: ValueKey((
+                          viewModel.draftSession.generation,
+                          viewModel.currentContentPath,
+                        )),
+                        visible: !viewModel.isHtmlMode,
+                        child: _buildFloatingToolbar(isMobile),
+                      ),
                     );
                   },
                 ),
 
                 // Spacious Editor Area
-                Expanded(child: _buildInputArea(context)),
+                Expanded(
+                  child: AppEntrance(
+                    identity:
+                        viewModel.currentContentPath ??
+                        viewModel.draftSession.generation,
+                    trigger: (
+                      viewModel.draftSession.generation,
+                      viewModel.currentContentPath,
+                      viewModel.isLocked,
+                      viewModel.editorMode,
+                    ),
+                    enabled: !viewModel.isLocked,
+                    child: _buildInputArea(context),
+                  ),
+                ),
 
                 AttachmentJobPanel(viewModel: viewModel, auxiliaryOnly: true),
                 ValueListenableBuilder(
@@ -803,7 +826,7 @@ class _ContentAreaState extends State<ContentArea> {
     BuildContext context, {
     PasswordMode mode = PasswordMode.unlock,
   }) async {
-    return showDialog<String>(
+    return showAppDialog<String>(
       context: context,
       builder: (context) {
         return PasswordDialog(
@@ -935,7 +958,7 @@ class _ContentAreaState extends State<ContentArea> {
 
   void _showSettingsMenu(BuildContext context) {
     if (!viewModel.ensureExtendedNoteOperations()) return;
-    showDialog(
+    showAppDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: colors.toolbarIsland,
@@ -1017,7 +1040,7 @@ class _ContentAreaState extends State<ContentArea> {
                   // preparation uses the nonblocking per-file/batch channels.
                   if (!mounted) return;
                   if (!viewModel.usesOwnedStorage)
-                    showDialog(
+                    showAppDialog(
                       context: stateContext,
                       barrierDismissible: false,
                       builder: (ctx) => _ProgressDialog(viewModel: viewModel),
@@ -1104,7 +1127,7 @@ class _ContentAreaState extends State<ContentArea> {
                   // Show progress dialog
                   if (!mounted) return;
                   if (!viewModel.usesOwnedStorage)
-                    showDialog(
+                    showAppDialog(
                       context: stateContext,
                       barrierDismissible: false,
                       builder: (ctx) => _ProgressDialog(viewModel: viewModel),
@@ -1200,7 +1223,7 @@ class _ContentAreaState extends State<ContentArea> {
         : null;
     if (!context.mounted || (viewModel.usesOwnedStorage && reference == null))
       return;
-    showDialog(
+    showAppDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: colors.toolbarIsland,

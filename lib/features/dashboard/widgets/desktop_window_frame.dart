@@ -1,3 +1,4 @@
+import '../../../core/theme/app_tooltip.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../core/platform/window_actions.dart';
@@ -66,7 +67,7 @@ class _DesktopWindowFrameState extends State<DesktopWindowFrame> {
                       Expanded(
                         child: Padding(
                           padding: const EdgeInsets.only(left: 12),
-                          child: Tooltip(
+                          child: AppTooltip(
                             message:
                                 _error ??
                                 'Drag to move · Double-click to maximize or restore',

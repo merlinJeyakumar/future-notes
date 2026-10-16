@@ -101,6 +101,8 @@ void main() {
     (tester, run, editor) async {
       final name = editor.currentFileName;
       for (var index = 0; index < 4; index++) {
+        // Attachment publication can finish before its row's reveal ends.
+        await tester.pumpAndSettle();
         expect(find.byType(DropTarget), findsOneWidget);
         final target = tester.widget<DropTarget>(find.byType(DropTarget));
         expect(target.enable, isTrue);
@@ -140,6 +142,7 @@ void main() {
       }
       await tester.tap(find.byTooltip('Hide notes'));
       await tester.pump();
+      await tester.pumpAndSettle();
       expect(find.byType(Sidebar), findsNothing);
       expect(find.byType(DropTarget), findsOneWidget);
       expect(tester.getSize(find.byType(DropTarget)), const Size(1440, 1000));

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/core/storage/attachment_performance.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_application_1/core/operations/operation_result.dart';
@@ -26,6 +27,64 @@ void main() {
   late int documentsRequests;
   late List<File> cleanupObstructions;
   late List<StorageOwnerWorker> probeWorkers;
+
+  test(
+    'invalid settings never publish a prospective performance profile',
+    () async {
+      await File(environment.settingsFile!).parent.create(recursive: true);
+      await File(environment.settingsFile!).writeAsString(
+        jsonEncode({
+          'themeMode': 999,
+          'attachmentPerformance': {
+            'targetPercent': 50,
+            'maxParallel': 1,
+            'memoryMiB': 64,
+          },
+        }),
+      );
+      await expectLater(
+        settings.init(),
+        throwsA(isA<SettingsPersistenceFailure>()),
+      );
+      expect(settings.attachmentPerformance, AttachmentPerformance.defaults);
+    },
+  );
+
+  test(
+    'adaptive performance publishes after acknowledgement and survives restart',
+    () async {
+      await settings.init();
+      expect(settings.attachmentPerformance, AttachmentPerformance.defaults);
+      final profile = AttachmentPerformance.defaults.copyWith(
+        targetPercent: 60,
+        maxParallel: 3,
+        memoryMiB: 256,
+        checkBeforeOpen: true,
+        verifyAfterOpen: true,
+      );
+      owner.failCommit = OperationOutcome.ioFailure;
+      await expectLater(
+        settings.setAttachmentPerformance(profile),
+        throwsA(isA<SettingsPersistenceFailure>()),
+      );
+      expect(settings.attachmentPerformance, AttachmentPerformance.defaults);
+      owner.failCommit = null;
+      await settings.setAttachmentPerformance(profile);
+      expect(settings.attachmentPerformance, profile);
+      final metadata =
+          jsonDecode(await File(environment.settingsFile!).readAsString())
+              as Map<String, dynamic>;
+      expect(metadata['attachmentPerformance'], profile.toJson());
+      await settings.closePersistence();
+      final reopened = SettingsService.withStorage(
+        storage: environment,
+        storageOwner: owner,
+      );
+      services.add(reopened);
+      await reopened.init();
+      expect(reopened.attachmentPerformance, profile);
+    },
+  );
 
   test(
     'Windows tray default and changes publish only after durable acknowledgement',

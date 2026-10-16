@@ -9,10 +9,19 @@ import '../../features/dashboard/models/note_model.dart';
 import 'note_reference.dart';
 import 'attachment_transform_worker.dart';
 import 'streaming_file_cipher.dart';
+import 'attachment_performance.dart';
 
 typedef AttachmentSourceResolver =
     Future<StreamingFileSource> Function(NoteReference reference, String id);
 typedef CacheFileRemover = Future<void> Function(File file);
+typedef AttachmentSourcePreparer =
+    Future<StreamingFileSource> Function(
+      NoteReference reference,
+      String id, {
+      FileByteProgress? onProgress,
+      FileReadCancellation? cancellation,
+      required bool verifyContent,
+    });
 
 class CachedAttachmentFile {
   const CachedAttachmentFile(this.path, this.length, this.key);
@@ -33,18 +42,23 @@ class _Entry {
     this.source,
     this.sourceModified,
     this.cachedModified,
+    this.checkedSource,
+    this.verifiedOutput,
   );
   final String note;
   final CachedAttachmentFile file;
   final StreamingFileSource source;
   final DateTime sourceModified;
   final DateTime cachedModified;
+  final bool checkedSource;
+  final bool verifiedOutput;
 }
 
 class _Preparation {
   _Preparation(this.note);
   final String note;
   bool cancelled = false;
+  final readCancellation = FileReadCancellation();
   FileTransformJob? transform;
   late Future<OperationResult<CachedAttachmentFile>> result;
 }
@@ -54,6 +68,8 @@ class AttachmentOpenCache {
   AttachmentOpenCache({
     required this.rootResolver,
     required this.sourceResolver,
+    this.sourcePreparer,
+    this.performance,
     AttachmentTransformWorker? worker,
     CacheFileRemover? removeFile,
   }) : _worker = worker ?? AttachmentTransformWorker(),
@@ -64,6 +80,8 @@ class AttachmentOpenCache {
            });
   final Future<String> Function() rootResolver;
   final AttachmentSourceResolver sourceResolver;
+  final AttachmentSourcePreparer? sourcePreparer;
+  final AttachmentPerformance Function()? performance;
   final AttachmentTransformWorker _worker;
   final CacheFileRemover _removeFile;
   final _entries = <String, _Entry>{};
@@ -260,6 +278,7 @@ class AttachmentOpenCache {
     FileByteProgress? progress,
   ) async {
     String? candidate;
+    final policy = performance?.call() ?? AttachmentPerformance.defaults;
     try {
       await initialize();
       if (operation.cancelled || _closed) return _cancelled();
@@ -268,7 +287,9 @@ class AttachmentOpenCache {
         await _safe(cached.file.path);
         final file = await File(cached.file.path).stat();
         final source = await File(cached.source.path).stat();
-        if (file.type == FileSystemEntityType.file &&
+        if ((!policy.checkBeforeOpen || cached.checkedSource) &&
+            (!policy.verifyAfterOpen || cached.verifiedOutput) &&
+            file.type == FileSystemEntityType.file &&
             file.size == cached.file.length &&
             file.modified == cached.cachedModified &&
             source.type == FileSystemEntityType.file &&
@@ -279,9 +300,24 @@ class AttachmentOpenCache {
         _entries.remove(key);
         await _removeOwned(cached.file.path);
       }
-      progress?.call('Preparing', 0, attachment.size);
-      final source = await sourceResolver(reference, attachment.id);
+      progress?.call(
+        policy.checkBeforeOpen ? 'Preparing' : 'Queued',
+        0,
+        attachment.size,
+      );
+      final source = sourcePreparer == null
+          ? await sourceResolver(reference, attachment.id)
+          : await sourcePreparer!(
+              reference,
+              attachment.id,
+              onProgress: progress,
+              cancellation: operation.readCancellation,
+              verifyContent: policy.checkBeforeOpen,
+            );
       final sourceStat = await File(source.path).stat();
+      if (policy.checkBeforeOpen && source.sha256Hex == null) {
+        throw const FormatException('A checked source digest is required.');
+      }
       if (operation.cancelled || _closed) return _cancelled();
       final id = const Uuid().v4();
       candidate = p.join(_session!.path, '$id.pending');
@@ -293,8 +329,13 @@ class AttachmentOpenCache {
         decryptSource: true,
         encryptDestination: false,
         sourcePassword: password,
+        verifyOutput: policy.verifyAfterOpen,
+        requireWholeSource: true,
+        // Legacy entries may have size=0 meaning unknown rather than empty.
+        expectedPlaintextBytes: attachment.size > 0 ? attachment.size : null,
       );
       transformCount++;
+      progress?.call('Queued', 0, attachment.size);
       operation.transform = _worker.submit(request, onProgress: progress);
       var result = await operation.transform!.result;
       if (!result.isSuccess &&
@@ -311,6 +352,9 @@ class AttachmentOpenCache {
           destination: candidate,
           decryptSource: true,
           encryptDestination: false,
+          verifyOutput: policy.verifyAfterOpen,
+          requireWholeSource: true,
+          expectedPlaintextBytes: attachment.size > 0 ? attachment.size : null,
         );
         transformCount++;
         operation.transform = _worker.submit(request, onProgress: progress);
@@ -345,10 +389,13 @@ class AttachmentOpenCache {
         source,
         sourceStat.modified,
         stat.modified,
+        policy.checkBeforeOpen,
+        policy.verifyAfterOpen,
       );
       candidate = null;
       return OperationResult.success(completed);
     } catch (_) {
+      if (operation.cancelled || _closed) return _cancelled();
       return const OperationResult.failure(
         OperationOutcome.ioFailure,
         'Attachment cache preparation failed.',
@@ -371,6 +418,7 @@ class AttachmentOpenCache {
     final job = _preparing[keyFor(reference, id, credential)];
     if (job == null) return;
     job.cancelled = true;
+    job.readCancellation.cancel();
     await job.transform?.cancel();
     await job.result;
   }
@@ -401,6 +449,7 @@ class AttachmentOpenCache {
     final jobs = _preparing.values.where((job) => job.note == note).toList();
     for (final job in jobs) {
       job.cancelled = true;
+      job.readCancellation.cancel();
       await job.transform?.cancel();
     }
     final paths = _entries.values
@@ -424,6 +473,7 @@ class AttachmentOpenCache {
     final jobs = _preparing.values.toList();
     for (final job in jobs) {
       job.cancelled = true;
+      job.readCancellation.cancel();
       await job.transform?.cancel();
     }
     _entries.clear();

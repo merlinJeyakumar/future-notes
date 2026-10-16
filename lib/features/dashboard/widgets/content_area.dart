@@ -8,10 +8,12 @@ import 'attachment_strip.dart';
 import '../models/note_model.dart';
 import 'password_dialog.dart';
 import 'note_unlock_form.dart';
+import 'desktop_attachment_drop_zone.dart';
 import '../../../core/theme/app_theme.dart';
 
 import 'package:code_text_field/code_text_field.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
+import 'package:flutter_highlight/themes/github.dart';
 
 // Theme-aware design colors helper
 class _ContentColors {
@@ -43,6 +45,7 @@ class _ContentAreaState extends State<ContentArea> {
   late final FocusNode _focusNode;
   late final ScrollController _scrollController;
   final _unlockFocusNode = FocusNode(debugLabel: 'Note unlock password');
+  final _htmlFocusNode = FocusNode(debugLabel: 'HTML source');
 
   ContentViewModel get viewModel => widget.viewModel;
 
@@ -76,6 +79,7 @@ class _ContentAreaState extends State<ContentArea> {
   @override
   void dispose() {
     _unlockFocusNode.dispose();
+    _htmlFocusNode.dispose();
     super.dispose();
   }
 
@@ -118,7 +122,26 @@ class _ContentAreaState extends State<ContentArea> {
                 ),
 
                 // Spacious Editor Area
-                Expanded(child: _buildInputArea(context)),
+                Expanded(
+                  child: ListenableBuilder(
+                    listenable: Listenable.merge([
+                      viewModel,
+                      viewModel.isLockedNotifier,
+                      viewModel.attachmentJobsNotifier,
+                    ]),
+                    child: _buildInputArea(context),
+                    builder: (context, child) => DesktopAttachmentDropZone(
+                      enabled: viewModel.canAcceptAttachmentDrop,
+                      onDrop: (paths) async {
+                        await viewModel.attachDroppedFiles(
+                          paths,
+                          waitForCompletion: false,
+                        );
+                      },
+                      child: child!,
+                    ),
+                  ),
+                ),
 
                 AttachmentJobPanel(viewModel: viewModel, auxiliaryOnly: true),
                 ValueListenableBuilder(
@@ -843,33 +866,81 @@ class _ContentAreaState extends State<ContentArea> {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: viewModel.isHtmlMode
-          ? SizedBox.expand(
-              child: CodeTheme(
-                data: CodeThemeData(styles: atomOneDarkTheme),
-                child: SingleChildScrollView(
-                  child: CodeField(
-                    controller: viewModel.htmlController,
-                    readOnly:
-                        viewModel.isLibraryCutover ||
-                        viewModel.isImportCutover ||
-                        viewModel.isDeletingCurrent ||
-                        !viewModel.draftSession.canWrite,
-                    textStyle: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 14,
-                      color: colors.textPrimary,
-                    ),
-                    expands: false,
-                    maxLines: null,
-                    minLines: 30,
-                    background: colors.background,
-                    lineNumberStyle: LineNumberStyle(
-                      background: colors.background,
-                      textStyle: TextStyle(color: colors.subtleGray),
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: viewModel.isConvertingNotifier,
+                    builder: (context, converting, _) => TextButton.icon(
+                      onPressed:
+                          converting ||
+                              !viewModel.draftSession.canWrite ||
+                              viewModel.isLibraryCutover ||
+                              viewModel.isImportCutover ||
+                              viewModel.isDeletingCurrent
+                          ? null
+                          : () async {
+                              await viewModel.formatHtml();
+                              if (mounted &&
+                                  viewModel.isHtmlMode &&
+                                  !viewModel.isLocked) {
+                                _htmlFocusNode.requestFocus();
+                              }
+                            },
+                      icon: const Icon(Icons.format_align_left, size: 15),
+                      label: Text(
+                        converting ? 'Formatting…' : 'Format HTML',
+                        style: const TextStyle(fontSize: 12),
+                      ),
                     ),
                   ),
                 ),
-              ),
+                Expanded(
+                  child: CodeTheme(
+                    data: CodeThemeData(
+                      styles: Theme.of(context).brightness == Brightness.dark
+                          ? atomOneDarkTheme
+                          : githubTheme,
+                    ),
+                    child: SingleChildScrollView(
+                      child: CodeField(
+                        controller: viewModel.htmlController,
+                        focusNode: _htmlFocusNode,
+                        readOnly:
+                            viewModel.isLibraryCutover ||
+                            viewModel.isImportCutover ||
+                            viewModel.isDeletingCurrent ||
+                            !viewModel.draftSession.canWrite,
+                        textStyle: TextStyle(
+                          fontFamily: 'Consolas',
+                          fontFamilyFallback: const [
+                            'Courier New',
+                            'monospace',
+                          ],
+                          fontSize: 12,
+                          height: 1.5,
+                          color: colors.textPrimary,
+                        ),
+                        expands: false,
+                        maxLines: null,
+                        minLines: 30,
+                        background: colors.background,
+                        lineNumberStyle: LineNumberStyle(
+                          background: colors.background,
+                          textStyle: TextStyle(
+                            color: colors.subtleGray,
+                            fontSize: 12,
+                            height: 1.5,
+                            fontFamily: 'Consolas',
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             )
           : RepaintBoundary(
               child: QuillEditor.basic(

@@ -14,6 +14,7 @@ import '../../../core/storage/owned_note_persistence.dart';
 import '../../../core/storage/storage_owner_worker.dart';
 import '../../../core/storage/library_watch.dart';
 import '../../../core/storage/streaming_file_cipher.dart';
+import '../../../core/storage/attachment_transform_worker.dart';
 import '../../../core/operations/operation_result.dart';
 
 abstract interface class LibraryFileService {
@@ -40,13 +41,17 @@ abstract interface class TransactionalNoteFiles {
   Future<List<NoteReference>> pendingDeletions();
   Future<StreamingFileSource> attachmentSource(
     NoteReference reference,
-    String id,
-  );
+    String id, {
+    FileByteProgress? onProgress,
+    FileReadCancellation? cancellation,
+    bool verifyContent = true,
+  });
   Future<NoteReference> commitGeneration(
     NoteReference reference,
     String content,
-    List<PreparedAttachmentFile> attachments,
-  );
+    List<PreparedAttachmentFile> attachments, {
+    FileByteProgress? onProgress,
+  });
   Future<OperationResult<DeletionReport>> deleteResolved(
     NoteReference reference,
   );
@@ -131,26 +136,41 @@ class FileService
   @override
   Future<StreamingFileSource> attachmentSource(
     NoteReference reference,
-    String id,
-  ) async {
+    String id, {
+    FileByteProgress? onProgress,
+    FileReadCancellation? cancellation,
+    bool verifyContent = true,
+  }) async {
     await _verifyReference(reference);
     if (_ownedNotes == null) {
       throw UnsupportedError('Owned attachment source required.');
     }
-    return _ownedNotes!.attachmentSource(reference, id);
+    return _ownedNotes!.attachmentSource(
+      reference,
+      id,
+      onProgress: onProgress,
+      cancellation: cancellation,
+      verifyContent: verifyContent,
+    );
   }
 
   @override
   Future<NoteReference> commitGeneration(
     NoteReference reference,
     String content,
-    List<PreparedAttachmentFile> attachments,
-  ) async {
+    List<PreparedAttachmentFile> attachments, {
+    FileByteProgress? onProgress,
+  }) async {
     await _verifyReference(reference);
     if (_ownedNotes == null) {
       throw UnsupportedError('Owned generation commit required.');
     }
-    return _ownedNotes!.commit(reference, content, attachments: attachments);
+    return _ownedNotes!.commit(
+      reference,
+      content,
+      attachments: attachments,
+      onProgress: onProgress,
+    );
   }
 
   @override

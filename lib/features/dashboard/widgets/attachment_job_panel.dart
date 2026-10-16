@@ -140,7 +140,7 @@ class _JobCard extends StatelessWidget {
   ) => ValueListenableBuilder<AttachmentJobSnapshot>(
     valueListenable: job.progress,
     builder: (context, state, _) {
-      final label = attachmentPhaseLabel(state.phase);
+      final label = state.detail ?? attachmentPhaseLabel(state.phase);
       final total = state.total;
       final fraction = total != null && total > 0
           ? (state.bytes / total).clamp(0.0, 1.0)

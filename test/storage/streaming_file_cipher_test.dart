@@ -117,6 +117,142 @@ void main() {
     );
     expect(decrypt(await File(path('cipher')).readAsBytes(), null), [1, 2, 3]);
   });
+
+  for (final length in [0, 1, 15, 16, 17, 1024 * 1024 + 17]) {
+    test(
+      'decryption without output readback matches legacy fixture of $length bytes',
+      () async {
+        final bytes = Uint8List.fromList(List.generate(length, (i) => i % 251));
+        final encrypted = length == 0
+            ? Uint8List.fromList([
+                ...Uint8List(16),
+                ...legacy.Encrypter(
+                      legacy.AES(legacy.Key(key(null)), padding: null),
+                    )
+                    .encryptBytes(
+                      List.filled(16, 16),
+                      iv: legacy.IV(Uint8List(16)),
+                    )
+                    .bytes,
+              ])
+            : encrypt(bytes, null);
+        await File(path('source')).writeAsBytes(encrypted);
+        final phases = <String>[];
+        final result = await StreamingFileCipher.transform(
+          source: StreamingFileSource(path('source'), encrypted.length),
+          destination: path('plain'),
+          decryptSource: true,
+          encryptDestination: false,
+          verifyOutput: false,
+          expectedPlaintextBytes: length,
+          requireWholeSource: true,
+          progress: (phase, _, _) => phases.add(phase),
+        );
+        expect(await File(path('plain')).readAsBytes(), bytes);
+        expect(result.plaintextHash, sha256.convert(bytes).toString());
+        expect(phases, isNot(contains('Verifying')));
+      },
+    );
+  }
+
+  test(
+    'readback opt-out retains declared-length framing and mutation protections',
+    () async {
+      final encrypted = encrypt(Uint8List.fromList([1, 2, 3]), null);
+      await File(path('source')).writeAsBytes(encrypted);
+      await expectLater(
+        StreamingFileCipher.transform(
+          source: StreamingFileSource(path('source'), encrypted.length),
+          destination: path('wrong-size'),
+          decryptSource: true,
+          encryptDestination: false,
+          verifyOutput: false,
+          expectedPlaintextBytes: 4,
+        ),
+        throwsFormatException,
+      );
+      expect(await File(path('wrong-size')).exists(), isFalse);
+      await expectLater(
+        StreamingFileCipher.transform(
+          source: StreamingFileSource(path('source'), encrypted.length),
+          destination: path('write'),
+          decryptSource: true,
+          encryptDestination: true,
+          verifyOutput: false,
+        ),
+        throwsFormatException,
+      );
+      expect(await File(path('write')).exists(), isFalse);
+      await File(
+        path('source'),
+      ).writeAsBytes([...encrypted, ...List.filled(16, 0)]);
+      await expectLater(
+        StreamingFileCipher.transform(
+          source: StreamingFileSource(path('source'), encrypted.length),
+          destination: path('trailing'),
+          decryptSource: true,
+          encryptDestination: false,
+          verifyOutput: false,
+          requireWholeSource: true,
+        ),
+        throwsFormatException,
+      );
+      expect(await File(path('trailing')).exists(), isFalse);
+    },
+  );
+  test(
+    'decryption-only mode checks password and cancellation and closes partial output',
+    () async {
+      final bytes = Uint8List.fromList(
+        List.generate(1024 * 1024 + 17, (i) => i % 251),
+      );
+      final encrypted = encrypt(bytes, 'synthetic-password');
+      await File(path('source')).writeAsBytes(encrypted);
+      await StreamingFileCipher.transform(
+        source: StreamingFileSource(path('source'), encrypted.length),
+        destination: path('plain'),
+        decryptSource: true,
+        encryptDestination: false,
+        sourcePassword: 'synthetic-password',
+        verifyOutput: false,
+        expectedPlaintextBytes: bytes.length,
+      );
+      expect(await File(path('plain')).readAsBytes(), bytes);
+      await expectLater(
+        StreamingFileCipher.transform(
+          source: StreamingFileSource(path('source'), encrypted.length),
+          destination: path('wrong'),
+          decryptSource: true,
+          encryptDestination: false,
+          sourcePassword: 'wrong-synthetic',
+          verifyOutput: false,
+          expectedPlaintextBytes: bytes.length,
+        ),
+        throwsFormatException,
+      );
+      expect(await File(path('wrong')).exists(), isFalse);
+      var cancel = false;
+      var windows = 0;
+      await expectLater(
+        StreamingFileCipher.transform(
+          source: StreamingFileSource(path('source'), encrypted.length),
+          destination: path('cancelled'),
+          decryptSource: true,
+          encryptDestination: false,
+          sourcePassword: 'synthetic-password',
+          verifyOutput: false,
+          cancelled: () => cancel,
+          cooperate: () async {
+            if (++windows == 2) cancel = true;
+          },
+        ),
+        throwsA(isA<FileJobCancelled>()),
+      );
+      expect(await File(path('cancelled')).exists(), isFalse);
+      expect(await File(path('source')).readAsBytes(), encrypted);
+    },
+  );
+
   test('wrong key removes only its failed staged output', () async {
     final bytes = encrypt(Uint8List.fromList([1, 2, 3]), 'right-synthetic');
     await File(path('source')).writeAsBytes(bytes);

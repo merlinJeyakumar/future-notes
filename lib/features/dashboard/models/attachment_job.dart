@@ -24,6 +24,7 @@ class AttachmentJobSnapshot {
     this.bytes = 0,
     this.total,
     this.error,
+    this.detail,
     this.batch = false,
     this.originalAttachmentId,
     this.operation = AttachmentJobOperation.add,
@@ -35,6 +36,7 @@ class AttachmentJobSnapshot {
   final int bytes;
   final int? total;
   final String? error;
+  final String? detail;
   final bool batch;
   final String? originalAttachmentId;
   final AttachmentJobOperation operation;
@@ -61,6 +63,8 @@ class AttachmentJobState {
   void update(AttachmentJobSnapshot snapshot) {
     if (_disposed) return;
     if (snapshot.phase == progress.value.phase &&
+        snapshot.detail == progress.value.detail &&
+        snapshot.bytes != snapshot.total &&
         snapshot.active &&
         _clock.elapsedMilliseconds - _last < 200) {
       return;

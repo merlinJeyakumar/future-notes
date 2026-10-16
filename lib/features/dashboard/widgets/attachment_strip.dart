@@ -366,8 +366,8 @@ class _AttachmentTileState extends State<_AttachmentTile> {
         : widget.model.cachedAttachment(attachment.id);
     final active = state?.active ?? false;
     final waiting =
-        state?.phase == AttachmentJobPhase.finalizing ||
-        state?.phase == AttachmentJobPhase.cancelling;
+        state?.phase == AttachmentJobPhase.cancelling ||
+        (state?.phase == AttachmentJobPhase.finalizing && state?.total == null);
     final total = state?.total;
     final fraction = !waiting && total != null && total > 0
         ? (state!.bytes / total).clamp(0.0, 1.0)
@@ -389,7 +389,7 @@ class _AttachmentTileState extends State<_AttachmentTile> {
     final nameStyle = Theme.of(context).textTheme.labelMedium;
     final progressLabel = state == null
         ? ''
-        : '${attachmentPhaseLabel(state.phase)}${total == null || waiting ? '' : ' · ${formatAttachmentBytes(state.bytes)} / ${formatAttachmentBytes(total)}${fraction == null ? '' : ' · ${(fraction * 100).floor()}%'}'}';
+        : '${state.detail ?? attachmentPhaseLabel(state.phase)}${total == null || waiting ? '' : ' · ${formatAttachmentBytes(state.bytes)} / ${formatAttachmentBytes(total)}${fraction == null ? '' : ' · ${(fraction * 100).floor()}%'}'}';
     final more = AttachmentMoreButton(
       compact: true,
       fileName: name,
@@ -584,7 +584,8 @@ class _AttachmentTileState extends State<_AttachmentTile> {
                             liveRegion: true,
                             child: _caption(
                               context,
-                              attachmentPhaseLabel(state!.phase),
+                              state!.detail ??
+                                  attachmentPhaseLabel(state.phase),
                             ),
                           ),
                           if (active) LinearProgressIndicator(value: fraction),

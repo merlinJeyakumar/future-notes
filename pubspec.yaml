@@ -61,6 +61,8 @@ dependencies:
   flutter_widget_from_html_core: 0.17.4
   ffi: 2.1.4
   html: 0.15.6
+  desktop_drop: 0.8.4
+  win32: 5.15.0
 
 dev_dependencies:
   flutter_test:

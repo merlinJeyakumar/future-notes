@@ -96,6 +96,276 @@ void main() {
   }
 
   test(
+    'unlock validates declarations without scanning attachment payloads',
+    () async {
+      await save();
+      await editor.setPassword('synthetic-password');
+      final source = await input();
+      expect(
+        (await editor.addOwnedAttachment(
+          source.path,
+          'synthetic.txt',
+        )).isSuccess,
+        isTrue,
+      );
+      final reference = (await app.files.resolveNote(editor.currentFileName!))!;
+      final attachment = editor.attachments.single;
+      final phases = <String>[];
+      final admitted = await app.files.attachmentSource(
+        reference,
+        attachment.id,
+        verifyContent: false,
+        onProgress: (phase, _, _) => phases.add(phase),
+      );
+      expect(admitted.sha256Hex, isNull);
+      expect(admitted.modifiedMicros, isNotNull);
+      expect(admitted.length, await File(admitted.path).length());
+      expect(phases, isEmpty);
+      expect((await editor.manualLock()).isSuccess, isTrue);
+      await File(
+        p.join(reference.attachmentLocation, '${attachment.id}.med'),
+      ).delete();
+      await editor.unlockNote('synthetic-password');
+      expect(editor.isLocked, isFalse);
+      expect(editor.attachments.single.id, attachment.id);
+    },
+  );
+
+  test(
+    'attachment finalization reports journal stage bytes without enabling cancellation',
+    () async {
+      await save();
+      final source = await input('synthetic publication bytes');
+      final stages = <String>{};
+      var observedBytes = false;
+      var becameCancellable = false;
+      void watch() {
+        for (final job in editor.attachmentJobsNotifier.value) {
+          job.progress.addListener(() {
+            final state = job.progress.value;
+            if (state.phase == AttachmentJobPhase.finalizing &&
+                state.detail != null) {
+              stages.add(state.detail!);
+              observedBytes |= state.bytes > 0;
+              becameCancellable |= state.cancellable;
+            }
+          });
+        }
+      }
+
+      editor.attachmentJobsNotifier.addListener(watch);
+      expect(
+        (await editor.addOwnedAttachment(
+          source.path,
+          'synthetic.txt',
+        )).isSuccess,
+        isTrue,
+      );
+      editor.attachmentJobsNotifier.removeListener(watch);
+      expect(
+        stages,
+        containsAll([
+          'Writing staged file',
+          'Verifying published file',
+          'Confirming commit',
+        ]),
+      );
+      expect(observedBytes, isTrue);
+      expect(becameCancellable, isFalse);
+    },
+  );
+
+  test(
+    'drop batch uses explicit first Save once and publishes every prepared file',
+    () async {
+      var prompts = 0;
+      decisions = (request) async {
+        expect(request.kind, DraftDecisionKind.firstAttachment);
+        prompts++;
+        return DraftDecision.save;
+      };
+      final first = await input('first payload');
+      final second = File(p.join(run.path, 'second.txt'))
+        ..writeAsStringSync('second payload');
+      final dropped = editor.attachDroppedFiles([
+        first.path,
+        second.path,
+        first.path,
+      ]);
+      expect(editor.canAcceptAttachmentDrop, isFalse);
+      final result = await dropped;
+      expect(result.isSuccess, isTrue, reason: result.message);
+      expect(prompts, 1);
+      expect(
+        editor.attachments.map((a) => a.fileName),
+        unorderedEquals(['input.txt', 'second.txt']),
+      );
+      expect(
+        utf8.decode(
+          (await editor.readAttachment(
+            editor.attachments.firstWhere((a) => a.fileName == 'input.txt').id,
+          ))!,
+        ),
+        'first payload',
+      );
+      expect((await stored())['attachments'], hasLength(2));
+      expect(editor.canAcceptAttachmentDrop, isTrue);
+    },
+  );
+
+  test(
+    'drop rejects invalid batch before Save and first-save cancellation preserves draft',
+    () async {
+      var prompts = 0;
+      decisions = (_) async {
+        prompts++;
+        return DraftDecision.cancel;
+      };
+      final first = await input();
+      editor.titleController.text = 'Unsaved text';
+      expect(
+        (await editor.attachDroppedFiles([first.path, run.path])).outcome,
+        OperationOutcome.rejectedInput,
+      );
+      expect(prompts, 0);
+      expect(editor.currentFileName, isNull);
+      expect(
+        (await editor.attachDroppedFiles([first.path])).outcome,
+        OperationOutcome.cancelled,
+      );
+      expect(prompts, 1);
+      expect(editor.currentFileName, isNull);
+      expect(editor.titleController.text, 'Unsaved text');
+      expect(editor.attachments, isEmpty);
+      expect(editor.canAcceptAttachmentDrop, isTrue);
+    },
+  );
+
+  test(
+    'UI drop returns after admission and Exit cancels other preparation after a finishing commit',
+    () async {
+      await save();
+      final first = await input();
+      final second = File(p.join(run.path, 'queued-large.bin'));
+      final sink = await second.open(mode: FileMode.write);
+      for (var i = 0; i < 8; i++) {
+        await sink.writeFrom(List<int>.filled(1024 * 1024, 42));
+      }
+      await sink.close();
+      final (reached, release) = cipher.pause();
+      final committing = editor.addOwnedAttachment(first.path, 'committed.txt');
+      await reached.timeout(const Duration(seconds: 15));
+      expect(
+        (await editor.attachDroppedFiles([
+          second.path,
+        ], waitForCompletion: false)).isSuccess,
+        isTrue,
+      );
+      expect(editor.canAcceptAttachmentDrop, isTrue);
+      expect(editor.hasAttachmentJobs, isTrue);
+      var cancellationPrompts = 0;
+      decisions = (request) async {
+        if (request.kind == DraftDecisionKind.activeAttachments) {
+          cancellationPrompts++;
+        }
+        return DraftDecision.discard;
+      };
+      final exiting = editor.prepareToExit();
+      release.complete();
+      expect((await committing).isSuccess, isTrue);
+      expect(
+        (await exiting.timeout(const Duration(seconds: 15))).isSuccess,
+        isTrue,
+      );
+      expect(cancellationPrompts, 1);
+      expect(editor.attachments.single.fileName, 'committed.txt');
+      expect(editor.hasAttachmentJobs, isFalse);
+    },
+  );
+
+  test(
+    'drop into unlocked protected note retains encryption and rejects locked note',
+    () async {
+      await save();
+      expect(
+        (await editor.setPassword('synthetic-password')).isSuccess,
+        isTrue,
+      );
+      final source = await input();
+      expect(
+        (await editor.attachDroppedFiles([source.path])).isSuccess,
+        isTrue,
+      );
+      final id = editor.attachments.single.id;
+      expect(
+        utf8.decode((await editor.readAttachment(id))!),
+        'synthetic attachment',
+      );
+      await editor.manualLock();
+      expect(editor.canAcceptAttachmentDrop, isFalse);
+      expect(
+        (await editor.attachDroppedFiles([source.path])).outcome,
+        OperationOutcome.conflict,
+      );
+      expect(editor.attachments, hasLength(1));
+    },
+  );
+
+  test(
+    'a second drop is admitted during publication and preserves both attachments and typing',
+    () async {
+      await save();
+      final source = await input();
+      final (reached, release) = cipher.pause();
+      final first = editor.attachDroppedFiles([source.path]);
+      await reached.timeout(const Duration(seconds: 15));
+      expect(editor.canAcceptAttachmentDrop, isTrue);
+      final second = editor.attachDroppedFiles([source.path]);
+      editor.quillController.document.insert(0, 'latest typing ');
+      release.complete();
+      expect((await first).isSuccess, isTrue);
+      expect((await second).isSuccess, isTrue);
+      expect(editor.attachments, hasLength(2));
+      expect((await stored())['attachments'], hasLength(2));
+      expect(
+        editor.quillController.document.toPlainText(),
+        startsWith('latest typing '),
+      );
+    },
+  );
+
+  test(
+    'cancelling one admitted file preserves independently queued files',
+    () async {
+      await save();
+      final source = await input();
+      final second = File(p.join(run.path, 'later.txt'))
+        ..writeAsStringSync('later');
+      var cancelled = false;
+      void cancelFirst() {
+        if (cancelled || editor.attachmentJobsNotifier.value.isEmpty) return;
+        cancelled = true;
+        unawaited(
+          editor.cancelAttachmentJob(
+            editor.attachmentJobsNotifier.value.last.progress.value.id,
+          ),
+        );
+      }
+
+      editor.attachmentJobsNotifier.addListener(cancelFirst);
+      final result = await editor.attachDroppedFiles([
+        source.path,
+        second.path,
+      ]);
+      editor.attachmentJobsNotifier.removeListener(cancelFirst);
+      expect(result.outcome, OperationOutcome.cancelled);
+      expect(editor.attachments.single.fileName, 'later.txt');
+      expect((await stored())['attachments'], hasLength(1));
+      expect(editor.canAcceptAttachmentDrop, isTrue);
+    },
+  );
+
+  test(
     'explicit Save & Continue can persist a blank prerequisite but autosave cannot',
     () async {
       expect(

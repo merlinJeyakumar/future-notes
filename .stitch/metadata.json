@@ -130,6 +130,36 @@
       "purpose": "Left alignment and Show all filename search dialog; synthetic content only",
       "localHtml": ".stitch/designs/attachment-search-gallery-20261016.html",
       "localScreenshot": ".stitch/designs/attachment-search-gallery-20261016.png"
+    },
+    {
+      "id": "b6b90f8745364acd8446eb94d64bab33",
+      "title": "Future Notes - HTML Code Editor & Explorer Drag-and-Drop Surface",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "HTML source formatting, code styling and desktop file drop; synthetic markup only",
+      "localHtml": ".stitch/designs/html-code-drop-20261016.html",
+      "localScreenshot": ".stitch/designs/html-code-drop-20261016.png"
+    },
+    {
+      "id": "3ccfc50c4a3f4853851c0ff43e633d54",
+      "title": "Future Notes - Attachment Performance Settings",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Adaptive 70 percent target and advanced scheduling limits; synthetic content only. Generated crypto labels are not implementation evidence.",
+      "localHtml": ".stitch/designs/attachment-performance-20261016.html",
+      "localScreenshot": ".stitch/designs/attachment-performance-20261016.png"
+    },
+    {
+      "id": "0b616520f4f44469a97f6fbfc59226cb",
+      "title": "Future Notes - Optional attachment viewing checks",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Two off-by-default viewing scans within the existing performance settings; synthetic content only",
+      "localHtml": ".stitch/designs/attachment-open-options-20261016.html",
+      "localScreenshot": ".stitch/designs/attachment-open-options-20261016.png"
     }
   ]
 }

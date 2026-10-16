@@ -33,6 +33,12 @@ class StorageRevision {
       modifiedMicros == other.modifiedMicros;
 }
 
+class StorageFileMetadata {
+  const StorageFileMetadata(this.length, this.modifiedMicros);
+  final int length;
+  final int modifiedMicros;
+}
+
 /// Own this coordinator in one isolate; dispatch lease work to that owner.
 /// Other/older writers may ignore locks, so commits must also check revisions.
 class NativeStoragePrimitives {
@@ -62,6 +68,9 @@ class NativeStoragePrimitives {
   Future<StorageRevision> captureRevision(
     String location, {
     Future<void> Function(int bytesRead)? onChunk,
+    void Function(int length)? onStart,
+    void Function()? beginCompute,
+    void Function()? endCompute,
   }) async {
     await _verify(location);
     final type = await FileSystemEntity.type(location, followLinks: false);
@@ -91,10 +100,16 @@ class NativeStoragePrimitives {
       if (before.type != FileSystemEntityType.file) {
         throw StateError('Storage target changed before revision capture.');
       }
+      onStart?.call(before.size);
       while (true) {
         final bytes = await handle.read(ioWindow);
         if (bytes.isEmpty) break;
-        input.add(bytes);
+        beginCompute?.call();
+        try {
+          input.add(bytes);
+        } finally {
+          endCompute?.call();
+        }
         processed += bytes.length;
         if (onChunk != null) await onChunk(processed);
       }
@@ -116,6 +131,15 @@ class NativeStoragePrimitives {
       digest.value!.toString(),
       after.modified.microsecondsSinceEpoch,
     );
+  }
+
+  /// Path and file metadata only: no payload scan or writer-queue request.
+  Future<StorageFileMetadata> inspectMetadata(String location) async {
+    await _verify(location);
+    final stat = await File(location).stat();
+    if (stat.type != FileSystemEntityType.file)
+      throw const FileSystemException('Attachment is unavailable.');
+    return StorageFileMetadata(stat.size, stat.modified.microsecondsSinceEpoch);
   }
 
   Future<OperationResult<WriterLease>> acquireLease(String location) async {

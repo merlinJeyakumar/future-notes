@@ -74,6 +74,25 @@ class NoteCodec {
         map['timestamp'] is! int) {
       throw const FormatException('Unsupported note schema.');
     }
+    validateAttachmentDeclarations(map);
+    try {
+      final parsed = NoteModel.fromJson(map);
+      final note = NoteModel(
+        id: parsed.id,
+        title: parsed.title,
+        content: parsed.content,
+        isLocked: parsed.isLocked,
+        timestamp: parsed.timestamp,
+        attachments: List.unmodifiable(parsed.attachments),
+      );
+      return DecodedNote(note, map, kind);
+    } catch (_) {
+      throw const FormatException('Invalid note metadata.');
+    }
+  }
+
+  /// Metadata-only validation at note admission/unlock, never a payload scan.
+  static void validateAttachmentDeclarations(Map<String, dynamic> map) {
     final attachments = map['attachments'];
     if (attachments != null) {
       if (attachments is! List) {
@@ -109,20 +128,6 @@ class NoteCodec {
           throw const FormatException('Duplicate attachment identity.');
         }
       }
-    }
-    try {
-      final parsed = NoteModel.fromJson(map);
-      final note = NoteModel(
-        id: parsed.id,
-        title: parsed.title,
-        content: parsed.content,
-        isLocked: parsed.isLocked,
-        timestamp: parsed.timestamp,
-        attachments: List.unmodifiable(parsed.attachments),
-      );
-      return DecodedNote(note, map, kind);
-    } catch (_) {
-      throw const FormatException('Invalid note metadata.');
     }
   }
 }

@@ -70,14 +70,25 @@ class StreamingFileCipher {
     String? sourcePassword,
     String? destinationPassword,
     bool Function()? cancelled,
+    Future<void> Function()? cooperate,
+    void Function()? beginCompute,
+    void Function()? endCompute,
     FileByteProgress? progress,
     int maxPlaintextBytes = maxAttachmentBytes,
+    bool verifyOutput = true,
+    int? expectedPlaintextBytes,
+    bool requireWholeSource = false,
   }) async {
     if (source.offset < 0 || source.length < 0 || source.path == destination) {
       throw const FormatException('Invalid streaming source.');
     }
     final file = File(source.path);
     final before = await file.stat();
+    if (!verifyOutput && (!decryptSource || encryptDestination)) {
+      throw const FormatException(
+        'Output readback is mandatory for writes and rekeying.',
+      );
+    }
     if (before.type != FileSystemEntityType.file ||
         source.offset + source.length > before.size) {
       throw const FormatException('Source is missing or truncated.');
@@ -85,6 +96,10 @@ class StreamingFileCipher {
     if (source.modifiedMicros != null &&
         source.modifiedMicros != before.modified.microsecondsSinceEpoch) {
       throw const FormatException('Captured source revision changed.');
+    }
+    if (requireWholeSource &&
+        (source.offset != 0 || source.length != before.size)) {
+      throw const FormatException('Attachment framing changed.');
     }
     if (decryptSource &&
         (source.length < 32 || (source.length - 16) % 16 != 0)) {
@@ -101,7 +116,10 @@ class StreamingFileCipher {
     final plaintextDigest = _DigestSink();
     final hash = sha256.startChunkedConversion(plaintextDigest);
     final sourceDigest = _DigestSink();
-    final sourceHash = sha256.startChunkedConversion(sourceDigest);
+    // No unused second hash when the source has no captured expected digest.
+    final sourceHash = source.sha256Hex == null
+        ? null
+        : sha256.startChunkedConversion(sourceDigest);
     var plaintextBytes = 0;
     var written = 0;
     final clock = Stopwatch()..start();
@@ -123,7 +141,7 @@ class StreamingFileCipher {
         final iv = await input.read(16);
         if (iv.length != 16) throw const FormatException('Truncated IV.');
         decoder = _cipher(sourcePassword, iv);
-        sourceHash.add(iv);
+        sourceHash?.add(iv);
       }
       SICStreamCipher? encoder;
       if (encryptDestination) {
@@ -142,41 +160,53 @@ class StreamingFileCipher {
       report(phase, consumed, force: true);
       while (remaining > 0) {
         _checkCancelled(cancelled);
+        await cooperate?.call();
+        _checkCancelled(cancelled);
         final bytes = await input.read(min(window, remaining));
         if (bytes.isEmpty) throw const FormatException('Short source read.');
-        sourceHash.add(bytes);
-        remaining -= bytes.length;
-        consumed += bytes.length;
-        var plain = bytes;
-        if (decoder != null) {
-          final decoded = decoder.process(bytes);
-          final joined = Uint8List(retained.length + decoded.length)
-            ..setAll(0, retained)
-            ..setAll(retained.length, decoded);
-          if (remaining > 0) {
-            final keep = min(16, joined.length);
-            plain = Uint8List.sublistView(joined, 0, joined.length - keep);
-            retained = Uint8List.fromList(joined.sublist(joined.length - keep));
-          } else {
-            plain = joined;
+        late Uint8List encoded;
+        beginCompute?.call();
+        try {
+          sourceHash?.add(bytes);
+          remaining -= bytes.length;
+          consumed += bytes.length;
+          var plain = bytes;
+          if (decoder != null) {
+            final decoded = decoder.process(bytes);
+            final joined = Uint8List(retained.length + decoded.length)
+              ..setAll(0, retained)
+              ..setAll(retained.length, decoded);
+            if (remaining > 0) {
+              final keep = min(16, joined.length);
+              plain = Uint8List.sublistView(joined, 0, joined.length - keep);
+              retained = Uint8List.fromList(
+                joined.sublist(joined.length - keep),
+              );
+            } else {
+              plain = joined;
+            }
           }
-        }
-        if (decoder != null && remaining == 0) {
-          final padding = plain.last;
-          if (padding < 1 ||
-              padding > 16 ||
-              padding > plain.length ||
-              plain.sublist(plain.length - padding).any((v) => v != padding)) {
-            throw const FormatException('Invalid legacy padding.');
+          if (decoder != null && remaining == 0) {
+            final padding = plain.last;
+            if (padding < 1 ||
+                padding > 16 ||
+                padding > plain.length ||
+                plain
+                    .sublist(plain.length - padding)
+                    .any((v) => v != padding)) {
+              throw const FormatException('Invalid legacy padding.');
+            }
+            plain = Uint8List.sublistView(plain, 0, plain.length - padding);
           }
-          plain = Uint8List.sublistView(plain, 0, plain.length - padding);
+          plaintextBytes += plain.length;
+          if (plaintextBytes > maxPlaintextBytes) {
+            throw const FormatException('Attachment exceeds the allowed size.');
+          }
+          hash.add(plain);
+          encoded = encoder == null ? plain : encoder.process(plain);
+        } finally {
+          endCompute?.call();
         }
-        plaintextBytes += plain.length;
-        if (plaintextBytes > maxPlaintextBytes) {
-          throw const FormatException('Attachment exceeds the allowed size.');
-        }
-        hash.add(plain);
-        final encoded = encoder == null ? plain : encoder.process(plain);
         await sink.writeFrom(encoded);
         written += encoded.length;
         report(phase, consumed);
@@ -190,7 +220,13 @@ class StreamingFileCipher {
         written += tail.length;
       }
       hash.close();
-      sourceHash.close();
+      if (expectedPlaintextBytes != null &&
+          plaintextBytes != expectedPlaintextBytes) {
+        throw const FormatException(
+          'Decrypted length differs from declared metadata.',
+        );
+      }
+      sourceHash?.close();
       if (source.sha256Hex != null &&
           source.sha256Hex != sourceDigest.value.toString()) {
         throw const FormatException('Captured source content changed.');
@@ -211,21 +247,26 @@ class StreamingFileCipher {
         throw const FormatException('Source changed during transformation.');
       }
       _checkCancelled(cancelled);
-      report('Verifying', 0, force: true);
-      final verified = await _plaintextHash(
-        StreamingFileSource(destination, written),
-        password: destinationPassword,
-        encrypted: encryptDestination,
-        cancelled: cancelled,
-        verifiedBytes: (bytes) =>
-            report('Verifying', min(source.length, bytes)),
-      );
-      if (verified != plaintextDigest.value.toString()) {
-        throw const FormatException('Staged transformation mismatch.');
+      if (verifyOutput) {
+        report('Verifying', 0, force: true);
+        final verified = await _plaintextHash(
+          StreamingFileSource(destination, written),
+          password: destinationPassword,
+          encrypted: encryptDestination,
+          cancelled: cancelled,
+          cooperate: cooperate,
+          beginCompute: beginCompute,
+          endCompute: endCompute,
+          verifiedBytes: (bytes) =>
+              report('Verifying', min(source.length, bytes)),
+        );
+        if (verified != plaintextDigest.value.toString()) {
+          throw const FormatException('Staged transformation mismatch.');
+        }
+        report('Verifying', source.length, force: true);
       }
-      report('Verifying', source.length, force: true);
       _checkCancelled(cancelled);
-      return CipherFileResult(written, verified);
+      return CipherFileResult(written, plaintextDigest.value.toString());
     } catch (_) {
       await sink?.close();
       sink = null;
@@ -245,6 +286,9 @@ class StreamingFileCipher {
     required String? password,
     required bool encrypted,
     bool Function()? cancelled,
+    Future<void> Function()? cooperate,
+    void Function()? beginCompute,
+    void Function()? endCompute,
     void Function(int bytes)? verifiedBytes,
   }) async {
     final input = await File(source.path).open();
@@ -261,36 +305,47 @@ class StreamingFileCipher {
       }
       while (remaining > 0) {
         _checkCancelled(cancelled);
+        await cooperate?.call();
+        _checkCancelled(cancelled);
         final bytes = await input.read(min(window, remaining));
         if (bytes.isEmpty) {
           throw const FormatException('Short verification read.');
         }
-        remaining -= bytes.length;
-        var plain = bytes;
-        if (cipher != null) {
-          final decoded = cipher.process(bytes);
-          final joined = Uint8List(retained.length + decoded.length)
-            ..setAll(0, retained)
-            ..setAll(retained.length, decoded);
-          if (remaining > 0) {
-            final keep = min(16, joined.length);
-            plain = Uint8List.sublistView(joined, 0, joined.length - keep);
-            retained = Uint8List.fromList(joined.sublist(joined.length - keep));
-          } else {
-            plain = joined;
+        beginCompute?.call();
+        try {
+          remaining -= bytes.length;
+          var plain = bytes;
+          if (cipher != null) {
+            final decoded = cipher.process(bytes);
+            final joined = Uint8List(retained.length + decoded.length)
+              ..setAll(0, retained)
+              ..setAll(retained.length, decoded);
+            if (remaining > 0) {
+              final keep = min(16, joined.length);
+              plain = Uint8List.sublistView(joined, 0, joined.length - keep);
+              retained = Uint8List.fromList(
+                joined.sublist(joined.length - keep),
+              );
+            } else {
+              plain = joined;
+            }
           }
-        }
-        if (cipher != null && remaining == 0) {
-          final padding = plain.last;
-          if (padding < 1 ||
-              padding > 16 ||
-              padding > plain.length ||
-              plain.sublist(plain.length - padding).any((v) => v != padding)) {
-            throw const FormatException('Invalid verification padding.');
+          if (cipher != null && remaining == 0) {
+            final padding = plain.last;
+            if (padding < 1 ||
+                padding > 16 ||
+                padding > plain.length ||
+                plain
+                    .sublist(plain.length - padding)
+                    .any((v) => v != padding)) {
+              throw const FormatException('Invalid verification padding.');
+            }
+            plain = Uint8List.sublistView(plain, 0, plain.length - padding);
           }
-          plain = Uint8List.sublistView(plain, 0, plain.length - padding);
+          hash.add(plain);
+        } finally {
+          endCompute?.call();
         }
-        hash.add(plain);
         verifiedBytes?.call(source.length - remaining);
       }
       hash.close();

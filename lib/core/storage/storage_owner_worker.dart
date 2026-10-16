@@ -39,6 +39,16 @@ abstract interface class LibraryStorageOwner {
   Future<OperationResult<void>> admitSelectedLibrary(String root);
 }
 
+abstract interface class ProgressStorageOwner {
+  Future<OperationResult<StorageRevision>> commitWithProgress(
+    StorageOwnerRoot owner, {
+    required String target,
+    required StorageRevision expected,
+    required CommitFileSource source,
+    required CommitByteProgress onProgress,
+  });
+}
+
 /// Injectable storage owner interface; no controllers or attachment bytes cross
 /// its boundary. Application adoption is a separate validation gate.
 abstract class StorageOwner {
@@ -69,7 +79,8 @@ abstract class StorageOwner {
   Future<OperationResult<void>> close();
 }
 
-class StorageOwnerWorker implements StorageOwner, LibraryStorageOwner {
+class StorageOwnerWorker
+    implements StorageOwner, LibraryStorageOwner, ProgressStorageOwner {
   StorageOwnerWorker._(this._environment, this._generation) {
     _replies.listen(_receive);
   }
@@ -78,6 +89,7 @@ class StorageOwnerWorker implements StorageOwner, LibraryStorageOwner {
   final _replies = ReceivePort();
   final _ready = Completer<OperationResult<StorageOwnerWorker>>();
   final _pending = <int, Completer<OperationResult<Object?>>>{};
+  final _progress = <int, CommitByteProgress>{};
   final _roots = <int, StorageOwnerRoot>{};
   final _reports = <int, RecoveryReport>{};
   SendPort? _commands;
@@ -169,6 +181,16 @@ class StorageOwnerWorker implements StorageOwner, LibraryStorageOwner {
     if (_ended) {
       return;
     }
+    if (message is _CommitProgress && message.generation == _generation) {
+      try {
+        _progress[message.identity]?.call(
+          message.phase,
+          message.bytes,
+          message.total,
+        );
+      } catch (_) {}
+      return;
+    }
     if (message is _Hello && message.generation == _generation) {
       if (_commands != null) {
         _fail(OperationOutcome.recoveryRequired);
@@ -181,6 +203,7 @@ class StorageOwnerWorker implements StorageOwner, LibraryStorageOwner {
     }
     if (message is _Reply && message.generation == _generation) {
       final waiter = _pending.remove(message.identity);
+      _progress.remove(message.identity);
       if (waiter == null) {
         return;
       }
@@ -235,6 +258,7 @@ class StorageOwnerWorker implements StorageOwner, LibraryStorageOwner {
       waiter.complete(result);
     }
     _pending.clear();
+    _progress.clear();
     _roots.clear();
     _reports.clear();
     _replies.close();
@@ -248,6 +272,7 @@ class StorageOwnerWorker implements StorageOwner, LibraryStorageOwner {
     StorageRevision? expected,
     CommitFileSource? source,
     String? attachmentDirectory,
+    CommitByteProgress? onProgress,
   }) {
     if (_ended ||
         _commands == null ||
@@ -271,6 +296,7 @@ class StorageOwnerWorker implements StorageOwner, LibraryStorageOwner {
     final id = ++_request;
     final waiter = Completer<OperationResult<Object?>>();
     _pending[id] = waiter;
+    if (onProgress != null) _progress[id] = onProgress;
     _commands!.send(
       _Request(
         id,
@@ -341,6 +367,24 @@ class StorageOwnerWorker implements StorageOwner, LibraryStorageOwner {
       target: target,
       expected: expected,
       source: source,
+    ),
+  );
+
+  @override
+  Future<OperationResult<StorageRevision>> commitWithProgress(
+    StorageOwnerRoot owner, {
+    required String target,
+    required StorageRevision expected,
+    required CommitFileSource source,
+    required CommitByteProgress onProgress,
+  }) async => _revisionResult(
+    await _ask(
+      _Kind.commit,
+      owner: owner,
+      target: target,
+      expected: expected,
+      source: source,
+      onProgress: onProgress,
     ),
   );
 
@@ -502,6 +546,15 @@ class StorageOwnerWorker implements StorageOwner, LibraryStorageOwner {
                 target: message.target!,
                 expected: message.expected!,
                 source: message.source!,
+                onProgress: (phase, bytes, total) => start.replies.send(
+                  _CommitProgress(
+                    message.identity,
+                    start.generation,
+                    phase,
+                    bytes,
+                    total,
+                  ),
+                ),
               );
               report = store.recovery;
             } else if (message.kind == _Kind.delete) {
@@ -606,4 +659,19 @@ class _Reply {
   final OperationResult<Object?> result;
   final int? rootIdentity;
   final RecoveryReport? recovery;
+}
+
+class _CommitProgress {
+  const _CommitProgress(
+    this.identity,
+    this.generation,
+    this.phase,
+    this.bytes,
+    this.total,
+  );
+  final int identity;
+  final String generation;
+  final String phase;
+  final int bytes;
+  final int total;
 }

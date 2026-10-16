@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:crypto/crypto.dart';
+import 'package:flutter_application_1/core/storage/attachment_performance.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_application_1/core/operations/operation_result.dart';
@@ -46,11 +48,15 @@ void main() {
   });
   AttachmentOpenCache create({
     AttachmentSourceResolver? resolver,
+    AttachmentSourcePreparer? preparer,
+    AttachmentPerformance Function()? performance,
     CacheFileRemover? remover,
   }) {
     final cache = AttachmentOpenCache(
       rootResolver: () async => root.path,
       sourceResolver: resolver ?? (_, id) async => source,
+      sourcePreparer: preparer,
+      performance: performance,
       removeFile: remover,
     );
     caches.add(cache);
@@ -59,6 +65,110 @@ void main() {
 
   AttachmentModel attachment([String id = 'synthetic']) =>
       AttachmentModel(id: id, fileName: 'sample.txt', size: 15);
+
+  for (final check in [false, true]) {
+    for (final verify in [false, true]) {
+      test(
+        'open scan settings check=$check verify=$verify preserve exact bytes and cache reuse',
+        () async {
+          var profile = AttachmentPerformance.defaults.copyWith(
+            checkBeforeOpen: check,
+            verifyAfterOpen: verify,
+          );
+          var checked = 0;
+          final cache = create(
+            performance: () => profile,
+            preparer:
+                (
+                  _,
+                  _, {
+                  onProgress,
+                  cancellation,
+                  required verifyContent,
+                }) async {
+                  if (!verifyContent) return source;
+                  checked++;
+                  final hash = sha256
+                      .convert(await File(source.path).readAsBytes())
+                      .toString();
+                  onProgress?.call(
+                    'Checking attachment',
+                    source.length,
+                    source.length,
+                  );
+                  return StreamingFileSource(
+                    source.path,
+                    source.length,
+                    sha256Hex: hash,
+                  );
+                },
+          );
+          final phases = <String>[];
+          final result = await cache.prepare(
+            note,
+            attachment(),
+            0,
+            onProgress: (phase, _, _) => phases.add(phase),
+          );
+          expect(result.isSuccess, isTrue, reason: result.message);
+          expect(
+            await File(result.value!.path).readAsString(),
+            'synthetic bytes',
+          );
+          expect(checked, check ? 1 : 0);
+          expect(phases.contains('Verifying'), verify);
+          expect(phases.contains('Checking attachment'), check);
+          expect(phases.contains('Preparing'), check);
+          expect(
+            (await cache.prepare(note, attachment(), 0)).value!.path,
+            result.value!.path,
+          );
+          expect(cache.transformCount, 1);
+          if (!check || !verify) {
+            profile = profile.copyWith(
+              checkBeforeOpen: true,
+              verifyAfterOpen: true,
+            );
+            expect(
+              (await cache.prepare(note, attachment(), 0)).isSuccess,
+              isTrue,
+            );
+            expect(cache.transformCount, 2);
+          }
+        },
+      );
+    }
+  }
+
+  test(
+    'cancelling a source check joins its reader and never starts decryption',
+    () async {
+      final started = Completer<void>();
+      final readerClosed = Completer<void>();
+      final cache = create(
+        preparer:
+            (_, _, {onProgress, cancellation, required verifyContent}) async {
+              final cancelled = Completer<void>();
+              final detach = cancellation!.listen(() {
+                if (!cancelled.isCompleted) cancelled.complete();
+              });
+              onProgress?.call('Checking attachment', 1, source.length);
+              started.complete();
+              await cancelled.future;
+              detach();
+              readerClosed.complete();
+              throw StateError('synthetic cancelled reader');
+            },
+      );
+      final opening = cache.prepare(note, attachment(), 0);
+      await started.future;
+      await cache.cancel(note, 'synthetic', 0);
+      expect(readerClosed.isCompleted, isTrue);
+      expect((await opening).outcome, OperationOutcome.cancelled);
+      expect(cache.transformCount, 0);
+      expect(cache.peek(note, 'synthetic', 0), isNull);
+    },
+  );
 
   test(
     'explicit open produces a file and repeated/concurrent opens decrypt once',

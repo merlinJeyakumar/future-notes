@@ -35,9 +35,11 @@ import '../models/note_list_ui_state.dart';
 import '../models/draft_transition.dart';
 import '../models/note_envelope.dart' show DecodedNote;
 import '../services/note_codec.dart';
+import '../services/html_source_formatter.dart';
 import '../../../core/storage/note_reference.dart';
 import '../../../core/storage/owned_note_persistence.dart';
 import '../../../core/storage/attachment_transform_worker.dart';
+import '../../../core/storage/attachment_scheduler.dart';
 import '../../../core/storage/streaming_file_cipher.dart';
 import '../models/attachment_job.dart';
 import '../../../core/storage/library_watch.dart';
@@ -292,6 +294,9 @@ class ContentViewModel extends BaseViewModel {
         ),
         sourceResolver:
             (_fileService as TransactionalNoteFiles).attachmentSource,
+        sourcePreparer:
+            (_fileService as TransactionalNoteFiles).attachmentSource,
+        performance: () => _settings.attachmentPerformance,
       );
     }
     try {
@@ -391,13 +396,15 @@ class ContentViewModel extends BaseViewModel {
         password: password,
         onProgress: (phase, bytes, total) => _jobPhase(
           job,
-          phase == 'Verifying'
+          phase == 'Queued'
+              ? AttachmentJobPhase.queued
+              : phase == 'Verifying'
               ? AttachmentJobPhase.verifying
-              : phase == 'Preparing'
+              : phase == 'Preparing' || phase == 'Checking attachment'
               ? AttachmentJobPhase.preparing
               : AttachmentJobPhase.decrypting,
           bytes: bytes,
-          total: total,
+          total: phase == 'Queued' ? null : total,
         ),
       ),
     );
@@ -516,6 +523,8 @@ class ContentViewModel extends BaseViewModel {
   }
 
   bool _bulkAttachmentJob = false;
+  int _attachmentAdds = 0;
+  final _attachmentAddCompletions = <String, Completer<void>>{};
   bool _deleting = false;
   bool _deletingCurrent = false;
   bool get isDeletingCurrent => _deletingCurrent;
@@ -568,6 +577,21 @@ class ContentViewModel extends BaseViewModel {
       (job) => job.progress.value.phase == AttachmentJobPhase.finalizing,
     )) {
       if (transition == DraftTransition.exit) {
+        final finishing = attachmentJobsNotifier.value
+            .where(
+              (job) =>
+                  job.progress.value.phase == AttachmentJobPhase.finalizing,
+            )
+            .toList();
+        final joins = finishing
+            .map(
+              (job) => _attachmentAddCompletions[job.progress.value.id]?.future,
+            )
+            .toList();
+        if (joins.every((join) => join != null)) {
+          await Future.wait(joins.cast<Future<void>>());
+          return _resolveOwnerJobs(transition);
+        }
         await Future.wait(accepted);
         return const OperationResult.success();
       }
@@ -589,6 +613,20 @@ class ContentViewModel extends BaseViewModel {
           OperationOutcome.conflict,
           'Finishing attachment commit. Wait before continuing.',
         );
+      }
+      final finishing = attachmentJobsNotifier.value
+          .where(
+            (job) => job.progress.value.phase == AttachmentJobPhase.finalizing,
+          )
+          .toList();
+      final joins = finishing
+          .map(
+            (job) => _attachmentAddCompletions[job.progress.value.id]?.future,
+          )
+          .toList();
+      if (joins.every((join) => join != null)) {
+        await Future.wait(joins.cast<Future<void>>());
+        return _resolveOwnerJobs(transition);
       }
       await Future.wait(accepted);
       return const OperationResult.success();
@@ -650,7 +688,118 @@ class ContentViewModel extends BaseViewModel {
   bool _isHtmlMode = false;
   bool get isHtmlMode => _isHtmlMode;
 
+  bool _dropBatchActive = false;
+  bool get canAcceptAttachmentDrop =>
+      _usesOwnedMutations &&
+      !_disposed &&
+      !_isLocked &&
+      _session.canWrite &&
+      !_dropBatchActive &&
+      !_bulkAttachmentJob &&
+      !_librarySwitching &&
+      !_libraryResourcesClosing &&
+      !_importCutover &&
+      !_deleting;
+
+  Future<OperationResult<void>> attachDroppedFiles(
+    List<String> paths, {
+    bool waitForCompletion = true,
+  }) async {
+    if (paths.isEmpty) return _cancelledResult();
+    if (!canAcceptAttachmentDrop) {
+      return _reportResult(
+        const OperationResult.failure(
+          OperationOutcome.conflict,
+          'Unlock the note and finish its active operation before attaching files.',
+        ),
+      );
+    }
+    final owner = _session.generation;
+    final credential = _session.credentialGeneration;
+    final captured = List<String>.of(paths);
+    var admitted = false;
+    _dropBatchActive = true;
+    notifyListeners();
+    try {
+      return await _libraryTask(() async {
+        bool ownsDrop() =>
+            !_disposed &&
+            owner == _session.generation &&
+            credential == _session.credentialGeneration &&
+            !_isLocked &&
+            _session.canWrite &&
+            !_libraryResourcesClosing &&
+            !_importCutover;
+        try {
+          // Validate the batch before prompting for first Save or starting work.
+          // Sources remain file-backed; the existing worker rechecks each source.
+          final accepted = <String>{};
+          for (final path in captured) {
+            if (!p.isAbsolute(path) ||
+                await FileSystemEntity.type(path, followLinks: false) !=
+                    FileSystemEntityType.file ||
+                await File(path).length() > 10 * 1024 * 1024 * 1024) {
+              return _reportResult(
+                const OperationResult.failure(
+                  OperationOutcome.rejectedInput,
+                  'Drop regular files up to 10 GiB each. Folders and unavailable files cannot be attached.',
+                ),
+              );
+            }
+            if (!ownsDrop()) return _cancelledResult();
+            accepted.add(p.normalize(path));
+          }
+          if (!_session.isPersisted) {
+            final decision = await _askDraftDecision(
+              const DraftDecisionRequest(
+                DraftDecisionKind.firstAttachment,
+                DraftTransition.navigation,
+              ),
+            );
+            if (!ownsDrop() || decision != DraftDecision.save) {
+              return _cancelledResult();
+            }
+            final saved = await saveNote(allowEmptyFirstSave: true);
+            if (!saved.isSuccess) return saved;
+          }
+          final work = <Future<OperationResult<void>>>[];
+          for (final path in accepted) {
+            if (!ownsDrop()) return _cancelledResult();
+            work.add(addOwnedAttachment(path, p.basename(path)));
+          }
+          // Intake ends after admission, not after encryption/publication.
+          _dropBatchActive = false;
+          admitted = true;
+          if (!_disposed) notifyListeners();
+          Future<OperationResult<void>> finish() async {
+            final results = await Future.wait(work);
+            for (final result in results) {
+              if (!result.isSuccess) return _reportResult(result);
+            }
+            return const OperationResult<void>.success();
+          }
+
+          final completed = finish();
+          if (waitForCompletion) return completed;
+          unawaited(completed);
+          return const OperationResult<void>.success();
+        } catch (_) {
+          return _reportResult(
+            const OperationResult.failure(
+              OperationOutcome.ioFailure,
+              'Dropped files could not be attached. Completed attachments and the draft were retained.',
+            ),
+          );
+        }
+      }, _cancelledResult());
+    } finally {
+      if (!admitted) _dropBatchActive = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
   Future<void> pickAttachment() async {
+    if (_dropBatchActive) return;
     if (_usesOwnedMutations) {
       return _libraryTask(_pickOwnedAttachment, null);
     }
@@ -688,7 +837,8 @@ class ContentViewModel extends BaseViewModel {
     final selected = selection.files.single;
     final path = selected.path;
     if (path == null) return;
-    _reportResult(await addOwnedAttachment(path, selected.name));
+    // Allow another selection immediately while admitted files prepare.
+    unawaited(addOwnedAttachment(path, selected.name).then(_reportResult));
   }
 
   AttachmentJobState _newAttachmentJob(
@@ -721,12 +871,14 @@ class ContentViewModel extends BaseViewModel {
     int bytes = 0,
     int? total,
     String? error,
+    String? detail,
   }) {
     if (_disposed || !_ownedJobStates.contains(job)) return;
     final previous = job.progress.value;
     if (!previous.active) return;
     if ((previous.phase == AttachmentJobPhase.cancelling ||
             previous.phase == AttachmentJobPhase.finalizing) &&
+        previous.phase != phase &&
         ![
           AttachmentJobPhase.completed,
           AttachmentJobPhase.cancelled,
@@ -743,6 +895,7 @@ class ContentViewModel extends BaseViewModel {
         bytes: bytes,
         total: total,
         error: error,
+        detail: detail,
         batch: previous.batch,
         originalAttachmentId: previous.originalAttachmentId,
         operation: previous.operation,
@@ -867,6 +1020,7 @@ class ContentViewModel extends BaseViewModel {
         sourcePassword: oldPassword,
         destinationPassword: newPassword,
       ),
+      onStarted: () => _jobPhase(job, AttachmentJobPhase.preparing),
       onProgress: (phase, bytes, total) => _jobPhase(
         job,
         switch (phase) {
@@ -944,25 +1098,32 @@ class ContentViewModel extends BaseViewModel {
         _deleting ||
         _librarySwitching ||
         _libraryResourcesClosing ||
-        _bulkAttachmentJob) {
+        _bulkAttachmentJob ||
+        _attachmentAdds >= AttachmentScheduler.maxQueued) {
       return const OperationResult.failure(
         OperationOutcome.conflict,
         'Save the note and finish its active operation first.',
       );
     }
-    _bulkAttachmentJob = true;
+    _attachmentAdds++;
     final owner = _session.generation;
     final credential = _session.credentialGeneration;
     final password = _currentPassword;
     final id = const Uuid().v4();
     final job = _newAttachmentJob(id, fileName);
+    final completed = Completer<void>();
+    _attachmentAddCompletions[id] = completed;
+    final reference = _noteReference!;
     final files = _fileService as TransactionalNoteFiles;
     Directory? operation;
     OperationResult<void> result;
     try {
-      _jobPhase(job, AttachmentJobPhase.preparing);
       final source = StreamingFileSource(path, await File(path).length());
-      operation = await files.createOperationDirectory(_noteReference!);
+      if (_cancelledAttachmentJobs.contains(id) ||
+          owner != _session.generation) {
+        throw const FileJobCancelled();
+      }
+      operation = await files.createOperationDirectory(reference);
       final staged = p.join(operation.path, '$id.med');
       final transformed = await _transformAttachment(
         job,
@@ -981,6 +1142,9 @@ class ContentViewModel extends BaseViewModel {
           if (_disposed ||
               owner != _session.generation ||
               credential != _session.credentialGeneration ||
+              _isLocked ||
+              _noteReference == null ||
+              !p.equals(reference.contentPath, _noteReference!.contentPath) ||
               _cancelledAttachmentJobs.contains(id)) {
             return _cancelledResult();
           }
@@ -999,6 +1163,13 @@ class ContentViewModel extends BaseViewModel {
             ),
             true,
             generationChange: true,
+            onProgress: (phase, bytes, total) => _jobPhase(
+              job,
+              AttachmentJobPhase.finalizing,
+              detail: phase,
+              bytes: bytes,
+              total: total,
+            ),
             prepared: [
               PreparedAttachmentFile(
                 id,
@@ -1008,6 +1179,8 @@ class ContentViewModel extends BaseViewModel {
           );
         });
       }
+    } on FileJobCancelled {
+      result = _cancelledResult();
     } catch (_) {
       result = const OperationResult.failure(
         OperationOutcome.ioFailure,
@@ -1021,7 +1194,7 @@ class ContentViewModel extends BaseViewModel {
           /* Retain operation sources for manual cleanup. */
         }
       }
-      _bulkAttachmentJob = false;
+      _attachmentAdds--;
     }
     _jobPhase(
       job,
@@ -1037,6 +1210,8 @@ class ContentViewModel extends BaseViewModel {
         _reportResult(await addOwnedAttachment(path, fileName));
       };
     }
+    _attachmentAddCompletions.remove(id);
+    completed.complete();
     return result;
   }
 
@@ -1666,10 +1841,17 @@ class ContentViewModel extends BaseViewModel {
     _bindDocument();
     htmlController.addListener(_onHtmlChanged);
     titleController.addListener(_onTitleChanged);
+    _settings.attachmentPerformanceNotifier.addListener(
+      _configureAttachmentPerformance,
+    );
+    _configureAttachmentPerformance();
     if (startBackgroundServices) _initAsync();
   }
 
   static int _systemMilliseconds() => DateTime.now().millisecondsSinceEpoch;
+
+  void _configureAttachmentPerformance() =>
+      AttachmentScheduler.shared.configure(_settings.attachmentPerformance);
 
   void _bindDocument() {
     _documentSubscription?.cancel();
@@ -1745,6 +1927,62 @@ class ContentViewModel extends BaseViewModel {
 
   Future<void> toggleEditorMode() async {
     await setEditorMode(_isHtmlMode ? EditorMode.richText : EditorMode.html);
+  }
+
+  Future<OperationResult<void>> formatHtml() async {
+    if (_disposed ||
+        !_isHtmlMode ||
+        _isLocked ||
+        !_session.canWrite ||
+        _librarySwitching ||
+        _importCutover ||
+        _deleting ||
+        _libraryResourcesClosing) {
+      return _cancelledResult();
+    }
+    if (isConvertingEditor) {
+      return const OperationResult.failure(
+        OperationOutcome.conflict,
+        'Editor conversion is already running.',
+      );
+    }
+    final owner = _session.generation;
+    final revision = _session.editRevision;
+    final source = htmlController.text;
+    final selection = htmlController.selection;
+    isConvertingNotifier.value = true;
+    try {
+      final formatted = await compute(formatHtmlSource, source);
+      if (_disposed ||
+          owner != _session.generation ||
+          revision != _session.editRevision ||
+          !_isHtmlMode ||
+          _isLocked ||
+          !_session.canWrite ||
+          _libraryResourcesClosing) {
+        return _cancelledResult();
+      }
+      if (formatted != source) {
+        htmlController.value = TextEditingValue(
+          text: formatted,
+          selection: TextSelection(
+            baseOffset: selection.baseOffset.clamp(0, formatted.length),
+            extentOffset: selection.extentOffset.clamp(0, formatted.length),
+          ),
+        );
+      }
+      return const OperationResult.success();
+    } catch (_) {
+      if (_disposed || owner != _session.generation) return _cancelledResult();
+      return _reportResult(
+        const OperationResult.failure(
+          OperationOutcome.rejectedInput,
+          'HTML could not be formatted. Complete its tags first; the source was retained.',
+        ),
+      );
+    } finally {
+      if (!_disposed) isConvertingNotifier.value = false;
+    }
   }
 
   Future<OperationResult<void>> setEditorMode(EditorMode target) =>
@@ -2917,6 +3155,7 @@ class ContentViewModel extends BaseViewModel {
     final owner = _session.generation;
     final request = ++_unlockRequest;
     try {
+      NoteCodec.validateAttachmentDeclarations(_retainedMetadata);
       final decryptedContent = await _encryptionService.decryptResult(
         _storedNote!.content,
         password: password,
@@ -3518,6 +3757,7 @@ class ContentViewModel extends BaseViewModel {
     List<PreparedAttachmentFile> prepared = const [],
     bool generationChange = false,
     bool changesProtection = false,
+    FileByteProgress? onProgress,
   }) async {
     if (!_ownsSnapshot(snapshot)) return _cancelledResult();
     if (_persistedCredentialGeneration == snapshot.credentialGeneration &&
@@ -3608,6 +3848,7 @@ class ContentViewModel extends BaseViewModel {
               reference,
               encoded,
               prepared,
+              onProgress: onProgress,
             )
           : await _fileService.writeResolved(reference, encoded);
       if (!_ownsSnapshot(snapshot)) return _cancelledResult();
@@ -5060,6 +5301,9 @@ class ContentViewModel extends BaseViewModel {
   // region Lifecycle
   @override
   void dispose() {
+    _settings.attachmentPerformanceNotifier.removeListener(
+      _configureAttachmentPerformance,
+    );
     unawaited(closeAttachmentCache());
     attachmentCacheNotifier.dispose();
     pendingDeletionsNotifier.dispose();
@@ -5284,7 +5528,7 @@ Future<String> _deltaToHtmlTask(List<dynamic> deltaJson) async {
     deltaJson.cast<Map<String, dynamic>>(),
     ConverterOptions.forEmail(),
   );
-  return converter.convert();
+  return formatHtmlSource(converter.convert());
 }
 
 class _SearchTicket {

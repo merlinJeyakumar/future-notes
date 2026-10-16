@@ -42,6 +42,7 @@ enum CommitBoundary {
 
 typedef CommitFaultHook =
     Future<void> Function(CommitBoundary point, String id);
+typedef CommitByteProgress = void Function(String phase, int bytes, int total);
 
 /// Reopenable, file-backed input. Its length is checked before and after copying.
 class CommitFileSource {
@@ -175,6 +176,7 @@ class RecoverableStore {
     required StorageRevision expected,
     required CommitFileSource source,
     bool Function()? isCancelled,
+    CommitByteProgress? onProgress,
   }) {
     final completed = Completer<OperationResult<StorageRevision>>();
     if (_closing) {
@@ -186,7 +188,9 @@ class RecoverableStore {
       );
     }
     _tail = _tail.then((_) async {
-      completed.complete(await _commit(target, expected, source, isCancelled));
+      completed.complete(
+        await _commit(target, expected, source, isCancelled, onProgress),
+      );
     });
     return completed.future;
   }
@@ -305,7 +309,25 @@ class RecoverableStore {
     StorageRevision expected,
     CommitFileSource source,
     bool Function()? cancelled,
+    CommitByteProgress? onProgress,
   ) async {
+    final progressClock = Stopwatch()..start();
+    var lastProgress = -100;
+    String? lastPhase;
+    void progress(String phase, int bytes, int total) {
+      if (phase != lastPhase ||
+          bytes == total ||
+          progressClock.elapsedMilliseconds - lastProgress >= 100) {
+        lastPhase = phase;
+        lastProgress = progressClock.elapsedMilliseconds;
+        try {
+          onProgress?.call(phase, bytes, total);
+        } catch (_) {
+          /* Observation cannot interrupt a journal. */
+        }
+      }
+    }
+
     var journalStarted = false;
     try {
       if (_closing || _libraryReadOnly || _blocked.contains(_key(target))) {
@@ -340,7 +362,11 @@ class RecoverableStore {
       if (cancelled?.call() == true) {
         throw const _Cancelled();
       }
-      final before = await _primitives.captureRevision(source.path);
+      final before = await _captureProgress(
+        source.path,
+        progress,
+        'Checking prepared file',
+      );
       if (!before.exists ||
           before.length != source.length ||
           p.equals(source.path, destination)) {
@@ -356,8 +382,13 @@ class RecoverableStore {
         written: CommitBoundary.stageWritten,
         flushed: CommitBoundary.stageFlushed,
         cancelled: cancelled,
+        onProgress: progress,
       );
-      final staged = await _primitives.captureRevision(stagedPath);
+      final staged = await _captureProgress(
+        stagedPath,
+        progress,
+        'Confirming staged file',
+      );
       if (!_sameContent(staged, before)) {
         throw const _Changed();
       }
@@ -412,7 +443,11 @@ class RecoverableStore {
       await _parent(destination);
       await _move(stagedPath, destination);
       await _point(CommitBoundary.published, id);
-      final published = await _primitives.captureRevision(destination);
+      final published = await _captureProgress(
+        destination,
+        progress,
+        'Verifying published file',
+      );
       if (!published.matches(staged)) {
         throw const _Changed();
       }
@@ -429,8 +464,10 @@ class RecoverableStore {
         record,
       );
       // Detect an observed replacement even after writing the receipt.
-      if (!(await _primitives.captureRevision(
+      if (!(await _captureProgress(
         destination,
+        progress,
+        'Confirming commit',
       )).matches(published)) {
         throw const _Changed();
       }
@@ -733,13 +770,18 @@ class RecoverableStore {
     CommitBoundary? written,
     CommitBoundary? flushed,
     bool Function()? cancelled,
+    CommitByteProgress? onProgress,
   }) async {
     if (!required.exists) {
       throw const _Changed();
     }
     await _parent(destination);
     await environment.verifyLocation(source);
-    final before = await _primitives.captureRevision(source);
+    final before = await _captureProgress(
+      source,
+      onProgress,
+      'Verifying prepared source',
+    );
     if (!_sameContent(before, required)) {
       throw const _Changed();
     }
@@ -766,6 +808,7 @@ class RecoverableStore {
           throw const _Changed();
         }
         await output.writeFrom(bytes);
+        onProgress?.call('Writing staged file', copied, required.length!);
       }
       if (copied != required.length) {
         throw const _Changed();
@@ -788,13 +831,40 @@ class RecoverableStore {
         }
       }
     }
-    if (!(await _primitives.captureRevision(source)).matches(before) ||
+    if (!(await _captureProgress(
+          source,
+          onProgress,
+          'Rechecking prepared source',
+        )).matches(before) ||
         !_sameContent(
-          await _primitives.captureRevision(destination),
+          await _captureProgress(
+            destination,
+            onProgress,
+            'Verifying staged file',
+          ),
           required,
         )) {
       throw const _Changed();
     }
+  }
+
+  Future<StorageRevision> _captureProgress(
+    String path,
+    CommitByteProgress? progress,
+    String phase,
+  ) async {
+    if (progress == null) return _primitives.captureRevision(path);
+    var length = 0;
+    return _primitives.captureRevision(
+      path,
+      onStart: (bytes) {
+        length = bytes;
+        progress(phase, 0, length);
+      },
+      onChunk: (bytes) async {
+        progress(phase, min(bytes, length), length);
+      },
+    );
   }
 
   Future<void> _writeSmall(

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../../../core/operations/operation_result.dart';
 import '../services/settings_service.dart';
+import '../../../core/storage/attachment_performance.dart';
+import '../../../core/storage/attachment_scheduler.dart';
 
 class AppSettingsDialog extends StatefulWidget {
   const AppSettingsDialog({
@@ -26,6 +28,7 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
   late final Future<String> _version;
   final _pending = <String>{};
   String? _error;
+  double? _targetPreview;
   @override
   void initState() {
     super.initState();
@@ -134,6 +137,8 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
             ),
             if (!kIsWeb && !Platform.isAndroid && !Platform.isIOS) ...[
               const Divider(),
+              _attachmentPerformance(),
+              const Divider(),
               const Text(
                 'Current library',
                 style: TextStyle(fontWeight: FontWeight.w600),
@@ -181,6 +186,144 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Close'),
+        ),
+      ],
+    );
+  }
+
+  Widget _attachmentPerformance() {
+    final current = widget.settings.attachmentPerformance;
+    final pending = _pending.contains('performance');
+    Future<void> save(AttachmentPerformance value) => _write(
+      'performance',
+      () => widget.settings.setAttachmentPerformance(value),
+    );
+    Widget limit(
+      String label,
+      int value,
+      List<int> options,
+      String Function(int) text,
+      AttachmentPerformance Function(int) candidate,
+    ) => DropdownButtonFormField<int>(
+      key: ValueKey('$label:$value:$pending'),
+      decoration: InputDecoration(labelText: label),
+      initialValue: value,
+      items: ({0, ...options, value}.toList()..sort())
+          .map(
+            (v) => DropdownMenuItem(
+              value: v,
+              child: Text(v == 0 ? 'Automatic' : text(v)),
+            ),
+          )
+          .toList(),
+      onChanged: pending
+          ? null
+          : (v) {
+              if (v != null) save(candidate(v));
+            },
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Attachment performance',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Automatically adapts to this computer and other running apps. Additional files queue while processing continues.',
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Available-capacity target: ${(_targetPreview ?? current.targetPercent.toDouble()).round()}%',
+        ),
+        Slider(
+          key: const ValueKey('attachment-capacity-target'),
+          min: 10,
+          max: 90,
+          divisions: 16,
+          value: _targetPreview ?? current.targetPercent.toDouble(),
+          label:
+              '${(_targetPreview ?? current.targetPercent.toDouble()).round()}%',
+          onChanged: pending ? null : (v) => setState(() => _targetPreview = v),
+          onChangeEnd: pending
+              ? null
+              : (v) async {
+                  await save(current.copyWith(targetPercent: v.round()));
+                  if (mounted) setState(() => _targetPreview = null);
+                },
+        ),
+        const Text(
+          'Default 70%. A scheduling target, not an OS hard cap; memory is a ceiling, not an allocation goal.',
+        ),
+        ValueListenableBuilder<AttachmentBudget?>(
+          valueListenable: AttachmentScheduler.shared.status,
+          builder: (context, budget, _) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              budget == null
+                  ? 'CPU and available memory are detected when work starts.'
+                  : '${budget.capacity.processors} logical processors · ${(budget.capacity.availableBytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GiB available\n${budget.active} active · ${budget.queued} queued${budget.capacity.detected ? '' : ' · conservative monitoring fallback'}',
+            ),
+          ),
+        ),
+        ExpansionTile(
+          title: const Text('Advanced configuration'),
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          children: [
+            limit(
+              'Maximum parallel files',
+              current.maxParallel,
+              [1, 2, 4, 8, 16, 32, 64, 128, 256],
+              (v) => '$v files',
+              (v) => current.copyWith(maxParallel: v),
+            ),
+            const SizedBox(height: 12),
+            limit(
+              'Preparation working-memory budget',
+              current.memoryMiB,
+              [64, 128, 256, 512, 1024, 2048, 4096, 8192],
+              (v) => '$v MiB',
+              (v) => current.copyWith(memoryMiB: v),
+            ),
+            const SizedBox(height: 6),
+            SwitchListTile(
+              key: const ValueKey('check-before-open'),
+              title: const Text('Check encrypted file before opening'),
+              subtitle: const Text(
+                'Optional full source hash scan. Off by default.',
+              ),
+              value: current.checkBeforeOpen,
+              onChanged: pending
+                  ? null
+                  : (v) => save(current.copyWith(checkBeforeOpen: v)),
+            ),
+            SwitchListTile(
+              key: const ValueKey('verify-after-open'),
+              title: const Text('Verify decrypted output'),
+              subtitle: const Text('Optional output readback. Off by default.'),
+              value: current.verifyAfterOpen,
+              onChanged: pending
+                  ? null
+                  : (v) => save(current.copyWith(verifyAfterOpen: v)),
+            ),
+            const Text(
+              'Attachment metadata is validated when loading/unlocking the note. Required file-safety, length and padding checks always apply.',
+            ),
+            const Text(
+              'Each worker reserves an estimated 64 MiB scheduling allowance and streams 1 MiB windows. Lower limits apply as memory becomes busy.',
+            ),
+            TextButton(
+              onPressed: pending
+                  ? null
+                  : () => save(AttachmentPerformance.defaults),
+              child: const Text('Reset performance defaults'),
+            ),
+          ],
+        ),
+        const Text(
+          'Viewing options do not change encryption formats or journal commit verification.',
         ),
       ],
     );

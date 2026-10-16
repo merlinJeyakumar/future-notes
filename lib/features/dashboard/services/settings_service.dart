@@ -7,6 +7,7 @@ import '../../../core/storage/storage_environment.dart';
 import '../../../core/storage/owned_settings_persistence.dart';
 import '../../../core/storage/storage_owner_worker.dart';
 import '../../../core/operations/operation_result.dart';
+import '../../../core/storage/attachment_performance.dart';
 
 enum CompressionLevel {
   high, // significant compression
@@ -74,6 +75,24 @@ class SettingsService {
   );
 
   ThemeMode get themeMode => _themeMode;
+  final attachmentPerformanceNotifier = ValueNotifier(
+    AttachmentPerformance.defaults,
+  );
+  AttachmentPerformance get attachmentPerformance =>
+      attachmentPerformanceNotifier.value;
+
+  Future<void> setAttachmentPerformance(AttachmentPerformance value) async {
+    final validated = AttachmentPerformance.fromJson(value.toJson());
+    if (_storageOwner != null) {
+      return _queueOwnedSettings(
+        () => _saveOwnedSettings(performance: validated),
+      );
+    }
+    // Publish only after the legacy writer has acknowledged this candidate too.
+    await _saveSettings(performance: validated);
+    attachmentPerformanceNotifier.value = validated;
+  }
+
   bool _minimizeToTrayOnClose = Platform.isWindows;
   bool get minimizeToTrayOnClose => _minimizeToTrayOnClose;
   Future<void> setMinimizeToTrayOnClose(bool enabled) async {
@@ -125,6 +144,16 @@ class SettingsService {
         final compression = metadata['compressionLevel'];
         final theme = metadata['themeMode'];
         final tray = metadata['minimizeToTrayOnClose'];
+        final AttachmentPerformance performance;
+        try {
+          performance = AttachmentPerformance.fromJson(
+            metadata['attachmentPerformance'],
+          );
+        } on FormatException {
+          throw const SettingsPersistenceFailure(
+            OperationOutcome.rejectedInput,
+          );
+        }
         if (metadata.containsKey('minimizeToTrayOnClose') && tray is! bool) {
           throw const SettingsPersistenceFailure(
             OperationOutcome.rejectedInput,
@@ -177,6 +206,7 @@ class SettingsService {
         }
         _customDataPath = _storage.isValidation ? null : storedPath;
         themeModeNotifier.value = _themeMode;
+        attachmentPerformanceNotifier.value = performance;
         return;
       } on SettingsPersistenceFailure {
         rethrow;
@@ -275,6 +305,7 @@ class SettingsService {
     String? path,
     bool changesPath = false,
     bool? minimizeToTray,
+    AttachmentPerformance? performance,
   }) async {
     final candidateTheme = theme ?? _themeMode;
     final candidateCompression = compression ?? _compressionLevel;
@@ -285,6 +316,7 @@ class SettingsService {
       'customDataPath': candidatePath,
       'themeMode': candidateTheme.index,
       'minimizeToTrayOnClose': minimizeToTray ?? _minimizeToTrayOnClose,
+      'attachmentPerformance': (performance ?? attachmentPerformance).toJson(),
     };
     await _ownedPersistence!.write(candidate);
     _ownedMetadata = candidate;
@@ -293,6 +325,7 @@ class SettingsService {
     _themeMode = candidateTheme;
     _minimizeToTrayOnClose = minimizeToTray ?? _minimizeToTrayOnClose;
     themeModeNotifier.value = candidateTheme;
+    attachmentPerformanceNotifier.value = performance ?? attachmentPerformance;
   }
 
   /// Release only this service's settings root after accepted mutations. The
@@ -399,13 +432,16 @@ class SettingsService {
         if (json['minimizeToTrayOnClose'] is bool) {
           _minimizeToTrayOnClose = json['minimizeToTrayOnClose'] as bool;
         }
+        attachmentPerformanceNotifier.value = AttachmentPerformance.fromJson(
+          json['attachmentPerformance'],
+        );
       }
     } catch (e) {
       debugPrint('Settings could not be loaded; defaults retained.');
     }
   }
 
-  Future<void> _saveSettings() async {
+  Future<void> _saveSettings({AttachmentPerformance? performance}) async {
     try {
       final file = File(await getSettingsFilePath());
       final folder = file.parent;
@@ -418,11 +454,14 @@ class SettingsService {
         'customDataPath': _customDataPath,
         'themeMode': _themeMode.index,
         'minimizeToTrayOnClose': _minimizeToTrayOnClose,
+        'attachmentPerformance': (performance ?? attachmentPerformance)
+            .toJson(),
       };
 
       await file.writeAsString(jsonEncode(json));
     } catch (e) {
       debugPrint('Settings could not be saved.');
+      if (performance != null) rethrow;
     }
   }
 }

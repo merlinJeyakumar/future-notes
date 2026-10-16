@@ -1,16 +1,19 @@
-Future Notes 1.2.1 is the protected Windows x64 portable release (build 4).
+Future Notes 1.2.2 is the protected Windows x64 portable release (build 5).
 
-Changes since 1.2.0:
+Changes since 1.2.1:
 
-- Dart code is compiled with name obfuscation. Crash symbols and the name map
-  remain in private build storage and are excluded from downloadable files.
-- The native Release runner enables Control Flow Guard, stack cookies, DEP,
-  ASLR and high-entropy ASLR. Build tooling checks the actual executable flags.
-- DLL loading excludes the working directory and PATH, prefers System32 and
-  rejects remote/low-integrity images. Legacy extension points are disabled and
-  strict handle checks enabled before normal engine/plugin/storage startup.
-- The normal editor, storage backend, note formats and existing functionality
-  are retained. Notes, settings, encryption and library locations are unchanged.
+- PDF +/− zoom keeps the visible view centered, including after panning.
+- Touchpad pinch and two-finger pan now use one transform owner. Pinching stays
+  centered without sideways drift, including when reversing direction or when
+  scroll signals arrive during a pinch. Separate scrolling pans without zooming.
+- Fit page recenters the full page; existing zoom limits and page controls remain.
+
+The normal editor, storage backend, note formats and existing functionality
+are retained. Notes, settings, encryption and library locations are unchanged.
+Dart name obfuscation and the existing Windows runner protections remain enabled:
+Control Flow Guard, stack cookies, DEP, ASLR, high-entropy ASLR and restricted DLL
+search/loading. Crash symbols and the name map stay in private build storage and
+are excluded from downloadable files.
 
 These are compatible exploit mitigations, not complete memory-injection
 prevention. Obfuscation does not encrypt resources or prevent reverse
@@ -21,7 +24,7 @@ are not enabled because they can break Flutter and bundled native libraries.
 The application remains unsigned.
 
 Download **Download-FutureNotes.ps1**, run it in Windows PowerShell, then read
-**RUN-ME.txt** in the verified `FutureNotes-1.2.1-windows-x64` folder and open
+**RUN-ME.txt** in the verified `FutureNotes-1.2.2-windows-x64` folder and open
 **FutureNotes.exe**. The helper reconstructs the folder from individual release
 assets and verifies SHA-256 hashes. No ZIP, installer, administrator rights,
 Flutter/Dart SDK, Microsoft Office or separate Visual C++ installation is needed.
@@ -35,16 +38,15 @@ with the protected build. An unknown-publisher warning is possible.
 Notes/settings are not distributed. Keep a separate notes backup and the prior
 app folder. Transfer notes using backup or package export/import, and reselect
 a custom library if its path differs on another PC. Existing release tags and
-previous release assets, including v1.2.0, are preserved.
+previous release assets, including v1.2.1, are preserved.
 
-The hardening candidate passed 49 affected Flutter regressions, 15 release-tool
-tests, native loader/policy tests and actual executable-mitigation checks.
-Windows policy readback confirmed the protections active in the running app;
-captured logs showed no errors. The user accepted existing notes, typing,
-Save/reopen, attachment playback/document preview and locking. Version 1.2.1
-uses that same runtime code with updated release identity and a new obfuscated
-build. Packaging validates native imports and file hashes. Clean second-PC/VM
-execution and dedicated IME/accessibility compatibility are not claimed tested.
+The PDF correction passed scoped static analysis, all nine affected document
+preview tests, a protected Windows Release build and the user's physical
+touchpad check for pinch/reversal, separate panning, +/− and Fit page. Version
+1.2.2 uses that accepted runtime code with updated release identity and a new
+obfuscated build. Packaging validates native imports and file hashes. Clean
+second-PC/VM execution and dedicated IME/accessibility compatibility are not
+claimed tested.
 
 This repository is private. Download the helper while signed in to GitHub. It
 uses GH_TOKEN/GITHUB_TOKEN or prompts for a hidden repository-access token to

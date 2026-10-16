@@ -5,6 +5,40 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_application_1/features/dashboard/widgets/expanding_formatting_bar.dart';
 
 void main() {
+  testWidgets(
+    'collapsed card follows control height without surplus vertical space',
+    (tester) async {
+      for (final height in [32.0, 48.0, 72.0]) {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Column(
+                children: [
+                  ExpandingFormattingBar(
+                    restoreEditorFocus: () {},
+                    expandedChild: const SizedBox(height: 120),
+                    child: SizedBox(
+                      width: 1200,
+                      height: height,
+                      child: const Text('Synthetic controls'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          tester.getSize(find.byKey(const ValueKey('formatting-card'))).height,
+          height + 2,
+        );
+        expect(tester.takeException(), isNull);
+      }
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   for (final reduced in [false, true]) {
     testWidgets(
       'hover wraps in flow, leaves collapse, selection preserved; reduced=$reduced',
@@ -64,7 +98,7 @@ void main() {
         final editor = find.byKey(const ValueKey('writing'));
         final resting = tester.getRect(editor);
         final restingWidth = tester.getSize(card).width;
-        expect(tester.getSize(card).height, 58);
+        expect(tester.getSize(card).height, 42);
         final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
         await mouse.addPointer(location: const Offset(790, 590));
         await mouse.moveTo(tester.getCenter(card));
@@ -76,7 +110,7 @@ void main() {
             lessThanOrEqualTo(tester.getTopLeft(editor).dy),
           );
         }
-        expect(tester.getSize(card).height, greaterThan(58));
+        expect(tester.getSize(card).height, greaterThan(42));
         expect(find.text('Tool 11').hitTestable(), findsOneWidget);
         expect(
           find.descendant(
@@ -96,7 +130,7 @@ void main() {
           await tester.pump(const Duration(milliseconds: 30));
           await mouse.moveTo(tester.getCenter(card));
           await tester.pumpAndSettle();
-          expect(tester.getSize(card).height, greaterThan(58));
+          expect(tester.getSize(card).height, greaterThan(42));
           await mouse.moveTo(const Offset(790, 590));
           await tester.pump(const Duration(milliseconds: 185));
         }

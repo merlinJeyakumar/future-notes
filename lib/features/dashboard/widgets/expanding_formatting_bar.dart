@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show OverflowBoxFit;
 import 'package:flutter/services.dart';
 import '../../../core/theme/app_motion.dart';
 
@@ -127,17 +128,12 @@ class _ExpandingFormattingBarState extends State<ExpandingFormattingBar> {
 
   Widget _compactRow() => ExcludeFocus(
     child: ClipRect(
-      child: SizedBox(
-        height: 56,
-        width: double.infinity,
-        child: OverflowBox(
-          alignment: Alignment.topLeft,
-          minWidth: 0,
-          maxWidth: double.infinity,
-          minHeight: 0,
-          maxHeight: 56,
-          child: widget.child,
-        ),
+      child: OverflowBox(
+        fit: OverflowBoxFit.deferToChild,
+        alignment: Alignment.topLeft,
+        minWidth: 0,
+        maxWidth: double.infinity,
+        child: widget.child,
       ),
     ),
   );

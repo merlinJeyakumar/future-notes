@@ -4,7 +4,9 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_widget_from_html_core/flutter_widget_from_html_core.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'package:path/path.dart' as p;
@@ -264,6 +266,10 @@ class _PdfSurface extends StatefulWidget {
 
 class _PdfSurfaceState extends State<_PdfSurface> {
   final _transform = TransformationController();
+  final _viewportKey = GlobalKey();
+  double _gestureStartScale = 1;
+  Offset? _gestureSceneCenter;
+  bool _pinching = false;
   @override
   void didUpdateWidget(covariant _PdfSurface oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -276,12 +282,98 @@ class _PdfSurfaceState extends State<_PdfSurface> {
     super.dispose();
   }
 
-  void _zoom(double factor) {
-    final scale = (_transform.value.getMaxScaleOnAxis() * factor).clamp(
-      1.0,
-      5.0,
+  void _zoom(double factor) =>
+      _setScale(_transform.value.getMaxScaleOnAxis() * factor);
+
+  void _setScale(double requestedScale, {Offset? sceneAnchor}) {
+    final viewport =
+        _viewportKey.currentContext?.findRenderObject() as RenderBox?;
+    if (viewport == null || !viewport.hasSize) return;
+    final currentScale = _transform.value.getMaxScaleOnAxis();
+    final scale = requestedScale.clamp(1.0, 5.0);
+    if (scale == currentScale && sceneAnchor == null) return;
+    final center = viewport.size.center(Offset.zero);
+    final sceneCenter = sceneAnchor ?? _transform.toScene(center);
+    // Keep the point currently under the viewport center stationary. Scaling
+    // about (0, 0) instead moves the document toward the top-left corner.
+    // Keep the viewport covered when zooming back to Fit.
+    final x = (center.dx - sceneCenter.dx * scale).clamp(
+      viewport.size.width * (1 - scale),
+      0.0,
     );
-    _transform.value = Matrix4.diagonal3Values(scale, scale, 1);
+    final y = (center.dy - sceneCenter.dy * scale).clamp(
+      viewport.size.height * (1 - scale),
+      0.0,
+    );
+    _transform.value = Matrix4.diagonal3Values(scale, scale, 1)
+      ..setTranslationRaw(x, y, 0);
+  }
+
+  void _pan(Offset delta) {
+    final viewport =
+        _viewportKey.currentContext?.findRenderObject() as RenderBox?;
+    if (viewport == null || !viewport.hasSize) return;
+    final matrix = _transform.value;
+    final scale = matrix.getMaxScaleOnAxis();
+    final translation = matrix.getTranslation();
+    _transform.value = matrix.clone()
+      ..setTranslationRaw(
+        (translation.x + delta.dx).clamp(
+          viewport.size.width * (1 - scale),
+          0.0,
+        ),
+        (translation.y + delta.dy).clamp(
+          viewport.size.height * (1 - scale),
+          0.0,
+        ),
+        0,
+      );
+  }
+
+  void _handlePointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent && event is! PointerScaleEvent) return;
+    GestureBinding.instance.pointerSignalResolver.register(event, (resolved) {
+      // Discrete signals must not reset an ongoing native gesture or add pan
+      // while it is pinching. Both input paths write through this controller.
+      if (_pinching) return;
+      if (resolved is PointerScaleEvent) {
+        _zoom(resolved.scale);
+      } else if (resolved is PointerScrollEvent) {
+        if (HardwareKeyboard.instance.isControlPressed) {
+          _zoom(
+            math.exp(
+              -resolved.scrollDelta.dy / kDefaultMouseScrollToScaleFactor,
+            ),
+          );
+        } else {
+          _pan(-resolved.scrollDelta);
+        }
+      }
+    });
+  }
+
+  void _startInteraction(ScaleStartDetails details) {
+    _gestureStartScale = _transform.value.getMaxScaleOnAxis();
+    final viewport =
+        _viewportKey.currentContext?.findRenderObject() as RenderBox?;
+    _gestureSceneCenter = viewport != null && viewport.hasSize
+        ? _transform.toScene(viewport.size.center(Offset.zero))
+        : null;
+    _pinching = false;
+  }
+
+  void _updateInteraction(ScaleUpdateDetails details) {
+    if (details.scale != 1 || _pinching) {
+      // Scale is cumulative. Once classified as a pinch, do not reinterpret
+      // centroid motion (even at scale 1) as pan until the gesture ends.
+      _pinching = true;
+      _setScale(
+        _gestureStartScale * details.scale,
+        sceneAnchor: _gestureSceneCenter,
+      );
+    } else {
+      _pan(details.focalPointDelta);
+    }
   }
 
   @override
@@ -327,14 +419,28 @@ class _PdfSurfaceState extends State<_PdfSurface> {
       if (widget.busy) const LinearProgressIndicator(),
       Expanded(
         child: ClipRect(
-          child: InteractiveViewer(
-            transformationController: _transform,
-            minScale: 1,
-            maxScale: 5,
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: RawImage(image: widget.image, fit: BoxFit.contain),
+          child: Listener(
+            onPointerSignal: _handlePointerSignal,
+            child: GestureDetector(
+              key: _viewportKey,
+              behavior: HitTestBehavior.opaque,
+              onScaleStart: _startInteraction,
+              onScaleUpdate: _updateInteraction,
+              onScaleEnd: (_) {
+                _gestureSceneCenter = null;
+                _pinching = false;
+              },
+              child: AnimatedBuilder(
+                key: const ValueKey('pdf-viewport-transform'),
+                animation: _transform,
+                builder: (context, child) =>
+                    Transform(transform: _transform.value, child: child),
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: RawImage(image: widget.image, fit: BoxFit.contain),
+                  ),
+                ),
               ),
             ),
           ),

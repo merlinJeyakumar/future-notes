@@ -200,6 +200,16 @@
       "purpose": "Reversible panels, scale/fade dialogs, incoming content and reduced-motion reference. Existing layout and workflows unchanged; synthetic content only.",
       "localHtml": ".stitch/designs/app-motion-20261016.html",
       "localScreenshot": ".stitch/designs/app-motion-20261016.png"
+    },
+    {
+      "id": "91abaf0039594a2eb74a045f65ce7d58",
+      "title": "Future Notes - Document & Media Viewer Info Toggle & Hover Ribbon",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Media hover-only information; non-media header Info toggle. Existing preview layout and workflows retained; synthetic names only.",
+      "localHtml": ".stitch/designs/attachment-info-controls-20261016.html",
+      "localScreenshot": ".stitch/designs/attachment-info-controls-20261016.png"
     }
   ]
 }

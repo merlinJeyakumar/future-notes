@@ -6,7 +6,7 @@ import 'package:flutter_application_1/features/dashboard/widgets/attachment_medi
 
 void main() {
   testWidgets(
-    'ribbon appears initially and on hover without moving or blocking media',
+    'ribbon stays hidden until hover and hides on exit without moving or blocking media',
     (tester) async {
       var taps = 0;
       const media = ValueKey('synthetic-media');
@@ -43,11 +43,9 @@ void main() {
         matching: find.byType(AnimatedOpacity),
       );
       final rect = tester.getRect(find.byKey(media));
-      expect(tester.widget<AnimatedOpacity>(opacity).opacity, 1);
+      expect(tester.widget<AnimatedOpacity>(opacity).opacity, 0);
       expect(find.text('sample-animation.gif'), findsOneWidget);
       expect(find.text('GIF · 2.0 KiB · Stored 16/10 14:05'), findsOneWidget);
-      await tester.tapAt(tester.getCenter(ribbon));
-      expect(taps, 1);
       await tester.pump(const Duration(seconds: 3));
       await tester.pump(const Duration(milliseconds: 100));
       expect(tester.widget<AnimatedOpacity>(opacity).opacity, 0);
@@ -66,6 +64,8 @@ void main() {
         inExclusiveRange(0, 1),
       );
       expect(tester.getRect(find.byKey(media)), rect);
+      await tester.tapAt(tester.getCenter(ribbon));
+      expect(taps, 1);
       await mouse.moveTo(Offset.zero);
       await tester.pumpAndSettle();
       expect(tester.widget<AnimatedOpacity>(opacity).opacity, 0);
@@ -75,7 +75,7 @@ void main() {
   );
 
   testWidgets(
-    'keyboard focus retains the ribbon; reduced motion and early disposal are immediate',
+    'focus does not pin the ribbon; reduced-motion hover and removal are immediate',
     (tester) async {
       final focus = FocusNode();
       try {
@@ -106,12 +106,21 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(seconds: 4));
         final opacity = find.byType(AnimatedOpacity);
-        expect(tester.widget<AnimatedOpacity>(opacity).opacity, 1);
-        focus.unfocus();
+        expect(focus.hasFocus, isTrue);
+        expect(tester.widget<AnimatedOpacity>(opacity).opacity, 0);
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: const Offset(-10, -10));
+        await mouse.moveTo(
+          tester.getCenter(find.byType(AttachmentMediaOverlay)),
+        );
         await tester.pump();
+        expect(tester.widget<AnimatedOpacity>(opacity).opacity, 1);
+        await mouse.moveTo(const Offset(-10, -10));
         await tester.pump();
         expect(tester.widget<AnimatedOpacity>(opacity).opacity, 0);
+        expect(focus.hasFocus, isTrue);
         expect(tester.widget<AnimatedOpacity>(opacity).duration, Duration.zero);
+        await mouse.removePointer();
         await tester.pumpWidget(
           MaterialApp(
             home: AttachmentMediaOverlay(

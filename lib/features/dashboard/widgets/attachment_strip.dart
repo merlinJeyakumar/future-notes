@@ -16,9 +16,11 @@ class AttachmentStrip extends StatefulWidget {
     super.key,
     required this.viewModel,
     this.playerFactory,
+    this.collapseRequests,
   });
   final ContentViewModel viewModel;
   final AttachmentPlayerFactory? playerFactory;
+  final Listenable? collapseRequests;
   @override
   State<AttachmentStrip> createState() => _AttachmentStripState();
 }
@@ -30,6 +32,10 @@ class _AttachmentStripState extends State<AttachmentStrip> {
   String? _path;
   final _openIntents = <String>{};
   ContentViewModel get model => widget.viewModel;
+
+  void _collapse() {
+    if (expanded) setState(() => expanded = false);
+  }
 
   void _rememberOwner() {
     _owner = model.draftSession.generation;
@@ -51,11 +57,16 @@ class _AttachmentStripState extends State<AttachmentStrip> {
     super.initState();
     _rememberOwner();
     model.addListener(_syncOwner);
+    widget.collapseRequests?.addListener(_collapse);
   }
 
   @override
   void didUpdateWidget(covariant AttachmentStrip oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.collapseRequests != widget.collapseRequests) {
+      oldWidget.collapseRequests?.removeListener(_collapse);
+      widget.collapseRequests?.addListener(_collapse);
+    }
     if (oldWidget.viewModel != model) {
       oldWidget.viewModel.removeListener(_syncOwner);
       expanded = false;
@@ -67,6 +78,7 @@ class _AttachmentStripState extends State<AttachmentStrip> {
   @override
   void dispose() {
     model.removeListener(_syncOwner);
+    widget.collapseRequests?.removeListener(_collapse);
     super.dispose();
   }
 

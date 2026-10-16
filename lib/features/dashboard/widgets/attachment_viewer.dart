@@ -395,6 +395,7 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
   bool _playbackFailed = false;
   bool _documentFailed = false;
   bool _systemOpening = false;
+  bool _informationVisible = false;
   String? _systemError;
   ImageProvider? _previewImage;
   late final Future<DateTime?> _storedDate;
@@ -537,19 +538,18 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
     }
   }
 
-  Widget _withInformation(Widget preview) {
-    final name = widget.attachment.fileName;
-    if (!attachmentSupportsPlayback(name) &&
-        attachmentVisualKind(name) != AttachmentVisualKind.image) {
-      return preview;
-    }
-    return AttachmentMediaOverlay(
-      attachment: widget.attachment,
-      length: widget.file.length,
-      storedDate: _storedDate,
-      child: preview,
-    );
-  }
+  bool get _isMedia =>
+      attachmentSupportsPlayback(widget.attachment.fileName) ||
+      attachmentVisualKind(widget.attachment.fileName) ==
+          AttachmentVisualKind.image;
+
+  Widget _withInformation(Widget preview) => AttachmentMediaOverlay(
+    attachment: widget.attachment,
+    length: widget.file.length,
+    storedDate: _storedDate,
+    visible: _isMedia ? null : _informationVisible,
+    child: preview,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -581,6 +581,19 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    if (!_isMedia)
+                      IconButton(
+                        tooltip: 'File information',
+                        isSelected: _informationVisible,
+                        icon: const Icon(Icons.info_outline),
+                        selectedIcon: const Icon(Icons.info),
+                        onPressed: _dismissing
+                            ? null
+                            : () => setState(
+                                () =>
+                                    _informationVisible = !_informationVisible,
+                              ),
+                      ),
                     AttachmentMoreButton(
                       onSelected: _action,
                       alreadyOpen: true,

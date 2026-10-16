@@ -1,0 +1,29 @@
+# Media information ribbon: hover only — 16 October 2026
+
+## Requested behavior and implementation
+
+The user requested automatic hiding and visibility only on mouse hover. Removed the initial three-second visibility timer and focus-based visibility retention from `AttachmentMediaOverlay`. The ribbon is hidden initially, fades in while the pointer is over the preview and fades out on exit. A focused player control does not keep it visible. Existing shared fade timing and reduced-motion handling remain. The overlay still ignores pointer input and occupies no layout space; media playback, metadata, decryption, cache lifetime and secure viewer teardown are unchanged. No new layout, dependency, storage behavior or design service upload was needed for this visibility correction.
+
+## Validation
+
+Formatted both changed Dart files and passed whitespace checking. Scoped `flutter analyze --no-pub` reported no issues. One affected suite passed all 13 tests across `attachment_media_overlay_test.dart`, `attachment_gif_test.dart`, `attachment_playback_test.dart` and `app_motion_viewer_test.dart`. Checks cover hidden initial state, hover enter/exit and intermediate fade, pointer click-through, unchanged preview dimensions, focus not pinning visibility, reduced motion, removal, real GIF playback, existing media behavior and immediate security teardown. Synthetic attachments only. Evidence: `.validation/media-ribbon-hover-analysis.txt`, `media-ribbon-hover-tests.txt`.
+
+## Non-media clarification
+
+After the media-only build was launched, the user clarified that other file types should have an Info icon. The combined implementation adds an explicit toggle next to More in non-media viewer headers. It reveals/hides the same compact metadata overlay without creating a new route or changing preview layout. Hovering a non-media preview does not reveal information. Media (image/GIF/video/audio) retains hover-only visibility and has no additional Info button. Other file types, including unsupported-preview fallback, have Info. Metadata uses the existing stored-date future and completed-cache length; no extra payload read or decryption is introduced. Parent viewer lock/removal tears down the panel immediately.
+
+The shared overlay accepts nullable explicit visibility: null follows hover; a boolean follows the non-media toggle. A second scoped analysis after this clarification found only three existing informational brace notices, no errors/warnings. One combined affected suite then passed all 23 tests in the original four files plus `attachment_document_preview_test.dart`. Checks include Info toggling across PDF/DOC/DOCX/XLS/XLSX, no reveal on non-media hover, stable document geometry and one renderer load, no writes/decrypts, immediate information removal on lock, and the Info button on unsupported files. Existing native PDF zoom/fit and Office fixture previews passed. Evidence: `.validation/attachment-info-controls-analysis.txt`, `attachment-info-controls-tests.txt`.
+
+Stitch project `6056916933162144137` returned screen `91abaf0039594a2eb74a045f65ce7d58`, session `17086144789936711853`, using synthetic filenames only. Pro was unavailable; the available Flash model was used. The reference HTML and screenshot are retained at `.stitch/designs/attachment-info-controls-20261016.*`. Only the requested hover/Info interaction was adopted; generated surrounding layout and extra header actions were not substituted into the app.
+
+## Build, preservation and acceptance
+
+The media-only protected Windows Release build passed in 41.4 seconds with hardening checks. The accepted executable/AOT matched the prior receipt and were preserved in `.validation/media-ribbon-hover-previous-candidate`. That interim candidate launched once with verified source/binary hashes and no automated input; the user closed it normally after requesting the non-media control.
+
+For the clarified combined scope, `.validation/attachment-info-controls-build.ps1` preserved the interim candidate in `.validation/attachment-info-controls-previous-candidate` and built canonical `lib/main.dart` once with Windows Release, obfuscation, fresh private symbols/map and opt-in numeric motion diagnostics. Build passed in 41.1 seconds. ASLR/high-entropy ASLR/DEP/CFG/stack-cookie/dependent-load checks passed. The existing Office FetchContent CMake developer warning remains. Evidence: `.validation/attachment-info-controls-build.txt`, `attachment-info-controls-build-receipt.json`.
+
+Checked every receipt-bound production input and executable/AOT hash and zero project instances before one combined-candidate launch. PID 28508 started at 12:05:38 UTC. Read-only Computer Use showed one normal editor window; no automated input was sent. Two process samples across 22.1 seconds remained responsive. Working set was 155.2–149.8 MiB, private memory 151.0–146.6 MiB, handles 606–610, CPU time increased by 1.97 seconds during startup. Captured logs at that observation contained expected initialization and no error output. This short observation does not prove sustained load behavior or remove the previously documented Windows accessibility limitation. Evidence: `.validation/attachment-info-controls-runtime*.json` and stdout/stderr logs.
+
+The accepted pre-change checkpoint was hash-verified again after the combined launch. Existing accepted snapshots, notes, tags, published portable files and unrelated changes are preserved. Source commit/push was subsequently authorized with the accepted editor-focus collapse change. No release publication or ZIP is included.
+
+The user replied “perfect” to the combined manual check: media hover reveal/hide and non-media Info toggling with no automatic hover ribbon. Physical acceptance for the requested behavior is complete. No broader load, accessibility or unrelated workflow acceptance is inferred.

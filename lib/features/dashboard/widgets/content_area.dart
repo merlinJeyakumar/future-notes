@@ -47,6 +47,15 @@ class _ContentAreaState extends State<ContentArea> {
   late final ScrollController _scrollController;
   final _unlockFocusNode = FocusNode(debugLabel: 'Note unlock password');
   final _htmlFocusNode = FocusNode(debugLabel: 'HTML source');
+  final _attachmentCollapseRequests = ValueNotifier<int>(0);
+
+  void _collapseAttachments() => _attachmentCollapseRequests.value++;
+
+  void _onEditorFocus() {
+    if (_focusNode.hasFocus || _htmlFocusNode.hasFocus) {
+      _collapseAttachments();
+    }
+  }
 
   ContentViewModel get viewModel => widget.viewModel;
 
@@ -60,6 +69,8 @@ class _ContentAreaState extends State<ContentArea> {
     // Cache local references to avoid property access in build/config
     _focusNode = viewModel.focusNode;
     _scrollController = viewModel.scrollController;
+    _focusNode.addListener(_onEditorFocus);
+    _htmlFocusNode.addListener(_onEditorFocus);
 
     _editorConfig = QuillEditorConfig(
       autoFocus: false,
@@ -79,6 +90,9 @@ class _ContentAreaState extends State<ContentArea> {
 
   @override
   void dispose() {
+    _focusNode.removeListener(_onEditorFocus);
+    _htmlFocusNode.removeListener(_onEditorFocus);
+    _attachmentCollapseRequests.dispose();
     _unlockFocusNode.dispose();
     _htmlFocusNode.dispose();
     super.dispose();
@@ -142,7 +156,10 @@ class _ContentAreaState extends State<ContentArea> {
                       viewModel.editorMode,
                     ),
                     enabled: !viewModel.isLocked,
-                    child: _buildInputArea(context),
+                    child: Listener(
+                      onPointerDown: (_) => _collapseAttachments(),
+                      child: _buildInputArea(context),
+                    ),
                   ),
                 ),
 
@@ -177,7 +194,10 @@ class _ContentAreaState extends State<ContentArea> {
                     return ValueListenableBuilder<List<AttachmentModel>>(
                       valueListenable: viewModel.attachmentsNotifier,
                       builder: (context, attachments, child) {
-                        return AttachmentStrip(viewModel: viewModel);
+                        return AttachmentStrip(
+                          viewModel: viewModel,
+                          collapseRequests: _attachmentCollapseRequests,
+                        );
                       },
                     );
                   },

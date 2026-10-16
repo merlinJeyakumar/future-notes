@@ -150,7 +150,7 @@ void main() {
       },
     );
   }
-  for (final name in ['sample.png', 'sample.pdf']) {
+  for (final name in ['sample.png', 'sample.pdf', 'sample.bin']) {
     testWidgets('$name never starts a media player', (tester) async {
       final h = await EditorHarness.create();
       var creations = 0;
@@ -167,6 +167,10 @@ void main() {
           return _PlaybackSpy();
         }, filePath: file.path);
         expect(creations, 0);
+        expect(
+          find.byTooltip('File information'),
+          name.endsWith('.png') ? findsNothing : findsOneWidget,
+        );
         expect(h.files.writeAttempts, 0);
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());

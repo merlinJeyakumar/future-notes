@@ -344,11 +344,39 @@ void main() {
         expect(document.loads, 1);
         expect(find.text('Synthetic document surface'), findsOneWidget);
         expect(find.byType(AttachmentMoreButton), findsOneWidget);
+        final info = find.byTooltip('File information');
+        expect(info, findsOneWidget);
+        final ribbon = find.byKey(const ValueKey('media-information-ribbon'));
+        final opacity = find.ancestor(
+          of: ribbon,
+          matching: find.byType(AnimatedOpacity),
+        );
+        final surface = find.text('Synthetic document surface');
+        final surfaceRect = tester.getRect(surface);
+        expect(tester.widget<AnimatedOpacity>(opacity).opacity, 0);
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: Offset.zero);
+        await mouse.moveTo(tester.getCenter(surface));
+        await tester.pump();
+        expect(tester.widget<AnimatedOpacity>(opacity).opacity, 0);
+        await tester.tap(info);
+        await tester.pumpAndSettle();
+        expect(tester.widget<AnimatedOpacity>(opacity).opacity, 1);
+        expect(tester.getRect(surface), surfaceRect);
+        expect(document.loads, 1);
+        expect(document.disposals, 0);
+        await tester.tap(info);
+        await tester.pumpAndSettle();
+        expect(tester.widget<AnimatedOpacity>(opacity).opacity, 0);
+        await tester.tap(info);
+        await tester.pumpAndSettle();
+        await mouse.removePointer();
         expect(h.encryption.binaryDecryptCalls, 0);
         expect(h.files.writeAttempts, 0);
         await h.editor.closeAttachmentCache();
         await tester.pumpAndSettle();
         expect(find.byType(AttachmentViewer), findsNothing);
+        expect(ribbon, findsNothing);
         expect(document.disposals, 1);
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());

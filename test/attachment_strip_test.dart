@@ -88,26 +88,10 @@ class FakePlayer implements AttachmentMediaPlayer {
 }
 
 class FakeDesktop implements DesktopActions {
-  final controller = StreamController<String>.broadcast();
   final opened = <String>[];
-  int hides = 0;
-  bool failHide = false;
-  @override
-  Stream<String> get events => controller.stream;
   @override
   Future<String> cacheRoot({String? validationRoot}) async =>
       throw StateError('Test must not resolve native cache');
-  @override
-  Future<OperationResult<void>> minimizeToTray() async {
-    hides++;
-    return failHide
-        ? const OperationResult.failure(
-            OperationOutcome.ioFailure,
-            'Synthetic tray failure',
-          )
-        : const OperationResult.success();
-  }
-
   @override
   Future<OperationResult<void>> openFile(String path) async {
     opened.add(path);
@@ -115,9 +99,7 @@ class FakeDesktop implements DesktopActions {
   }
 
   @override
-  Future<void> dispose() async {
-    await controller.close();
-  }
+  Future<void> dispose() async {}
 }
 
 void main() {

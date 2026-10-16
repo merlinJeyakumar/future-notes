@@ -180,6 +180,16 @@
       "purpose": "Extend existing file drop hover to all dashboard client areas with one selected-note handler; synthetic content only.",
       "localHtml": ".stitch/designs/window-drop-20261016.html",
       "localScreenshot": ".stitch/designs/window-drop-20261016.png"
+    },
+    {
+      "id": "5c926ace8b1e4843b08da7e4b2bbb394",
+      "title": "Future Notes - Custom In-App Caption Bar (36px)",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Compact global caption, taskbar minimize, maximize/restore and confirmed safe Close; remove notification-area tray, synthetic content only.",
+      "localHtml": ".stitch/designs/window-chrome-20261016.html",
+      "localScreenshot": ".stitch/designs/window-chrome-20261016.png"
     }
   ]
 }

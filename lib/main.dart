@@ -1,4 +1,5 @@
 import 'dart:io' show Platform;
+import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,8 @@ import 'core/storage/owned_app_services.dart';
 import 'core/storage/storage_startup_failure.dart';
 import 'core/storage/windows_storage_bootstrap.dart';
 import 'core/platform/windows_navigation_shortcuts.dart';
+import 'core/platform/window_actions.dart';
+import 'features/dashboard/widgets/desktop_window_frame.dart';
 
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart';
@@ -46,6 +49,9 @@ void main() async {
       }
       runApp(
         MyApp(
+          windowActions: !kIsWeb && Platform.isWindows
+              ? WindowsWindowActions()
+              : null,
           settings: runtime.settings,
           home: DashboardScreen(
             settings: runtime.settings,
@@ -57,7 +63,13 @@ void main() async {
       return;
     }
     await SettingsService().init();
-    runApp(const MyApp());
+    runApp(
+      MyApp(
+        windowActions: !kIsWeb && Platform.isWindows
+            ? WindowsWindowActions()
+            : null,
+      ),
+    );
   } catch (_) {
     if (kDebugMode)
       debugPrint(
@@ -69,10 +81,11 @@ void main() async {
 }
 
 class MyApp extends StatefulWidget {
-  const MyApp({super.key, this.settings, this.home});
+  const MyApp({super.key, this.settings, this.home, this.windowActions});
 
   final SettingsService? settings;
   final Widget? home;
+  final WindowActions? windowActions;
 
   @override
   State<MyApp> createState() => _MyAppState();
@@ -90,6 +103,7 @@ class _MyAppState extends State<MyApp> {
   @override
   void dispose() {
     _settings.themeModeNotifier.removeListener(_onThemeChanged);
+    unawaited(widget.windowActions?.dispose());
     super.dispose();
   }
 
@@ -122,8 +136,14 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Future Notes',
-      builder: (context, child) =>
-          WindowsNavigationShortcuts(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) => WindowsNavigationShortcuts(
+        child: widget.windowActions == null
+            ? child ?? const SizedBox.shrink()
+            : DesktopWindowFrame(
+                actions: widget.windowActions!,
+                child: child ?? const SizedBox.shrink(),
+              ),
+      ),
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,

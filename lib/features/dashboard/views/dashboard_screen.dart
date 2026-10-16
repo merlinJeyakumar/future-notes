@@ -4,7 +4,7 @@ import '../models/note_list_ui_state.dart';
 import '../widgets/app_settings_dialog.dart';
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' show AppExitResponse, AppExitType;
+import 'dart:ui' show AppExitResponse;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -36,7 +36,6 @@ class DashboardScreen extends StatefulWidget {
     this.startBackgroundServices = true,
     this.desktopActions,
     this.attachmentOpenCache,
-    this.requestApplicationExit,
     this.confirmExit,
   });
 
@@ -46,7 +45,6 @@ class DashboardScreen extends StatefulWidget {
   final bool startBackgroundServices;
   final DesktopActions? desktopActions;
   final AttachmentOpenCache? attachmentOpenCache;
-  final Future<AppExitResponse> Function()? requestApplicationExit;
   final Future<bool> Function()? confirmExit;
 
   @override
@@ -62,8 +60,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   ShutdownSequence? _shutdown;
   final _shutdownElapsed = Stopwatch();
   DesktopActions? _desktop;
-  StreamSubscription<String>? _desktopEvents;
-  bool _exitFromTray = false;
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _searchController = TextEditingController();
   final _desktopSearchFocus = FocusNode();
@@ -176,22 +172,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       attachmentOpenCache: widget.attachmentOpenCache,
     );
     _lifecycle = AppLifecycleListener(onExitRequested: _requestExit);
-    _desktopEvents = _desktop?.events.listen((event) async {
-      if (event == 'trayExit' && !_exitFromTray) {
-        _exitFromTray = true;
-        try {
-          if (widget.requestApplicationExit != null) {
-            await widget.requestApplicationExit!();
-          } else {
-            await ServicesBinding.instance.exitApplication(
-              AppExitType.cancelable,
-            );
-          }
-        } finally {
-          _exitFromTray = false;
-        }
-      }
-    });
     unawaited(_viewModel.initializeAttachmentCache());
     _viewModel.operationResultNotifier.addListener(_showOperationFailure);
     _searchController.addListener(_queryChanged);
@@ -342,7 +322,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
-    unawaited(_desktopEvents?.cancel());
     unawaited(_desktop?.dispose());
     _lifecycle.dispose();
     _viewModel.operationResultNotifier.removeListener(_showOperationFailure);

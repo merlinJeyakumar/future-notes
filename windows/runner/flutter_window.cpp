@@ -28,6 +28,8 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   desktop_actions_ = std::make_unique<DesktopActions>(GetHandle(), flutter_controller_->engine()->messenger());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  window_frame_ = std::make_unique<WindowFrame>(GetHandle(),
+      flutter_controller_->view()->GetNativeWindow(), flutter_controller_->engine()->messenger());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -42,6 +44,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  window_frame_ = nullptr;
   desktop_actions_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
@@ -54,7 +57,10 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
-  if (desktop_actions_ && desktop_actions_->Handle(message, wparam, lparam)) return 0;
+  if (window_frame_) {
+    auto result = window_frame_->Handle(message, wparam, lparam);
+    if (result) return *result;
+  }
 #ifndef NDEBUG
   if (message == WM_CLOSE || message == WM_DESTROY) {
     std::cerr << "Window shutdown: "

@@ -6,9 +6,7 @@
 #include <aclapi.h>
 #include <vector>
 #include <cwchar>
-#include "resource.h"
 namespace {
-constexpr UINT kTrayMessage = WM_APP + 71;
 std::wstring Wide(const std::string& text) {
   int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
   if (size <= 0) return {};
@@ -33,14 +31,10 @@ bool RegularPath(const std::wstring& path) {
 }
 }
 DesktopActions::DesktopActions(HWND window, flutter::BinaryMessenger* messenger)
-    : window_(window), taskbar_created_(RegisterWindowMessageW(L"TaskbarCreated")) {
+    : window_(window) {
   channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(messenger, "future_notes/desktop", &flutter::StandardMethodCodec::GetInstance());
   channel_->SetMethodCallHandler([this](const auto& call, auto result) {
-    if (call.method_name() == "minimizeToTray") {
-      if (!RegisterTray()) { result->Error("tray", "Tray registration failed."); return; }
-      ShowWindow(window_, SW_HIDE);
-      result->Success();
-    } else if (call.method_name() == "cacheRoot") {
+    if (call.method_name() == "cacheRoot") {
       const auto* validation = call.arguments() ? std::get_if<std::string>(call.arguments()) : nullptr;
       auto root = CacheRoot(validation ? Wide(*validation) : std::wstring());
       cache_root_ = root;
@@ -65,40 +59,7 @@ DesktopActions::DesktopActions(HWND window, flutter::BinaryMessenger* messenger)
   });
 }
 DesktopActions::~DesktopActions() {
-  if (tray_) { NOTIFYICONDATAW icon{}; icon.cbSize = sizeof(icon); icon.hWnd = window_; icon.uID = 1; Shell_NotifyIconW(NIM_DELETE, &icon); }
-}
-bool DesktopActions::RegisterTray() {
-  NOTIFYICONDATAW icon{};
-  icon.cbSize = sizeof(icon); icon.hWnd = window_; icon.uID = 1;
-  icon.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
-  icon.uCallbackMessage = kTrayMessage;
-  icon.hIcon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP_ICON));
-  wcscpy_s(icon.szTip, L"Future Notes - running in background");
-  if (!Shell_NotifyIconW(tray_ ? NIM_MODIFY : NIM_ADD, &icon)) return false;
-  tray_ = true; icon.uVersion = NOTIFYICON_VERSION_4;
-  if (!Shell_NotifyIconW(NIM_SETVERSION, &icon)) { Shell_NotifyIconW(NIM_DELETE, &icon); tray_ = false; return false; }
-  return true;
-}
-void DesktopActions::Restore() {
-  ShowWindow(window_, SW_RESTORE); SetForegroundWindow(window_);
-  channel_->InvokeMethod("trayRestored", nullptr);
-}
-bool DesktopActions::Handle(UINT message, WPARAM, LPARAM lparam) {
-  if (message == taskbar_created_ && tray_) { tray_ = false; if (!RegisterTray()) Restore(); return true; }
-  if (message != kTrayMessage) return false;
-  UINT action = LOWORD(lparam);
-  if (action == NIN_SELECT || action == NIN_KEYSELECT || action == WM_LBUTTONDBLCLK) Restore();
-  else if (action == WM_CONTEXTMENU) {
-    HMENU menu = CreatePopupMenu();
-    if (!menu) return true;
-    AppendMenuW(menu, MF_STRING, 1, L"Open Future Notes"); AppendMenuW(menu, MF_STRING, 2, L"Exit");
-    POINT point; GetCursorPos(&point); SetForegroundWindow(window_);
-    UINT selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, point.x, point.y, 0, window_, nullptr);
-    DestroyMenu(menu);
-    if (selected == 1) Restore();
-    else if (selected == 2) { Restore(); channel_->InvokeMethod("trayExit", nullptr); }
-  }
-  return true;
+  channel_->SetMethodCallHandler(nullptr);
 }
 std::wstring DesktopActions::CacheRoot(const std::wstring& validation_root) {
   PWSTR location = nullptr;

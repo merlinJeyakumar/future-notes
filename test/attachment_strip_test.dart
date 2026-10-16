@@ -165,7 +165,49 @@ void main() {
         await tester.pumpAndSettle();
         final dialog = find.byType(AlertDialog);
         final search = find.byKey(const ValueKey('attachment-filename-search'));
+        void expectFullRowUsesWidth() {
+          final cards = [
+            for (var i = 0; i < names.length; i++)
+              tester.getRect(
+                find.descendant(
+                  of: dialog,
+                  matching: find.byKey(ValueKey('attachment-open-item$i')),
+                ),
+              ),
+          ];
+          final firstRow = cards
+              .where((card) => (card.top - cards.first.top).abs() < .5)
+              .toList();
+          expect(firstRow.first.left, closeTo(tester.getRect(search).left, .5));
+          expect(
+            firstRow.last.right,
+            closeTo(tester.getRect(search).right, .5),
+          );
+          for (final card in cards) {
+            expect(card.width, closeTo(cards.first.width, .5));
+          }
+        }
+
+        expectFullRowUsesWidth();
+
         expect(find.text('All attachments'), findsOneWidget);
+        final firstCard = find.descendant(
+          of: dialog,
+          matching: find.byKey(const ValueKey('attachment-open-item0')),
+        );
+        expect(
+          tester.getTopLeft(firstCard).dx,
+          closeTo(tester.getTopLeft(search).dx, .5),
+        );
+        expect(
+          tester.getTopLeft(firstCard).dy,
+          closeTo(tester.getBottomLeft(search).dy + 12, .5),
+        );
+        expect(
+          tester.getTopLeft(find.text('All attachments')).dx,
+          closeTo(tester.getTopLeft(search).dx, .5),
+        );
+
         expect(
           tester
               .widget<EditableText>(find.byType(EditableText))
@@ -190,6 +232,19 @@ void main() {
           findsOneWidget,
         );
         expect(find.text('Budget 2026.xlsx'), findsOneWidget);
+        final filteredCard = find.descendant(
+          of: dialog,
+          matching: find.byKey(const ValueKey('attachment-open-item1')),
+        );
+        expect(
+          tester.getTopLeft(filteredCard).dx,
+          closeTo(tester.getTopLeft(search).dx, .5),
+        );
+        expect(
+          tester.getTopLeft(filteredCard).dy,
+          closeTo(tester.getBottomLeft(search).dy + 12, .5),
+        );
+
         expect(find.text('Notes.docx'), findsNothing);
         await tester.enterText(search, 'not-present');
         await tester.pumpAndSettle();
@@ -211,6 +266,15 @@ void main() {
               .hasFocus,
           true,
         );
+
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        tester.view.devicePixelRatio = 1;
+        for (final width in [540.0, 920.0]) {
+          tester.view.physicalSize = Size(width, 600);
+          await tester.pumpAndSettle();
+          expectFullRowUsesWidth();
+        }
         await tester.enterText(search, 'notes.docx');
         await tester.pumpAndSettle();
         await tester.tap(

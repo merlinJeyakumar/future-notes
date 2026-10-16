@@ -1,0 +1,11 @@
+# Attachment gallery alignment — 16 October 2026
+
+The All/More attachments dialog now uses 16 px title/content side margins and stretches its content column. The vertical scroll viewport and Wrap therefore fill the content width, anchoring attachment cards at the top-left rather than centering a shrink-wrapped grid. Title, search and first card share a left edge. Card spacing remains 8 px and search-to-grid spacing remains 12 px. A single filtered result stays top-left. Existing cards, actions, search autofocus, scrolling and lock/session invalidation remain.
+
+Stitch geometry reference: project 6056916933162144137, screen 224e6bb1773a4ec2b83be4dbf7a1baf4. Synthetic filenames only; implementation adopts alignment/spacing while retaining existing card design/actions. The connected tool offers Flash rather than Pro.
+
+Formatting and whitespace passed. Scoped analysis exited 0 with no errors/warnings and one existing intl dependency informational notice. The combined attachment strip, editor-focus and job-panel suite passed all 21 tests, including new full-grid and single-result left/top alignment assertions, search/clear, More actions, no automatic decryption, narrow/scaled layout and protected-content removal. Evidence: .validation/attachment-gallery-alignment-analysis.txt and attachment-gallery-alignment-tests.txt.
+
+One protected Windows Release build passed in 41.6 s, including private-symbol/obfuscation validation and PE checks (ASLR, high-entropy ASLR, DEP, CFG, stack cookie and dependent-load flags 0xA00). Existing CMake FetchContent deprecation remains. Previous executable/AOT copies were hash-verified before compilation. Build inputs and artifact hashes matched the receipt before one launch of PID 17464. Runtime observations/logs are under .validation/attachment-gallery-alignment-runtime-*. The first manual check reported excessive unused width on the right. The responsive-column correction and final user acceptance are recorded in ATTACHMENT_GALLERY_WIDTH_RESULTS_20261016.md.
+
+The published 1.4.0 portable folder verified all 59 files unchanged. Notes, existing tags, dependencies and unrelated work remain preserved. The user subsequently authorized committing and pushing the completed gallery refinement; no release publication is included.

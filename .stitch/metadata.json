@@ -280,6 +280,16 @@
       "purpose": "Same-card wrapped layout reference. Latest implementation expands on hover or keyboard focus, with chevron and horizontal scrolling removed and a tighter bottom gap. Synthetic content only.",
       "localHtml": ".stitch/designs/expand-formatting-20261016.html",
       "localScreenshot": ".stitch/designs/expand-formatting-20261016.png"
+    },
+    {
+      "id": "224e6bb1773a4ec2b83be4dbf7a1baf4",
+      "title": "Future Notes - Top-left attachment gallery",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Gallery geometry reference: 16 px margin, title/search/cards sharing the left edge, top-left grid and responsive equal-width columns filling full rows. Synthetic filenames only; existing card height/actions retained.",
+      "localHtml": ".stitch/designs/attachment-gallery-alignment-20261016.html",
+      "localScreenshot": ".stitch/designs/attachment-gallery-alignment-20261016.png"
     }
   ]
 }

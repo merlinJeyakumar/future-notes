@@ -751,6 +751,9 @@ class _AttachmentGalleryState extends State<_AttachmentGallery> {
           )
           .toList();
       return AlertDialog(
+        titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+        contentPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        actionsPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
         title: Text(
           widget.startIndex == 0 ? 'All attachments' : 'More attachments',
         ),
@@ -758,6 +761,7 @@ class _AttachmentGalleryState extends State<_AttachmentGallery> {
           width: 600,
           height: MediaQuery.sizeOf(context).height * .55,
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               TextField(
                 key: const ValueKey('attachment-filename-search'),
@@ -791,35 +795,53 @@ class _AttachmentGalleryState extends State<_AttachmentGallery> {
                               : 'No matching attachments',
                         ),
                       )
-                    : SingleChildScrollView(
-                        primary: false,
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final entry in remaining)
-                              ListenableBuilder(
-                                key: ValueKey(
-                                  'overflow/${widget.owner}/${entry.id}',
-                                ),
-                                listenable:
-                                    entry.job?.phase ??
-                                    model.attachmentsNotifier,
-                                builder: (context, _) => SizedBox(
-                                  height:
-                                      _tileHeight(true) *
-                                      MediaQuery.textScalerOf(context).scale(1),
-                                  child: _AttachmentTile(
-                                    model: model,
-                                    attachment: entry.attachment,
-                                    job: entry.job,
-                                    expanded: true,
-                                    onAction: widget.onAction,
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          final scale = MediaQuery.textScalerOf(
+                            context,
+                          ).scale(1);
+                          final columns = math.max(
+                            1,
+                            ((constraints.maxWidth + 8) / (96 * scale + 8))
+                                .floor(),
+                          );
+                          final cardWidth =
+                              (constraints.maxWidth - 8 * (columns - 1)) /
+                              columns;
+                          return SingleChildScrollView(
+                            primary: false,
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final entry in remaining)
+                                  ListenableBuilder(
+                                    key: ValueKey(
+                                      'overflow/${widget.owner}/${entry.id}',
+                                    ),
+                                    listenable:
+                                        entry.job?.phase ??
+                                        model.attachmentsNotifier,
+                                    builder: (context, _) => SizedBox(
+                                      width: cardWidth,
+                                      height:
+                                          _tileHeight(true) *
+                                          MediaQuery.textScalerOf(
+                                            context,
+                                          ).scale(1),
+                                      child: _AttachmentTile(
+                                        model: model,
+                                        attachment: entry.attachment,
+                                        job: entry.job,
+                                        expanded: true,
+                                        onAction: widget.onAction,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ),
-                          ],
-                        ),
+                              ],
+                            ),
+                          );
+                        },
                       ),
               ),
             ],

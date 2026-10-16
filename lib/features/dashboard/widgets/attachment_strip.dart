@@ -9,6 +9,7 @@ import '../models/attachment_job.dart';
 import '../models/note_model.dart';
 import '../viewmodels/content_viewmodel.dart';
 import 'attachment_viewer.dart';
+import 'attachment_preview.dart';
 import 'attachment_presentation.dart';
 
 class AttachmentStrip extends StatefulWidget {
@@ -30,7 +31,6 @@ class _AttachmentStripState extends State<AttachmentStrip> {
   late int _owner;
   late bool _locked;
   String? _path;
-  final _openIntents = <String>{};
   ContentViewModel get model => widget.viewModel;
 
   void _collapse() {
@@ -87,46 +87,15 @@ class _AttachmentStripState extends State<AttachmentStrip> {
     AttachmentModel attachment,
     FocusNode focus,
   ) async {
-    final owner = model.draftSession.generation;
-    final credential = model.draftSession.credentialGeneration;
-    final path = model.currentContentPath;
-    final key = '$owner/$credential/$path/${attachment.id}';
-    bool current() =>
-        mounted &&
-        !model.isLocked &&
-        owner == model.draftSession.generation &&
-        credential == model.draftSession.credentialGeneration &&
-        path == model.currentContentPath &&
-        model.attachments.any((a) => a.id == attachment.id);
-    if (!current()) return;
     if (action == AttachmentAction.open || action == AttachmentAction.system) {
-      if (!_openIntents.add(key)) return;
-      try {
-        final result = await model.openAttachment(
-          attachment,
-          system: action == AttachmentAction.system,
-        );
-        if (!mounted ||
-            !current() ||
-            !result.isSuccess ||
-            action == AttachmentAction.system) {
-          return;
-        }
-        await showAppDialog<void>(
-          context: context,
-          builder: (_) => AttachmentViewer(
-            viewModel: model,
-            attachment: attachment,
-            file: result.value!,
-            playerFactory: widget.playerFactory,
-          ),
-        );
-        if (current() && focus.context != null && focus.canRequestFocus) {
-          focus.requestFocus();
-        }
-      } finally {
-        _openIntents.remove(key);
-      }
+      await openAttachmentPreview(
+        context,
+        model,
+        attachment,
+        system: action == AttachmentAction.system,
+        restoreFocus: focus,
+        playerFactory: widget.playerFactory,
+      );
     } else if (action == AttachmentAction.save) {
       await model.exportAttachment(attachment);
     } else {

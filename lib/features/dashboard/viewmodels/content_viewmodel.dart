@@ -9,6 +9,8 @@ import '../services/file_service.dart';
 import '../services/background_service.dart';
 import '../services/encryption_service.dart';
 import '../models/note_model.dart';
+import '../models/attachment_mention.dart';
+import '../../../core/routing/fnotes_uri.dart';
 import '../models/note_import.dart';
 import '../services/note_import_service.dart';
 import 'dart:convert';
@@ -1346,6 +1348,7 @@ class ContentViewModel extends BaseViewModel {
             fileName: attachment.fileName,
             size: attachment.size,
             mimeType: attachment.mimeType,
+            mentionId: attachment.mentionId,
           ),
         );
       }
@@ -1361,11 +1364,26 @@ class ContentViewModel extends BaseViewModel {
             return _cancelledResult();
           }
           if (!_tryBeginFinalization(jobs)) return _cancelledResult();
+          for (var i = 0; i < replacement.length; i++) {
+            final latest = _attachments.where((a) => a.id == original[i].id);
+            if (latest.length == 1 &&
+                latest.single.mentionId != replacement[i].mentionId) {
+              final a = replacement[i];
+              replacement[i] = AttachmentModel(
+                id: a.id,
+                fileName: a.fileName,
+                size: a.size,
+                mimeType: a.mimeType,
+                mentionId: latest.single.mentionId,
+              );
+            }
+          }
           final metadata = <String, dynamic>{..._retainedMetadata};
           final oldFields = metadata['attachments'];
           if (oldFields is List &&
               oldFields.isNotEmpty &&
-              oldFields.first is String) {
+              oldFields.first is String &&
+              !replacement.any((a) => a.mentionId != null)) {
             metadata['attachments'] = replacement.map((a) => a.id).toList();
           } else {
             final byId = <String, Map<String, dynamic>>{};
@@ -1916,7 +1934,191 @@ class ContentViewModel extends BaseViewModel {
     _publishSaveState();
   }
 
+  AttachmentMentionQuery? attachmentMentionQuery() {
+    if (_disposed ||
+        _isLocked ||
+        !_session.canWrite ||
+        isConvertingEditor ||
+        _librarySwitching ||
+        _importCutover ||
+        _deleting) {
+      return null;
+    }
+    if (_isHtmlMode) {
+      final value = htmlController.value;
+      if (!value.selection.isCollapsed ||
+          !value.composing.isCollapsed ||
+          !htmlAllowsAttachmentMention(value.text, value.selection.start)) {
+        return null;
+      }
+      final end = value.selection.start;
+      if (end <= 0) return null;
+      final start = value.text.lastIndexOf('\n', end == 0 ? 0 : end - 1) + 1;
+      final query = AttachmentMentionQuery.find(
+        value.text.substring(start, end),
+        end - start,
+        offset: start,
+      );
+      return query != null &&
+              htmlAllowsAttachmentMention(value.text, query.start)
+          ? query
+          : null;
+    }
+    final selection = quillController.selection;
+    if (!selection.isCollapsed ||
+        selection.start < 0 ||
+        selection.start >= quillController.document.length) {
+      return null;
+    }
+    final line = quillController.document.queryChild(selection.start);
+    final node = line.node;
+    if (node == null ||
+        quillController.getSelectionStyle().attributes['link']?.value != null) {
+      return null;
+    }
+    final query = AttachmentMentionQuery.find(
+      node.toPlainText(),
+      line.offset,
+      offset: selection.start - line.offset,
+    );
+    if (query != null &&
+        quillController.document
+                .collectStyle(query.start, 1)
+                .attributes['link']
+                ?.value !=
+            null) {
+      return null;
+    }
+    return query;
+  }
+
+  OperationResult<AttachmentModel> resolveInternalLink(String url) {
+    final target = FnotesTarget.parse(url);
+    if (target == null) {
+      return const OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        'Invalid internal link.',
+      );
+    }
+    if (target.resource != FnotesResource.attachment) {
+      return const OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        'Unsupported internal link.',
+      );
+    }
+    final matches = _attachments
+        .where((a) => !a.isLoading && a.mentionIdentity == target.id)
+        .toList();
+    if (_isLocked || matches.length != 1) {
+      return const OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        'Attachment unavailable.',
+      );
+    }
+    return OperationResult.success(matches.single);
+  }
+
+  OperationResult<void> insertAttachmentMention({
+    required String attachmentId,
+    required AttachmentMentionQuery query,
+    required int owner,
+    required EditorMode mode,
+  }) {
+    final current = attachmentMentionQuery();
+    final matches = _attachments
+        .where((a) => a.id == attachmentId && !a.isLoading)
+        .toList();
+    if (owner != _session.generation ||
+        mode != editorMode ||
+        current == null ||
+        current.start != query.start ||
+        current.end != query.end ||
+        current.text != query.text ||
+        matches.length != 1) {
+      return const OperationResult.failure(
+        OperationOutcome.cancelled,
+        'Mention no longer available.',
+      );
+    }
+    final attachment = matches.single;
+    if (_attachments
+            .where((a) => a.mentionIdentity == attachment.mentionIdentity)
+            .length !=
+        1) {
+      return const OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        'Attachment reference is ambiguous.',
+      );
+    }
+    final url = FnotesTarget.attachment(attachment.mentionIdentity);
+    final label = '@${attachment.fileName}';
+    _publishing = true;
+    try {
+      if (_isHtmlMode) {
+        final text =
+            '<a href="$url">${const HtmlEscape(HtmlEscapeMode.element).convert(label)}</a> ';
+        final value = htmlController.value;
+        htmlController.value = value.copyWith(
+          text: value.text.replaceRange(query.start, query.end, text),
+          selection: TextSelection.collapsed(offset: query.start + text.length),
+          composing: TextRange.empty,
+        );
+        _observedHtml = htmlController.text;
+      } else {
+        final controller = quillController;
+        final attributes = controller.getSelectionStyle().attributes;
+        final style = <String, dynamic>{
+          for (final e in attributes.entries)
+            if (e.value.scope == AttributeScope.inline && e.key != 'link')
+              e.key: e.value.value,
+        };
+        final delta = controller.document.toDelta().slice(0, 0)
+          ..retain(query.start)
+          ..insert(label, {...style, 'link': url})
+          ..insert(' ', style)
+          ..delete(query.end - query.start);
+        // Isolate this replacement from adjacent typing in Quill's history.
+        controller.document.history.lastRecorded = 0;
+        controller.compose(
+          delta,
+          TextSelection.collapsed(offset: query.start + label.length + 1),
+          ChangeSource.local,
+        );
+        controller.document.history.lastRecorded = 0;
+        controller.updateSelection(
+          TextSelection.collapsed(offset: query.start + label.length + 1),
+          ChangeSource.local,
+        );
+        _observedRichDelta = controller.document.toDelta();
+      }
+      if (attachment.mentionId == null) {
+        _attachments = [
+          for (final a in _attachments)
+            if (a.id == attachment.id)
+              AttachmentModel(
+                id: a.id,
+                fileName: a.fileName,
+                size: a.size,
+                mimeType: a.mimeType,
+                mentionId: a.id,
+              )
+            else
+              a,
+        ];
+      }
+    } finally {
+      _publishing = false;
+    }
+    _recordEdit(DraftField.body);
+    _recordEdit(DraftField.attachments);
+    attachmentsNotifier.value = List.of(_attachments);
+    return const OperationResult.success();
+  }
+
   Future<void> handleLinkClick(String url) async {
+    if (FnotesTarget.isInternal(url)) {
+      return; // Never pass internal resources to an external launcher.
+    }
     if (url.startsWith('note://')) {
       final noteId = url.replaceFirst('note://', '');
       // Find file with this noteId
@@ -3118,6 +3320,7 @@ class ContentViewModel extends BaseViewModel {
                 fileName: attachment.fileName,
                 size: attachment.size,
                 mimeType: attachment.mimeType,
+                mentionId: attachment.mentionId,
                 isLoading: false,
               ),
             );
@@ -3427,6 +3630,7 @@ class ContentViewModel extends BaseViewModel {
                 fileName: attachment.fileName,
                 size: attachment.size,
                 mimeType: attachment.mimeType,
+                mentionId: attachment.mentionId,
                 isLoading: false,
               ),
             );
@@ -3829,7 +4033,7 @@ class ContentViewModel extends BaseViewModel {
         final original = snapshot.metadata['attachments'];
         final legacy =
             original is List && original.isNotEmpty && original.first is String;
-        if (legacy) {
+        if (legacy && !snapshot.attachments.any((a) => a.mentionId != null)) {
           metadata['attachments'] = snapshot.attachments
               .map((a) => a.id)
               .toList();
@@ -4852,6 +5056,7 @@ class ContentViewModel extends BaseViewModel {
           fileName: attachment.fileName,
           size: attachment.size,
           mimeType: attachment.mimeType,
+          mentionId: attachment.mentionId,
         );
         models.add(model);
         newFields.add(
@@ -5172,6 +5377,7 @@ class ContentViewModel extends BaseViewModel {
             fileName: original.fileName,
             size: entry.value.length,
             mimeType: original.mimeType,
+            mentionId: original.mentionId,
           ),
         );
       }
@@ -5544,9 +5750,11 @@ Future<List<dynamic>> _htmlToDeltaTask(String html) async {
 }
 
 Future<String> _deltaToHtmlTask(List<dynamic> deltaJson) async {
+  final options = ConverterOptions.forEmail();
+  options.sanitizerOptions.urlSanitizer = FnotesTarget.sanitize;
   final converter = QuillDeltaToHtmlConverter(
     deltaJson.cast<Map<String, dynamic>>(),
-    ConverterOptions.forEmail(),
+    options,
   );
   return formatHtmlSource(converter.convert());
 }

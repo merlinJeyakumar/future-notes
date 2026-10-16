@@ -3,6 +3,8 @@ class AttachmentModel {
   final String fileName;
   final int size;
   final String? mimeType;
+  final String? mentionId;
+  String get mentionIdentity => mentionId ?? id;
   final bool isLoading; // Transient
 
   AttachmentModel({
@@ -10,6 +12,7 @@ class AttachmentModel {
     required this.fileName,
     this.size = 0,
     this.mimeType,
+    this.mentionId,
     this.isLoading = false,
   });
 
@@ -18,6 +21,7 @@ class AttachmentModel {
     'fileName': fileName,
     'size': size,
     'mimeType': mimeType,
+    if (mentionId != null) 'mentionId': mentionId,
   };
 
   factory AttachmentModel.fromJson(Map<String, dynamic> json) {
@@ -26,6 +30,7 @@ class AttachmentModel {
       fileName: json['fileName'] as String? ?? 'Attachment',
       size: json['size'] as int? ?? 0,
       mimeType: json['mimeType'] as String?,
+      mentionId: json['mentionId'] as String?,
       isLoading: false,
     );
   }

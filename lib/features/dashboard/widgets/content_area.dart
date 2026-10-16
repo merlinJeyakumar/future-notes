@@ -7,6 +7,9 @@ import 'package:flutter_quill/flutter_quill.dart';
 import '../viewmodels/content_viewmodel.dart';
 import 'attachment_job_panel.dart';
 import 'attachment_strip.dart';
+import 'attachment_mentions.dart';
+import 'attachment_preview.dart';
+import '../../../core/routing/fnotes_uri.dart';
 import '../models/note_model.dart';
 import 'password_dialog.dart';
 import 'note_unlock_form.dart';
@@ -48,6 +51,8 @@ class _ContentAreaState extends State<ContentArea> {
   final _unlockFocusNode = FocusNode(debugLabel: 'Note unlock password');
   final _htmlFocusNode = FocusNode(debugLabel: 'HTML source');
   final _attachmentCollapseRequests = ValueNotifier<int>(0);
+  final _richEditorKey = GlobalKey<EditorState>();
+  final _htmlEditorKey = GlobalKey();
 
   void _collapseAttachments() => _attachmentCollapseRequests.value++;
 
@@ -73,6 +78,8 @@ class _ContentAreaState extends State<ContentArea> {
     _htmlFocusNode.addListener(_onEditorFocus);
 
     _editorConfig = QuillEditorConfig(
+      editorKey: _richEditorKey,
+      customLinkPrefixes: const ['fnotes://', 'note://'],
       autoFocus: false,
       scrollable: true,
       expands: true,
@@ -80,7 +87,25 @@ class _ContentAreaState extends State<ContentArea> {
       keyboardAppearance: Brightness.dark,
       embedBuilders: [_embedBuilder],
       onLaunchUrl: (url) {
-        viewModel.handleLinkClick(url);
+        if (FnotesTarget.isInternal(url)) {
+          final result = viewModel.resolveInternalLink(url);
+          if (result.isSuccess) {
+            unawaited(
+              openAttachmentPreview(
+                context,
+                viewModel,
+                result.value!,
+                restoreFocus: _focusNode,
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(result.message!)));
+          }
+        } else {
+          viewModel.handleLinkClick(url);
+        }
       },
       // Optimization: Disable some heavy features if not needed
       enableInteractiveSelection: true,
@@ -158,7 +183,13 @@ class _ContentAreaState extends State<ContentArea> {
                     enabled: !viewModel.isLocked,
                     child: Listener(
                       onPointerDown: (_) => _collapseAttachments(),
-                      child: _buildInputArea(context),
+                      child: AttachmentMentions(
+                        model: viewModel,
+                        richKey: _richEditorKey,
+                        htmlKey: _htmlEditorKey,
+                        htmlFocus: _htmlFocusNode,
+                        child: _buildInputArea(context),
+                      ),
                     ),
                   ),
                 ),
@@ -929,6 +960,7 @@ class _ContentAreaState extends State<ContentArea> {
                     ),
                     child: SingleChildScrollView(
                       child: CodeField(
+                        key: _htmlEditorKey,
                         controller: viewModel.htmlController,
                         focusNode: _htmlFocusNode,
                         readOnly:

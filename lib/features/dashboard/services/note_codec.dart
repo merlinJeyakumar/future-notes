@@ -118,6 +118,9 @@ class NoteCodec {
               (attachment['size'] != null &&
                   (attachment['size'] is! int ||
                       (attachment['size'] as int) < 0)) ||
+              (attachment['mentionId'] != null &&
+                  (attachment['mentionId'] is! String ||
+                      (attachment['mentionId'] as String).isEmpty)) ||
               (attachment['mimeType'] != null &&
                   attachment['mimeType'] is! String)) {
             throw const FormatException('Invalid attachment metadata.');

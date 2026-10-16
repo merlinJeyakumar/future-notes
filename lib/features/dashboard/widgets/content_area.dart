@@ -9,7 +9,7 @@ import 'attachment_job_panel.dart';
 import 'attachment_strip.dart';
 import 'attachment_mentions.dart';
 import 'attachment_preview.dart';
-import 'hover_formatting_bar.dart';
+import 'expanding_formatting_bar.dart';
 import '../../../core/routing/fnotes_uri.dart';
 import '../models/note_model.dart';
 import 'password_dialog.dart';
@@ -84,7 +84,8 @@ class _ContentAreaState extends State<ContentArea> {
       autoFocus: false,
       scrollable: true,
       expands: true,
-      padding: const EdgeInsets.all(16), // Increased padding here directly
+      padding:
+          EdgeInsets.zero, // The input area supplies the single writing inset.
       keyboardAppearance: Brightness.dark,
       embedBuilders: [_embedBuilder],
       onLaunchUrl: (url) {
@@ -158,11 +159,13 @@ class _ContentAreaState extends State<ContentArea> {
                     return IgnorePointer(
                       ignoring: viewModel.isLibraryCutover,
                       child: Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: isMobile ? 12 : 20,
-                          vertical: 8,
+                        padding: EdgeInsets.only(
+                          left: isMobile ? 12 : 20,
+                          right: isMobile ? 12 : 20,
+                          top: 8,
+                          bottom: 4,
                         ),
-                        child: HoverFormattingBar(
+                        child: ExpandingFormattingBar(
                           key: ValueKey((
                             viewModel.draftSession.generation,
                             viewModel.currentContentPath,
@@ -170,21 +173,17 @@ class _ContentAreaState extends State<ContentArea> {
                           surfaceColor: colors.toolbarIsland,
                           outlineColor: colors.divider.withValues(alpha: .3),
                           restoreEditorFocus: _restoreEditorFocus,
-                          primaryToolbar: _buildFloatingToolbar(
-                            isMobile,
-                            primary: true,
+                          expandedChild: _buildFormattingControls(
+                            expanded: true,
                           ),
-                          toolbar: _buildFloatingToolbar(
-                            isMobile,
-                            primary: false,
-                          ),
+                          child: _buildFormattingControls(),
                         ),
                       ),
                     );
                   },
                 ),
 
-                // Spacious Editor Area
+                // Editor Area
                 Expanded(
                   child: AppEntrance(
                     identity:
@@ -204,7 +203,7 @@ class _ContentAreaState extends State<ContentArea> {
                         richKey: _richEditorKey,
                         htmlKey: _htmlEditorKey,
                         htmlFocus: _htmlFocusNode,
-                        child: _buildInputArea(context),
+                        child: _buildInputArea(context, isMobile: isMobile),
                       ),
                     ),
                   ),
@@ -496,233 +495,219 @@ class _ContentAreaState extends State<ContentArea> {
   );
 
   /// Floating toolbar "island" with grouped formatting tools
-  Widget _buildFloatingToolbar(bool isMobile, {required bool primary}) {
-    return AbsorbPointer(
-      absorbing:
-          viewModel.isLibraryCutover ||
-          viewModel.isImportCutover ||
-          !viewModel.draftSession.canWrite,
-      // Always allow horizontal scroll to prevent overflow, even on larger screens if constrained
-      child: Row(
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: primary ? _buildToolbarRow1() : _buildToolbarRow2(),
-              ),
+  Widget _buildFormattingControls({bool expanded = false}) => AbsorbPointer(
+    absorbing:
+        viewModel.isLibraryCutover ||
+        viewModel.isImportCutover ||
+        !viewModel.draftSession.canWrite,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: expanded
+          ? Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                ..._toolbarPrimaryControls(),
+                _buildVerticalDivider(),
+                ..._toolbarSecondaryControls(),
+              ],
+            )
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ..._toolbarPrimaryControls(),
+                _buildVerticalDivider(),
+                ..._toolbarSecondaryControls(),
+              ],
             ),
-          ),
-        ],
+    ),
+  );
+
+  List<Widget> _toolbarPrimaryControls() => [
+    // Undo/Redo
+    QuillToolbarHistoryButton(
+      controller: viewModel.quillController,
+      isUndo: true,
+      options: QuillToolbarHistoryButtonOptions(
+        afterButtonPressed: _restoreEditorFocus,
+        iconTheme: _getIconTheme(),
       ),
-    );
-  }
-
-  Widget _buildToolbarRow1() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Undo/Redo
-          QuillToolbarHistoryButton(
-            controller: viewModel.quillController,
-            isUndo: true,
-            options: QuillToolbarHistoryButtonOptions(
-              afterButtonPressed: _restoreEditorFocus,
-              iconTheme: _getIconTheme(),
-            ),
-          ),
-          QuillToolbarHistoryButton(
-            controller: viewModel.quillController,
-            isUndo: false,
-            options: QuillToolbarHistoryButtonOptions(
-              afterButtonPressed: _restoreEditorFocus,
-              iconTheme: _getIconTheme(),
-            ),
-          ),
-          _buildVerticalDivider(),
-
-          // Font Size dropdown
-          QuillToolbarFontSizeButton(
-            controller: viewModel.quillController,
-            options: QuillToolbarFontSizeButtonOptions(
-              afterButtonPressed: _restoreEditorFocus,
-              style: TextStyle(color: colors.textSecondary, fontSize: 9.504),
-            ),
-          ),
-          _buildVerticalDivider(),
-
-          // Text Styling: Bold, Italic, Underline, Strike, Inline Code
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.bold,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.italic,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.underline,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.strikeThrough,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.inlineCode,
-            options: _getButtonOptions(),
-          ),
-          _buildVerticalDivider(),
-
-          // Subscript, Superscript
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.subscript,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.superscript,
-            options: _getButtonOptions(),
-          ),
-          _buildVerticalDivider(),
-
-          // Color buttons
-          QuillToolbarColorButton(
-            controller: viewModel.quillController,
-            isBackground: false,
-            options: _getColorButtonOptions(),
-          ),
-          QuillToolbarColorButton(
-            controller: viewModel.quillController,
-            isBackground: true,
-            options: _getColorButtonOptions(),
-          ),
-          QuillToolbarClearFormatButton(
-            controller: viewModel.quillController,
-            options: QuillToolbarClearFormatButtonOptions(
-              afterButtonPressed: _restoreEditorFocus,
-              iconTheme: _getIconTheme(),
-            ),
-          ),
-          _buildVerticalDivider(),
-
-          // Alignment
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.leftAlignment,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.centerAlignment,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.rightAlignment,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.justifyAlignment,
-            options: _getButtonOptions(),
-          ),
-          _buildVerticalDivider(),
-
-          // Header dropdown
-          QuillToolbarSelectHeaderStyleDropdownButton(
-            controller: viewModel.quillController,
-            options: QuillToolbarSelectHeaderStyleDropdownButtonOptions(
-              afterButtonPressed: _restoreEditorFocus,
-              textStyle: TextStyle(color: colors.textSecondary),
-            ),
-          ),
-        ],
+    ),
+    QuillToolbarHistoryButton(
+      controller: viewModel.quillController,
+      isUndo: false,
+      options: QuillToolbarHistoryButtonOptions(
+        afterButtonPressed: _restoreEditorFocus,
+        iconTheme: _getIconTheme(),
       ),
-    );
-  }
+    ),
+    _buildVerticalDivider(),
 
-  Widget _buildToolbarRow2() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Ordered list, Bullet list, Checkbox
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.ol,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.ul,
-            options: _getButtonOptions(),
-          ),
-          QuillToolbarToggleCheckListButton(
-            controller: viewModel.quillController,
-            options: QuillToolbarToggleCheckListButtonOptions(
-              afterButtonPressed: _restoreEditorFocus,
-              iconTheme: _getIconTheme(),
-            ),
-          ),
-          _buildVerticalDivider(),
-
-          // Code Block
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.codeBlock,
-            options: _getButtonOptions(),
-          ),
-          _buildVerticalDivider(),
-
-          // Quote
-          QuillToolbarToggleStyleButton(
-            controller: viewModel.quillController,
-            attribute: Attribute.blockQuote,
-            options: _getButtonOptions(),
-          ),
-          _buildVerticalDivider(),
-
-          // Indent buttons
-          QuillToolbarIndentButton(
-            controller: viewModel.quillController,
-            isIncrease: true,
-            options: QuillToolbarIndentButtonOptions(
-              afterButtonPressed: _restoreEditorFocus,
-              iconTheme: _getIconTheme(),
-            ),
-          ),
-          QuillToolbarIndentButton(
-            controller: viewModel.quillController,
-            isIncrease: false,
-            options: QuillToolbarIndentButtonOptions(
-              afterButtonPressed: _restoreEditorFocus,
-              iconTheme: _getIconTheme(),
-            ),
-          ),
-          _buildVerticalDivider(),
-
-          // Link
-          QuillToolbarLinkStyleButton(
-            controller: viewModel.quillController,
-            options: QuillToolbarLinkStyleButtonOptions(
-              iconTheme: _getIconTheme(),
-            ),
-          ),
-        ],
+    // Font Size dropdown
+    QuillToolbarFontSizeButton(
+      controller: viewModel.quillController,
+      options: QuillToolbarFontSizeButtonOptions(
+        afterButtonPressed: _restoreEditorFocus,
+        style: TextStyle(color: colors.textSecondary, fontSize: 9.504),
       ),
-    );
-  }
+    ),
+    _buildVerticalDivider(),
+
+    // Text Styling: Bold, Italic, Underline, Strike, Inline Code
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.bold,
+      options: _getButtonOptions(),
+    ),
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.italic,
+      options: _getButtonOptions(),
+    ),
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.underline,
+      options: _getButtonOptions(),
+    ),
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.strikeThrough,
+      options: _getButtonOptions(),
+    ),
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.inlineCode,
+      options: _getButtonOptions(),
+    ),
+    _buildVerticalDivider(),
+
+    // Subscript, Superscript
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.subscript,
+      options: _getButtonOptions(),
+    ),
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.superscript,
+      options: _getButtonOptions(),
+    ),
+    _buildVerticalDivider(),
+
+    // Color buttons
+    QuillToolbarColorButton(
+      controller: viewModel.quillController,
+      isBackground: false,
+      options: _getColorButtonOptions(),
+    ),
+    QuillToolbarColorButton(
+      controller: viewModel.quillController,
+      isBackground: true,
+      options: _getColorButtonOptions(),
+    ),
+    QuillToolbarClearFormatButton(
+      controller: viewModel.quillController,
+      options: QuillToolbarClearFormatButtonOptions(
+        afterButtonPressed: _restoreEditorFocus,
+        iconTheme: _getIconTheme(),
+      ),
+    ),
+    _buildVerticalDivider(),
+
+    // Alignment
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.leftAlignment,
+      options: _getButtonOptions(),
+    ),
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.centerAlignment,
+      options: _getButtonOptions(),
+    ),
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.rightAlignment,
+      options: _getButtonOptions(),
+    ),
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.justifyAlignment,
+      options: _getButtonOptions(),
+    ),
+    _buildVerticalDivider(),
+
+    // Header dropdown
+    QuillToolbarSelectHeaderStyleDropdownButton(
+      controller: viewModel.quillController,
+      options: QuillToolbarSelectHeaderStyleDropdownButtonOptions(
+        afterButtonPressed: _restoreEditorFocus,
+        textStyle: TextStyle(color: colors.textSecondary),
+      ),
+    ),
+  ];
+
+  List<Widget> _toolbarSecondaryControls() => [
+    // Ordered list, Bullet list, Checkbox
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.ol,
+      options: _getButtonOptions(),
+    ),
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.ul,
+      options: _getButtonOptions(),
+    ),
+    QuillToolbarToggleCheckListButton(
+      controller: viewModel.quillController,
+      options: QuillToolbarToggleCheckListButtonOptions(
+        afterButtonPressed: _restoreEditorFocus,
+        iconTheme: _getIconTheme(),
+      ),
+    ),
+    _buildVerticalDivider(),
+
+    // Code Block
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.codeBlock,
+      options: _getButtonOptions(),
+    ),
+    _buildVerticalDivider(),
+
+    // Quote
+    QuillToolbarToggleStyleButton(
+      controller: viewModel.quillController,
+      attribute: Attribute.blockQuote,
+      options: _getButtonOptions(),
+    ),
+    _buildVerticalDivider(),
+
+    // Indent buttons
+    QuillToolbarIndentButton(
+      controller: viewModel.quillController,
+      isIncrease: true,
+      options: QuillToolbarIndentButtonOptions(
+        afterButtonPressed: _restoreEditorFocus,
+        iconTheme: _getIconTheme(),
+      ),
+    ),
+    QuillToolbarIndentButton(
+      controller: viewModel.quillController,
+      isIncrease: false,
+      options: QuillToolbarIndentButtonOptions(
+        afterButtonPressed: _restoreEditorFocus,
+        iconTheme: _getIconTheme(),
+      ),
+    ),
+    _buildVerticalDivider(),
+
+    // Link
+    QuillToolbarLinkStyleButton(
+      controller: viewModel.quillController,
+      options: QuillToolbarLinkStyleButtonOptions(iconTheme: _getIconTheme()),
+    ),
+  ];
 
   /// Small segmented mode control following the Stitch header refinement.
   Widget _buildModeToggleButton() => ValueListenableBuilder<bool>(
@@ -872,7 +857,7 @@ class _ContentAreaState extends State<ContentArea> {
     );
   }
 
-  Widget _buildInputArea(BuildContext context) {
+  Widget _buildInputArea(BuildContext context, {required bool isMobile}) {
     if (viewModel.isLocked) {
       return NoteUnlockForm(
         key: ValueKey(viewModel.draftSession.generation),
@@ -894,9 +879,14 @@ class _ContentAreaState extends State<ContentArea> {
       );
     }
 
-    // Spacious editor with increased padding
+    // One modest inset, shared by Rich text and HTML.
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.only(
+        left: isMobile ? 12 : 20,
+        right: isMobile ? 12 : 20,
+        top: 4,
+        bottom: 8,
+      ),
       child: viewModel.isHtmlMode
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,

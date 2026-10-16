@@ -250,6 +250,36 @@
       "purpose": "Single-card hover expansion reference; final implementation removes the disclosure arrow and reveals extra controls inside the same card. Synthetic content only; no editor reflow.",
       "localHtml": ".stitch/designs/unified-formatting-20261016.html",
       "localScreenshot": ".stitch/designs/unified-formatting-20261016.png"
+    },
+    {
+      "id": "e76a83bcf906490da7f1db19dada92b1",
+      "title": "Future Notes - Compact editor margins",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Single writing inset: desktop 20 px sides, narrow 12 px sides, 8 px vertical; no duplicate inner padding. Synthetic content only.",
+      "localHtml": ".stitch/designs/editor-margin-20261016.html",
+      "localScreenshot": ".stitch/designs/editor-margin-20261016.png"
+    },
+    {
+      "id": "a97204805fd7441aa90c8c0dcf413077",
+      "title": "Future Notes - Single-row scrolling toolbar",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "All formatting tools in one fixed-height scrolling row; wheel/touchpad and end arrows. No hover expansion or editor overlay. Existing margins retained; synthetic content only.",
+      "localHtml": ".stitch/designs/scroll-formatting-20261016.html",
+      "localScreenshot": ".stitch/designs/scroll-formatting-20261016.png"
+    },
+    {
+      "id": "2a9cabb575254ee7a647ccaa71144bea",
+      "title": "Future Notes - Explicit toolbar expansion",
+      "updated": "2026-10-16",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Same-card wrapped layout reference. Latest implementation expands on hover or keyboard focus, with chevron and horizontal scrolling removed and a tighter bottom gap. Synthetic content only.",
+      "localHtml": ".stitch/designs/expand-formatting-20261016.html",
+      "localScreenshot": ".stitch/designs/expand-formatting-20261016.png"
     }
   ]
 }

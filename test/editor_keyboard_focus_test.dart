@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -259,6 +260,22 @@ void main() {
       );
       await tester.tap(find.byTooltip('Align center'));
       await tester.pump();
+      expect(h.editor.focusNode.hasFocus, isTrue);
+      expect(h.editor.quillController.selection, selection);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: const Offset(1400, 900));
+      await mouse.moveTo(
+        tester.getCenter(find.byKey(const ValueKey('formatting-card'))),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Bold'));
+      await tester.pump();
+      expect(h.editor.focusNode.hasFocus, isTrue);
+      expect(h.editor.quillController.selection, selection);
+      await mouse.moveTo(const Offset(1400, 900));
+      await tester.pump(const Duration(milliseconds: 185));
+      await tester.pumpAndSettle();
+      await mouse.removePointer();
       expect(h.editor.focusNode.hasFocus, isTrue);
       expect(h.editor.quillController.selection, selection);
     },

@@ -252,6 +252,14 @@ class ContentViewModel extends BaseViewModel {
   int _mutationsPending = 0;
   final _attachmentWorker = AttachmentTransformWorker();
   AttachmentOpenCache? _attachmentOpenCache;
+  // A new editor session must retain the acknowledged credentials' cache key.
+  // Values live only in this process and contain no passwords or key material.
+  final _noteCredentialGenerations = <String, int>{};
+  String _credentialIdentity(NoteReference reference) {
+    final path = p.normalize(reference.contentPath);
+    return Platform.isWindows ? path.toLowerCase() : path;
+  }
+
   final DesktopActions? _desktopActions;
   final attachmentCacheNotifier = ValueNotifier<int>(0);
   final _attachmentViewerClosers = <Future<void> Function()>{};
@@ -2725,11 +2733,17 @@ class ContentViewModel extends BaseViewModel {
         _noteReference = resolvedReference;
         _retainedMetadata = prospective.metadata;
         _envelopeKind = prospective.kind;
-        _persistedCredentialGeneration = 0;
+        final credentials =
+            _noteCredentialGenerations[_credentialIdentity(
+              resolvedReference,
+            )] ??
+            0;
+        _persistedCredentialGeneration = credentials;
         _session = DraftSession(
           generation: ++_nextSessionGeneration,
           access: locked ? DraftAccess.locked : DraftAccess.editable,
           persistedRevision: 0,
+          credentialGeneration: credentials,
         );
         _isLocked = locked;
         _isHtmlMode = false;
@@ -3877,6 +3891,8 @@ class ContentViewModel extends BaseViewModel {
       } else {
         _session = _session.acknowledged(snapshot.editRevision);
       }
+      _noteCredentialGenerations[_credentialIdentity(_noteReference!)] =
+          _session.credentialGeneration;
       if (snapshot.password != null) {
         _sessionPasswords[reference.fileName] = snapshot.password!;
       } else {
@@ -5055,6 +5071,7 @@ class ContentViewModel extends BaseViewModel {
       _retainedMetadata = metadata;
       _retainedPlainBody = note.isLocked ? null : note.content;
       _envelopeKind = kind;
+      _noteCredentialGenerations.remove(_credentialIdentity(reference));
       _persistedCredentialGeneration = 0;
       _session = DraftSession(
         generation: ++_nextSessionGeneration,

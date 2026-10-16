@@ -95,6 +95,18 @@ void main() {
       );
       expect(await File(first).exists(), isFalse);
       final protected = await open();
+      final protectedTransforms = cache.transformCount;
+      expect((await editor.reset()).isSuccess, isTrue);
+      expect((await editor.loadNote(name)).isSuccess, isTrue);
+      expect(editor.isLocked, isFalse);
+      expect(
+        editor.cachedAttachment(editor.attachments.single.id)?.path,
+        protected,
+      );
+      editor.quillController.document.insert(0, 'typed without relocking ');
+      expect((await editor.saveNote()).isSuccess, isTrue);
+      expect(await open(), protected);
+      expect(cache.transformCount, protectedTransforms);
       expect((await editor.manualLock()).isSuccess, isTrue);
       expect(await File(protected).exists(), isFalse);
       expect(editor.cachedAttachment(editor.attachments.single.id), isNull);
@@ -106,6 +118,11 @@ void main() {
       );
       expect(await File(unlocked).exists(), isFalse);
       final rekeyed = await open();
+      final rekeyedTransforms = cache.transformCount;
+      expect((await editor.reset()).isSuccess, isTrue);
+      expect((await editor.loadNote(name)).isSuccess, isTrue);
+      expect(await open(), rekeyed);
+      expect(cache.transformCount, rekeyedTransforms);
       expect(
         (await editor.removeAttachment(editor.attachments.single.id)).isSuccess,
         isTrue,
@@ -124,6 +141,20 @@ void main() {
       expect(editor.currentFileName, isNull);
     },
   );
+
+  test('actual cache close removes files from every unlocked note', () async {
+    await saveWithAttachment();
+    final first = await open();
+    expect((await editor.reset()).isSuccess, isTrue);
+    await saveWithAttachment();
+    final second = await open();
+    expect(first, isNot(second));
+    expect(await File(first).exists(), isTrue);
+    expect(await File(second).exists(), isTrue);
+    await editor.closeAttachmentCache();
+    expect(await File(first).exists(), isFalse);
+    expect(await File(second).exists(), isFalse);
+  });
 
   test(
     'actual Exit offers keep running or cancellation during preparation',

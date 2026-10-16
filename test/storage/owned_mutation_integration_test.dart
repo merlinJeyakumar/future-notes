@@ -614,6 +614,72 @@ void main() {
   );
 
   test(
+    'export source checking reports bytes and acknowledges cancellation without publishing',
+    () async {
+      await save();
+      final source = await input('x' * (4 * 1024 * 1024));
+      expect(
+        (await editor.addOwnedAttachment(
+          source.path,
+          'synthetic.bin',
+        )).isSuccess,
+        isTrue,
+      );
+      final before = await stored();
+      final destination = File(p.join(run.path, 'cancelled-export.fnote'));
+      await destination.writeAsString('previous destination');
+      Future<void>? cancellation;
+      final watched = <AttachmentJobState>{};
+      var sawBytes = false;
+      void watch() {
+        for (final job in editor.attachmentJobsNotifier.value) {
+          if (job.progress.value.operation != AttachmentJobOperation.export ||
+              !watched.add(job)) {
+            continue;
+          }
+          job.progress.addListener(() {
+            final state = job.progress.value;
+            if (state.phase == AttachmentJobPhase.preparing &&
+                state.detail?.startsWith('Checking export attachments') ==
+                    true &&
+                state.bytes > 0 &&
+                cancellation == null) {
+              sawBytes = true;
+              cancellation = editor.cancelAttachmentJob(state.id);
+            }
+          });
+        }
+      }
+
+      editor.attachmentJobsNotifier.addListener(watch);
+      try {
+        final result = await editor
+            .exportOwnedPackageTo(destination.path, format: ExportFormat.binary)
+            .timeout(const Duration(seconds: 20));
+        await cancellation;
+        expect(sawBytes, isTrue);
+        expect(result.outcome, OperationOutcome.cancelled);
+        expect(
+          editor.attachmentJobsNotifier.value.last.progress.value.phase,
+          AttachmentJobPhase.cancelled,
+        );
+        expect(await destination.readAsString(), 'previous destination');
+        expect(await stored(), before);
+        // A second operation can start; cancellation must release the export gate.
+        expect(
+          (await editor.exportOwnedPackageTo(
+            p.join(run.path, 'completed.fnote'),
+            format: ExportFormat.binary,
+          )).isSuccess,
+          isTrue,
+        );
+      } finally {
+        editor.attachmentJobsNotifier.removeListener(watch);
+      }
+    },
+  );
+
+  test(
     'exports cannot replace note payloads or application settings',
     () async {
       await save();

@@ -489,6 +489,7 @@ class ContentViewModel extends BaseViewModel {
       ValueNotifier([]);
   final Map<String, FileTransformJob> _attachmentTransforms = {};
   final Map<String, File> _packageCancellationFiles = {};
+  final Map<String, FileReadCancellation> _exportReadCancellations = {};
   final Map<String, Future<void> Function()> _attachmentRetries = {};
   final Set<String> _cancelledAttachmentJobs = {};
   final Set<Future<void>> _activeOwnedJobs = {};
@@ -976,6 +977,7 @@ class ContentViewModel extends BaseViewModel {
   Future<void> _signalCancellation(AttachmentJobState job) async {
     final state = job.progress.value;
     final id = state.id;
+    _exportReadCancellations[id]?.cancel();
     if (state.operation == AttachmentJobOperation.open) {
       final reference = _noteReference;
       final attachment = state.originalAttachmentId;
@@ -4617,38 +4619,77 @@ class ContentViewModel extends BaseViewModel {
       operation: AttachmentJobOperation.export,
     );
     final id = job.progress.value.id;
+    final readCancellation = FileReadCancellation();
+    _exportReadCancellations[id] = readCancellation;
+    void checkCancellation() {
+      if (_disposed ||
+          owner != _session.generation ||
+          readCancellation.cancelled ||
+          _cancelledAttachmentJobs.contains(id)) {
+        throw const FileJobCancelled();
+      }
+    }
+
     Directory? operation;
     String? candidate;
     OperationResult<void> result;
     try {
+      checkCancellation();
+      _jobPhase(job, AttachmentJobPhase.preparing, detail: 'Preparing export');
       final reference =
           captured?.reference ??
           (fileName == null || fileName == _currentFileName
               ? _noteReference
               : await _fileService.resolveNote(fileName));
+      checkCancellation();
       if (reference == null) {
         throw const FormatException('Save the note before exporting.');
       }
       final content = await _fileService.readResolved(reference);
+      checkCancellation();
       if (content == null) {
         throw const FormatException('The captured note is unavailable.');
       }
       final decoded = await _decodeNote(content);
+      checkCancellation();
       final resolved = reference.withModelId(decoded.note.id);
       final attachments = <String, StreamingFileSource>{};
+      var attachmentIndex = 0;
       for (final attachment in decoded.note.attachments) {
+        checkCancellation();
+        attachmentIndex++;
+        final detail =
+            'Checking export attachments ($attachmentIndex/${decoded.note.attachments.length})';
+        _jobPhase(job, AttachmentJobPhase.preparing, detail: detail);
         attachments[attachment.id] = await files.attachmentSource(
           resolved,
           attachment.id,
+          cancellation: readCancellation,
+          onProgress: (_, bytes, total) => _jobPhase(
+            job,
+            AttachmentJobPhase.preparing,
+            bytes: bytes,
+            total: total,
+            detail: detail,
+          ),
         );
+        checkCancellation();
       }
       final extension = format == ExportFormat.binary ? 'fnote' : 'zip';
+      if (destination == null) {
+        _jobPhase(
+          job,
+          AttachmentJobPhase.preparing,
+          detail: 'Choose export destination',
+        );
+      }
       destination ??= await FilePicker.platform.saveFile(
         dialogTitle: 'Save Note Package',
         fileName: 'note.$extension',
         type: FileType.custom,
         allowedExtensions: [extension],
       );
+      checkCancellation();
       if (destination == null) {
         result = const OperationResult.failure(
           OperationOutcome.cancelled,
@@ -4660,8 +4701,13 @@ class ContentViewModel extends BaseViewModel {
         operation = await files.createOperationDirectory(resolved);
         final cancellation = File(p.join(operation.path, 'cancel'));
         _packageCancellationFiles[id] = cancellation;
+        checkCancellation();
         candidate = ExternalFileExport.candidatePath(destination);
-        _jobPhase(job, AttachmentJobPhase.preparing);
+        _jobPhase(
+          job,
+          AttachmentJobPhase.preparing,
+          detail: 'Writing export package',
+        );
         await StreamingPackService().exportPackage(
           metadata: decoded.metadata,
           attachments: attachments,
@@ -4702,6 +4748,15 @@ class ContentViewModel extends BaseViewModel {
         OperationOutcome.cancelled,
         'Export cancelled.',
       );
+    } on NotePersistenceFailure catch (failure) {
+      result = OperationResult.failure(
+        readCancellation.cancelled
+            ? OperationOutcome.cancelled
+            : failure.outcome,
+        readCancellation.cancelled
+            ? 'Export cancelled.'
+            : 'Export failed; no complete backup is claimed.',
+      );
     } on FormatException catch (failure) {
       result = OperationResult.failure(
         OperationOutcome.rejectedInput,
@@ -4713,6 +4768,7 @@ class ContentViewModel extends BaseViewModel {
         'Export failed; no complete backup is claimed.',
       );
     } finally {
+      _exportReadCancellations.remove(id);
       _packageCancellationFiles.remove(id);
       if (candidate != null && await File(candidate).exists()) {
         try {

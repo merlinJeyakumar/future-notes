@@ -43,7 +43,6 @@ void main() {
           MyApp(
             settings: harness.settings,
             home: DashboardScreen(
-              confirmExit: () async => true,
               settings: harness.settings,
               fileService: harness.files,
               startBackgroundServices: false,

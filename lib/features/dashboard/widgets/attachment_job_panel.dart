@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 import '../models/attachment_job.dart';
 import '../viewmodels/content_viewmodel.dart';
 
-/// Structural events rebuild the strip; byte events rebuild its header and the
-/// individual card only. The editor never subscribes to progress.
+/// Structural events rebuild the panel; byte events rebuild the individual
+/// status row only. The editor never subscribes to progress.
 class AttachmentJobPanel extends StatefulWidget {
   const AttachmentJobPanel({
     super.key,
@@ -124,14 +124,26 @@ class _AttachmentJobPanelState extends State<AttachmentJobPanel> {
             ),
             AppReveal(
               visible: expanded,
-              child: SizedBox(
-                height: 160 * MediaQuery.textScalerOf(context).scale(1),
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: jobs.length,
-                  separatorBuilder: (_, index) => const SizedBox(width: 8),
-                  itemBuilder: (context, index) =>
-                      _JobCard(job: jobs[index], viewModel: widget.viewModel),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: 160 * MediaQuery.textScalerOf(context).scale(1),
+                ),
+                child: SingleChildScrollView(
+                  primary: false,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (var index = 0; index < jobs.length; index++) ...[
+                        if (index > 0) const SizedBox(height: 8),
+                        _JobRow(
+                          key: ValueKey(jobs[index].progress.value.id),
+                          job: jobs[index],
+                          viewModel: widget.viewModel,
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -142,8 +154,8 @@ class _AttachmentJobPanelState extends State<AttachmentJobPanel> {
   );
 }
 
-class _JobCard extends StatelessWidget {
-  const _JobCard({required this.job, required this.viewModel});
+class _JobRow extends StatelessWidget {
+  const _JobRow({super.key, required this.job, required this.viewModel});
   final AttachmentJobState job;
   final ContentViewModel viewModel;
   @override
@@ -157,79 +169,83 @@ class _JobCard extends StatelessWidget {
       final fraction = total != null && total > 0
           ? (state.bytes / total).clamp(0.0, 1.0)
           : null;
-      return SizedBox(
-        width: 246,
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  state.fileName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(label, style: Theme.of(context).textTheme.labelSmall),
-                if (state.error != null)
-                  AppTooltip(
-                    message: state.error!,
-                    child: Text(
-                      state.error!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelSmall,
+      return Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: AppTooltip(
+                      message: state.fileName,
+                      child: Text(
+                        state.fileName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
-                if (state.active) ...[
-                  const SizedBox(height: 6),
-                  LinearProgressIndicator(
-                    value:
-                        (state.phase == AttachmentJobPhase.finalizing ||
-                            state.phase == AttachmentJobPhase.cancelling)
-                        ? null
-                        : fraction,
-                  ),
-                  if (total != null)
-                    Text(
-                      '${formatAttachmentBytes(state.bytes)} / ${formatAttachmentBytes(total)}',
-                      style: Theme.of(context).textTheme.labelSmall,
+                  if (state.cancellable)
+                    TextButton(
+                      onPressed: () => viewModel.cancelAttachmentJob(state.id),
+                      child: const Text('Cancel'),
+                    )
+                  else if (!state.active &&
+                      state.phase != AttachmentJobPhase.failed)
+                    TextButton(
+                      onPressed: () =>
+                          viewModel.removePendingAttachmentJob(state.id),
+                      child: const Text('Dismiss'),
                     ),
                 ],
-                const Spacer(),
-                if (state.phase == AttachmentJobPhase.failed)
-                  Row(
-                    children: [
-                      if (!state.batch)
-                        Flexible(
-                          child: TextButton(
-                            onPressed: () =>
-                                viewModel.retryAttachmentJob(state.id),
-                            child: const Text('Retry'),
-                          ),
-                        ),
-                      Flexible(
-                        child: TextButton(
-                          onPressed: () =>
-                              viewModel.removePendingAttachmentJob(state.id),
-                          child: const Text('Remove pending'),
-                        ),
-                      ),
-                    ],
-                  )
-                else if (state.cancellable)
-                  TextButton(
-                    onPressed: () => viewModel.cancelAttachmentJob(state.id),
-                    child: const Text('Cancel'),
-                  )
-                else if (!state.active)
-                  TextButton(
-                    onPressed: () =>
-                        viewModel.removePendingAttachmentJob(state.id),
-                    child: const Text('Dismiss'),
+              ),
+              Text(label, style: Theme.of(context).textTheme.labelSmall),
+              if (state.error != null)
+                AppTooltip(
+                  message: state.error!,
+                  child: Text(
+                    state.error!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ),
+              if (state.active) ...[
+                const SizedBox(height: 6),
+                LinearProgressIndicator(
+                  value:
+                      (state.phase == AttachmentJobPhase.finalizing ||
+                          state.phase == AttachmentJobPhase.cancelling)
+                      ? null
+                      : fraction,
+                ),
+                if (total != null)
+                  Text(
+                    '${formatAttachmentBytes(state.bytes)} / ${formatAttachmentBytes(total)}',
+                    style: Theme.of(context).textTheme.labelSmall,
                   ),
               ],
-            ),
+              if (state.phase == AttachmentJobPhase.failed)
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    if (!state.batch)
+                      TextButton(
+                        onPressed: () => viewModel.retryAttachmentJob(state.id),
+                        child: const Text('Retry'),
+                      ),
+                    TextButton(
+                      onPressed: () =>
+                          viewModel.removePendingAttachmentJob(state.id),
+                      child: const Text('Remove pending'),
+                    ),
+                  ],
+                ),
+            ],
           ),
         ),
       );

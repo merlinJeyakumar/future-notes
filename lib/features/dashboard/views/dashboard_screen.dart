@@ -221,7 +221,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<AppExitResponse> _resolveExit() async {
     try {
       if (!_shutdownStarted) {
-        final confirmed = await (widget.confirmExit?.call() ?? _confirmExit());
+        // The transition coordinator prompts only for work that needs a
+        // decision. A saved, idle app can proceed directly to orderly cleanup.
+        final confirmed =
+            await (widget.confirmExit?.call() ?? Future.value(true));
         if (!mounted || !confirmed) return AppExitResponse.cancel;
         final result = await _viewModel.prepareToExit();
         if (!mounted || !result.isSuccess) {
@@ -266,29 +269,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
     return AppExitResponse.cancel;
   }
-
-  Future<bool> _confirmExit() async =>
-      await showAppDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Exit Future Notes?'),
-          content: const Text(
-            'Exit the app completely? Unsaved changes and active attachment '
-            'operations will be handled before closing.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Keep open'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Exit'),
-            ),
-          ],
-        ),
-      ) ??
-      false;
 
   void _showShutdownNotice(String message) {
     ScaffoldMessenger.maybeOf(

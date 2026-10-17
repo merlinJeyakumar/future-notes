@@ -7,6 +7,8 @@ import 'dart:typed_data';
 import 'package:path/path.dart' as p;
 import 'package:archive/archive.dart' as archive;
 import 'package:uuid/uuid.dart';
+import 'package:flutter/services.dart';
+import '../../../core/platform/android_native_cipher.dart';
 
 import '../../../core/storage/streaming_file_cipher.dart';
 import '../models/note_envelope.dart';
@@ -22,6 +24,8 @@ class FilePackResult {
 /// Native package jobs transfer descriptors only. Stored ZIP64 export and
 /// legacy stored/DEFLATE import use immediate bounded file sinks.
 class StreamingPackService {
+  const StreamingPackService({this.useNative = true});
+  final bool useNative;
   static const metadataLimit = 32 * 1024 * 1024;
   static const directoryLimit = 64 * 1024 * 1024;
   static const entryLimit = 10000;
@@ -36,26 +40,48 @@ class StreamingPackService {
     required String operationDirectory,
     String? password,
     String? cancellationFile,
-  }) => Isolate.run(
-    () => _export(
-      metadata,
-      attachments,
-      format,
-      destination,
-      operationDirectory,
-      password,
-      cancellationFile,
-    ),
-  );
+  }) async {
+    final token = useNative && AndroidNativeCipher.ready
+        ? ServicesBinding.rootIsolateToken
+        : null;
+    final owner = token == null ? null : const Uuid().v4();
+    try {
+      await Isolate.run(() {
+        AndroidNativeCipher.initialize(token, owner: owner);
+        return _export(
+          metadata,
+          attachments,
+          format,
+          destination,
+          operationDirectory,
+          password,
+          cancellationFile,
+        );
+      });
+    } finally {
+      await AndroidNativeCipher.releaseOwner(owner);
+    }
+  }
 
   Future<FilePackResult> importPackage({
     required String source,
     required String operationDirectory,
     String? password,
     String? cancellationFile,
-  }) => Isolate.run(
-    () => _import(source, operationDirectory, password, cancellationFile),
-  );
+  }) async {
+    final token = useNative && AndroidNativeCipher.ready
+        ? ServicesBinding.rootIsolateToken
+        : null;
+    final owner = token == null ? null : const Uuid().v4();
+    try {
+      return await Isolate.run(() {
+        AndroidNativeCipher.initialize(token, owner: owner);
+        return _import(source, operationDirectory, password, cancellationFile);
+      });
+    } finally {
+      await AndroidNativeCipher.releaseOwner(owner);
+    }
+  }
 
   static void _cancel(String? path) {
     if (path != null && File(path).existsSync()) throw const FileJobCancelled();

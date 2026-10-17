@@ -1,11 +1,9 @@
 import 'package:flutter/services.dart';
 import '../operations/operation_result.dart';
+import 'attachment_file_actions.dart';
+export 'attachment_file_actions.dart';
 
-abstract class DesktopActions {
-  Future<String> cacheRoot({String? validationRoot});
-  Future<OperationResult<void>> openFile(String path);
-  Future<void> dispose();
-}
+typedef DesktopActions = AttachmentFileActions;
 
 class WindowsDesktopActions implements DesktopActions {
   static const _channel = MethodChannel('future_notes/desktop');

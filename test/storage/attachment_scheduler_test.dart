@@ -20,6 +20,39 @@ SystemCapacity capacity({
 );
 
 void main() {
+  test(
+    'mobile export scans default off and independently respect saved preferences; desktop stays checked',
+    () {
+      for (final metadata in [null, <String, Object>{}]) {
+        final defaults = AttachmentPerformance.fromJson(metadata);
+        expect(defaults.exportChecks(mobile: true), (
+          checkSource: false,
+          verifyOutput: false,
+        ));
+        expect(defaults.exportChecks(mobile: false), (
+          checkSource: true,
+          verifyOutput: true,
+        ));
+      }
+      for (final check in [false, true]) {
+        for (final verify in [false, true]) {
+          final policy = AttachmentPerformance.defaults.copyWith(
+            checkBeforeOpen: check,
+            verifyAfterOpen: verify,
+          );
+          final reopened = AttachmentPerformance.fromJson(policy.toJson());
+          expect(reopened.exportChecks(mobile: true), (
+            checkSource: check,
+            verifyOutput: verify,
+          ));
+          expect(reopened.exportChecks(mobile: false), (
+            checkSource: true,
+            verifyOutput: true,
+          ));
+        }
+      }
+    },
+  );
   test('profiles default to 70 percent and reject unsafe persisted limits', () {
     expect(AttachmentPerformance.fromJson(null).targetPercent, 70);
     expect(AttachmentPerformance.fromJson(null).checkBeforeOpen, isFalse);

@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'dart:isolate';
+import 'package:flutter/services.dart';
+import 'package:uuid/uuid.dart';
+import '../platform/android_native_cipher.dart';
 
 import '../operations/operation_result.dart';
 import 'streaming_file_cipher.dart';
@@ -143,6 +146,10 @@ class AttachmentTransformWorker {
           final events = ReceivePort();
           final result = Completer<OperationResult<T>>();
           final ended = Completer<void>();
+          final nativeOwner = AndroidNativeCipher.ready
+              ? const Uuid().v4()
+              : null;
+          OperationResult<T>? resolved;
           final listener = events.listen((message) {
             if (message is SendPort) {
               job._cancelPort = message;
@@ -186,7 +193,15 @@ class AttachmentTransformWorker {
           try {
             await Isolate.spawn(
               _entry,
-              _Start(events.sendPort, request, job._duty),
+              _Start(
+                events.sendPort,
+                request,
+                job._duty,
+                AndroidNativeCipher.ready
+                    ? ServicesBinding.rootIsolateToken
+                    : null,
+                nativeOwner,
+              ),
               onError: events.sendPort,
               onExit: events.sendPort,
               errorsAreFatal: true,
@@ -202,19 +217,19 @@ class AttachmentTransformWorker {
                 ),
               );
             }
-            job._completed.complete(await result.future);
+            resolved = await result.future;
           } catch (_) {
-            job._completed.complete(
-              const OperationResult.failure(
-                OperationOutcome.ioFailure,
-                'Attachment worker could not start.',
-              ),
+            resolved = const OperationResult.failure(
+              OperationOutcome.ioFailure,
+              'Attachment worker could not start.',
             );
           } finally {
+            await AndroidNativeCipher.releaseOwner(nativeOwner);
             job._cancelPort = null;
             await listener.cancel();
             events.close();
           }
+          job._completed.complete(resolved);
         },
         cancelled: () => job._cancelled,
         quota: (duty) {
@@ -252,6 +267,7 @@ class AttachmentTransformWorker {
   }
 
   static void _entry(_Start start) async {
+    AndroidNativeCipher.initialize(start.nativeToken, owner: start.nativeOwner);
     final cancellation = ReceivePort();
     var cancelled = false;
     var duty = start.duty;
@@ -316,6 +332,7 @@ class AttachmentTransformWorker {
             verifyOutput: request.verifyOutput,
             expectedPlaintextBytes: request.expectedPlaintextBytes,
             requireWholeSource: request.requireWholeSource,
+            duty: () => duty,
             cancelled: () => cancelled,
             cooperate: pacer.cooperate,
             beginCompute: compute.begin,
@@ -382,10 +399,18 @@ class _WorkerBudget {
 }
 
 class _Start {
-  const _Start(this.events, this.request, this.duty);
+  const _Start(
+    this.events,
+    this.request,
+    this.duty,
+    this.nativeToken,
+    this.nativeOwner,
+  );
   final SendPort events;
   final Object request;
   final double duty;
+  final RootIsolateToken? nativeToken;
+  final String? nativeOwner;
 }
 
 class _Progress {

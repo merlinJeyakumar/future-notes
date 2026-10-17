@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'features/dashboard/views/dashboard_screen.dart';
+import 'features/dashboard/mobile/mobile_app.dart';
 import 'features/dashboard/services/settings_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/motion_frame_log.dart';
@@ -13,6 +14,8 @@ import 'core/storage/storage_startup_failure.dart';
 import 'core/storage/windows_storage_bootstrap.dart';
 import 'core/platform/windows_navigation_shortcuts.dart';
 import 'core/platform/window_actions.dart';
+import 'core/platform/mobile_diagnostics.dart';
+import 'core/platform/android_native_cipher.dart';
 import 'features/dashboard/widgets/desktop_window_frame.dart';
 
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -27,6 +30,17 @@ void main() async {
       environment = await WindowsStorageBootstrap.resolve();
     }
     SettingsService().configureStorage(environment);
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      MobileDiagnostics.install();
+      if (Platform.isAndroid && await AndroidNativeCipher.probe()) {
+        AndroidNativeCipher.initialize(ServicesBinding.rootIsolateToken);
+      }
+      final settings = SettingsService();
+      await settings.init();
+      await AndroidNativeCipher.configure(settings.attachmentPerformance);
+      runApp(MobileApp(settings: settings));
+      return;
+    }
     if (environment.hasOwnedStorage) {
       final runtime = OwnedAppServices(environment: environment);
       services = runtime;
@@ -72,6 +86,9 @@ void main() async {
       ),
     );
   } catch (_) {
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      MobileDiagnostics.record(MobileDiagnostic.startupFailed);
+    }
     if (kDebugMode)
       debugPrint(
         'Future Notes startup failed (configuration or storage admission).',

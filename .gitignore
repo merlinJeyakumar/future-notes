@@ -37,6 +37,9 @@ migrate_working_dir/
 # Symbolication related
 app.*.symbols
 /.private-release-symbols/
+/.native-deps/
+/ios/OfficeOxide/*.xcframework/
+/ios/OfficeOxide/Licenses/
 
 # Obfuscation related
 app.*.map.json

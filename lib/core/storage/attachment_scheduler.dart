@@ -29,16 +29,22 @@ class AttachmentBudget {
     final fraction = settings.targetPercent / 100;
     final otherCpu = (capacity.systemCpu - capacity.processCpu).clamp(0.0, 1.0);
     final cores = capacity.detected
-        ? capacity.processors * (1 - otherCpu) * fraction
-        : fraction;
+        ? capacity.processors *
+              (1 - otherCpu) *
+              fraction *
+              capacity.capacityFactor
+        : fraction * capacity.capacityFactor;
     var memory = (capacity.availableBytes * fraction).floor();
     if (settings.memoryMiB > 0) {
       memory = math.min(memory, settings.memoryMiB * 1024 * 1024);
     }
-    var slots = math.min(cores.ceil(), memory ~/ workerBytes);
+    var slots = math.min(cores.ceil(), memory ~/ capacity.workerBytes);
     if (!capacity.detected) {
-      slots = capacity.availableBytes > 0 && memory < workerBytes ? 0 : 1;
+      slots = capacity.availableBytes > 0 && memory < capacity.workerBytes
+          ? 0
+          : 1;
     }
+    if (capacity.capacityFactor <= 0) slots = 0;
     if (settings.maxParallel > 0) slots = math.min(slots, settings.maxParallel);
     // One slot may be admitted with a fractional CPU duty, never with
     // insufficient detected working memory. Cold-start uses the same limits.

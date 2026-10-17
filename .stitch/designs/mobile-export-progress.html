@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Future Notes - Android Mobile Attachment Specification</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              DEFAULT: '#4299E1',
+              focus: '#3182CE',
+              light: '#63B3ED'
+            },
+            surface: {
+              DEFAULT: '#0B0F17',
+              container: '#131A26',
+              'container-low': '#0E1420',
+              'container-high': '#1B2433',
+              'container-highest': '#232F42'
+            },
+            outline: {
+              DEFAULT: '#2D3748',
+              variant: '#1E293B'
+            },
+            on: {
+              surface: '#F1F5F9',
+              'surface-variant': '#94A3B8',
+              'surface-muted': '#64748B'
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      font-size: 20px;
+    }
+    .material-symbols-outlined.filled {
+      font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+    .material-symbols-outlined.sm {
+      font-size: 16px;
+    }
+    .material-symbols-outlined.md {
+      font-size: 22px;
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="bg-[#070A0F] text-on-surface antialiased font-sans min-h-screen p-4 md:p-8 flex flex-col items-center justify-start">
+<!-- Top Board Specification Header -->
+<header class="w-full max-w-[1400px] mb-8">
+<div class="flex flex-wrap items-center justify-between gap-4 border-b border-outline-variant/40 pb-5">
+<div>
+<div class="flex items-center gap-2 mb-2">
+<span class="px-2.5 py-0.5 rounded text-[11px] font-mono tracking-wider bg-primary/10 text-primary border border-primary/20 uppercase font-semibold">Native Android Phone</span>
+<span class="px-2.5 py-0.5 rounded text-[11px] font-mono text-on-surface-muted border border-outline-variant/50">390 × 844 dp viewport</span>
+<span class="px-2.5 py-0.5 rounded text-[11px] font-mono text-on-surface-muted border border-outline-variant/50">MD-309 • v1.5.0-refine</span>
+</div>
+<h1 class="text-2xl md:text-3xl font-bold tracking-tight text-white flex items-center gap-3">
+          Future Notes <span class="text-on-surface-muted font-normal text-xl md:text-2xl">· Mobile Attachment Presentation &amp; Multi-Selection</span>
+</h1>
+<p class="text-sm text-on-surface-variant mt-1.5 max-w-4xl">
+          Specification across the in-editor dock (border-free surface), full-screen all attachments directory with contextual multi-select mode, accessible 48dp touch targets, safe batch removal dialog confirmation, and zero occlusive borders.
+        </p>
+</div>
+<div class="flex items-center gap-3">
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-container border border-outline-variant/50 text-xs text-on-surface-variant font-mono">
+<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+<span>Local Encrypted Keystream Active</span>
+</div>
+</div>
+</div>
+</header>
+<!-- Triple Device Showcase Container -->
+<main class="w-full max-w-[1400px] flex flex-col xl:flex-row items-center xl:items-start justify-center gap-8">
+<!-- ========================================== -->
+<!-- FRAME 1: BORDER-FREE DOCK WITHIN EDITOR    -->
+<!-- ========================================== -->
+<div class="flex flex-col items-center w-full max-w-[390px]">
+<div class="w-full flex items-center justify-between mb-3 px-1 text-xs font-mono text-on-surface-variant">
+<span class="flex items-center gap-1.5 font-medium text-white">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+          STATE 1: BORDER-FREE IN-EDITOR DOCK
+        </span>
+<span class="text-[11px] text-on-surface-muted">BOUNDED ROWS</span>
+</div>
+<!-- Phone Shell -->
+<div class="w-full h-[844px] rounded-[44px] bg-surface border-[3px] border-slate-800 shadow-2xl relative flex flex-col overflow-hidden ring-1 ring-white/10 select-none">
+<!-- Android Status Bar (28dp) -->
+<div class="w-full h-8 px-6 pt-2 flex items-center justify-between text-xs font-mono text-on-surface-variant shrink-0 z-30">
+<span class="font-semibold text-white tracking-tight">09:41</span>
+<div class="w-20 h-4 bg-black rounded-full mx-auto self-center"></div>
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined sm text-on-surface-variant">signal_cellular_alt</span>
+<span class="material-symbols-outlined sm text-on-surface-variant">wifi</span>
+<span class="material-symbols-outlined sm text-on-surface-variant">battery_full</span>
+</div>
+</div>
+<!-- Frame Top App Bar (56dp) -->
+<nav class="h-14 px-3 flex items-center justify-between border-b border-outline-variant/30 shrink-0 bg-surface/90 backdrop-blur-md z-20">
+<div class="flex items-center gap-3">
+<button aria-label="Navigate back" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:text-white hover:bg-surface-container active:scale-95 transition-all">
+<span class="material-symbols-outlined">arrow_back</span>
+</button>
+<div>
+<div class="flex items-center gap-1.5">
+<span class="font-semibold text-sm text-white leading-tight">Project journal</span>
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Keystream synced"></span>
+</div>
+<p class="text-[11px] font-mono text-on-surface-muted leading-none mt-0.5">Edited 14:15 • fn-94</p>
+</div>
+</div>
+<div class="flex items-center gap-1">
+<button aria-label="1 pending background task" class="w-10 h-10 rounded-full relative flex items-center justify-center text-on-surface-variant hover:text-white hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-amber-400 rounded-full"></span>
+</button>
+<button aria-label="Note options" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:text-white hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+</nav>
+<!-- Secondary Sub-Header: Low-profile Rich text / HTML rail + Attach, Encrypted, Outlined Save -->
+<div class="px-4 py-2 border-b border-outline-variant/20 flex flex-wrap items-center justify-between gap-2 shrink-0 bg-surface">
+<div aria-label="Editor markup mode" class="h-[34px] p-0.5 rounded-lg bg-surface-container/90 border border-outline-variant/40 flex items-center" role="radiogroup">
+<button aria-checked="true" class="h-7 px-3 rounded-[6px] bg-surface-container-high text-primary font-medium text-xs flex items-center shadow-xs border border-white/5" role="radio">
+              Rich text
+            </button>
+<button aria-checked="false" class="h-7 px-3 rounded-[6px] text-on-surface-variant hover:text-on-surface text-xs font-normal flex items-center transition-colors" role="radio">
+              HTML
+            </button>
+</div>
+<div class="flex items-center gap-1.5">
+<button aria-label="Attach file" class="h-8 px-2.5 rounded-lg border border-outline-variant/40 text-on-surface-variant hover:text-white hover:bg-surface-container text-xs flex items-center gap-1.5 transition-colors">
+<span class="material-symbols-outlined sm text-primary">attach_file</span>
+<span class="font-medium">Attach</span>
+</button>
+<button aria-label="Encryption status locked" class="h-8 px-2.5 rounded-lg border border-outline-variant/40 text-on-surface-variant hover:text-white hover:bg-surface-container text-xs flex items-center gap-1.5 transition-colors">
+<span class="material-symbols-outlined sm text-emerald-400">lock</span>
+<span class="font-medium">Encrypted</span>
+</button>
+<button aria-label="Save changes" class="h-8 px-2.5 rounded-lg border border-outline-variant/50 text-on-surface-variant hover:text-white hover:bg-surface-container-high text-xs flex items-center gap-1 transition-colors">
+<span class="material-symbols-outlined sm">save</span>
+</button>
+</div>
+</div>
+<!-- Floating Formatting Card -->
+<div class="mx-3 mt-2 p-1 rounded-xl bg-surface-container/90 border border-outline-variant/40 shadow-sm shrink-0">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-0.5">
+<button class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-muted hover:text-white"><span class="material-symbols-outlined sm">undo</span></button>
+<button class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-muted hover:text-white"><span class="material-symbols-outlined sm">redo</span></button>
+<div class="w-px h-4 bg-outline-variant/60 mx-1"></div>
+<button class="w-8 h-8 rounded-lg flex items-center justify-center bg-primary/15 text-primary border border-primary/25 font-semibold text-xs">B</button>
+<button class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:text-white italic font-serif text-xs">I</button>
+</div>
+<button class="h-7 px-2.5 rounded-lg bg-surface-container-high/80 hover:bg-surface-container-high text-on-surface-variant text-[11px] font-medium flex items-center gap-1 border border-outline-variant/30">
+<span>Format</span>
+<span class="material-symbols-outlined sm">expand_less</span>
+</button>
+</div>
+</div>
+<!-- Scrollable Note Writing Canvas -->
+<div class="flex-1 overflow-y-auto px-4 py-3 no-scrollbar">
+<div class="text-xs uppercase tracking-wider font-mono text-on-surface-muted mb-1.5">SPECIFICATION DRAFT</div>
+<p class="text-sm text-on-surface leading-relaxed mb-3">
+            Reviewing field telemetry and verifying offline encrypted cache integrity for local mobile nodes. Ensure all binary assets pass cryptographic verification prior to commit.
+          </p>
+<p class="text-sm text-on-surface leading-relaxed mb-3">
+            Refer to the architecture summary in <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary text-xs font-mono"><span class="material-symbols-outlined text-[13px]">description</span>@sample-document.pdf</span> and inspect telemetry logs before submitting milestone report.
+          </p>
+<div class="p-2.5 rounded-lg bg-surface-container-low border border-outline-variant/30 font-mono text-xs text-on-surface-variant">
+<span class="text-primary font-semibold">$ cipher-keystream</span> --status nominal
+          </div>
+</div>
+<!-- ============================================== -->
+<!-- REFINED BORDER-FREE ATTACHMENT PANEL           -->
+<!-- ============================================== -->
+<div class="shrink-0 bg-surface-container/95 backdrop-blur-md rounded-t-2xl shadow-2xl flex flex-col z-20">
+<!-- Dock Compact Header: Completely border-free, subtle elevation separation -->
+<div class="h-11 px-4 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined sm text-primary">attach_file</span>
+<span class="text-xs font-semibold text-white tracking-tight">Attachments</span>
+<span class="px-1.5 py-0.2 rounded-full bg-primary/15 text-primary text-[11px] font-mono font-medium">3</span>
+<button aria-label="Collapse attachment dock" class="w-6 h-6 rounded flex items-center justify-center text-on-surface-muted hover:text-white transition-colors ml-0.5">
+<span class="material-symbols-outlined sm">expand_more</span>
+</button>
+</div>
+<button aria-label="See all attachments full screen" class="text-xs font-medium text-primary hover:text-primary-light flex items-center gap-0.5 active:opacity-75 transition-opacity">
+<span>See all</span>
+<span class="material-symbols-outlined text-[15px]">chevron_right</span>
+</button>
+</div>
+<!-- Bounded Vertical List of Compact Horizontal File Rows (Border-free layout) -->
+<div class="max-h-[220px] overflow-y-auto px-2 py-1 space-y-1 no-scrollbar">
+<!-- Row 1: Active In-Flight Processing Row with Linear Progress & Safe Cancel -->
+<div class="py-2 px-2.5 rounded-xl bg-surface-container-high/70 flex flex-col gap-1.5">
+<div class="flex items-start justify-between gap-2.5">
+<div class="w-8 h-8 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center shrink-0 mt-0.5">
+<span class="material-symbols-outlined text-[17px]">description</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center gap-1.5">
+<span class="text-xs font-medium text-white truncate">sample-document.pdf</span>
+<span class="px-1 py-0.2 rounded text-[9px] font-mono bg-primary/20 text-primary shrink-0">Encrypting</span>
+</div>
+<div class="flex items-center gap-2 mt-0.5 text-[11px] font-mono text-on-surface-variant">
+<span>420 KiB / 1.0 MiB</span>
+<span class="text-on-surface-muted">•</span>
+<span class="text-primary font-semibold">42%</span>
+</div>
+</div>
+<button aria-label="Cancel encryption" class="h-8 px-2.5 rounded-lg bg-surface-container hover:bg-surface-container-highest text-rose-300 hover:text-rose-200 text-xs font-medium flex items-center gap-1 shrink-0 active:scale-95 transition-all">
+<span class="material-symbols-outlined sm text-rose-400">close</span>
+<span>Cancel</span>
+</button>
+</div>
+<!-- Continuous progress bar -->
+<div class="w-full bg-surface-container-highest rounded-full h-1 overflow-hidden mt-0.5">
+<div class="bg-primary h-full rounded-full transition-all duration-300" style="width: 42%"></div>
+</div>
+</div>
+<!-- Row 2: Standard Stored Horizontal Row (Word / PDF) -->
+<div class="py-2 px-2.5 rounded-xl hover:bg-surface-container-high/40 transition-colors flex items-center justify-between gap-2.5">
+<div class="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[17px]">article</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="text-xs font-medium text-on-surface truncate leading-tight">Project overview.pdf</div>
+<div class="flex items-center gap-1.5 mt-0.5 text-[11px] font-mono text-on-surface-muted">
+<span class="uppercase">PDF</span>
+<span>•</span>
+<span>1.2 MB</span>
+<span>•</span>
+<span>Oct 14</span>
+</div>
+</div>
+<div class="flex items-center shrink-0">
+<button aria-label="Options for Project overview.pdf" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-muted hover:text-white hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Row 3: Standard Stored Horizontal Row (Video) -->
+<div class="py-2 px-2.5 rounded-xl hover:bg-surface-container-high/40 transition-colors flex items-center justify-between gap-2.5">
+<div class="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[17px]">videocam</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="text-xs font-medium text-on-surface truncate leading-tight">Workshop recording.mp4</div>
+<div class="flex items-center gap-1.5 mt-0.5 text-[11px] font-mono text-on-surface-muted">
+<span class="uppercase">MP4</span>
+<span>•</span>
+<span>708 MB</span>
+<span>•</span>
+<span>Oct 12</span>
+</div>
+</div>
+<div class="flex items-center shrink-0">
+<button aria-label="Options for Workshop recording.mp4" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-muted hover:text-white hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Bottom Collapsed Strip Representation Callout -->
+<div class="px-4 py-2 bg-surface-container-low/70 flex items-center justify-between">
+<span class="text-[10px] font-mono uppercase text-on-surface-muted">COLLAPSED DOCK REFERENCE:</span>
+<div class="flex items-center gap-1.5 bg-surface-container px-2 py-1 rounded-md">
+<span class="material-symbols-outlined text-[14px] text-red-400">description</span>
+<span class="material-symbols-outlined text-[14px] text-blue-400">article</span>
+<span class="material-symbols-outlined text-[14px] text-purple-400">videocam</span>
+<span class="material-symbols-outlined text-[14px] text-emerald-400">table_chart</span>
+<span class="text-[10px] font-mono text-on-surface-muted ml-0.5">+1</span>
+</div>
+</div>
+</div>
+<!-- Android Home Navigation Bar (16dp) -->
+<div class="w-full h-4 pb-1 flex items-center justify-center shrink-0 bg-surface-container-low z-30">
+<div class="w-32 h-1 bg-slate-600/70 rounded-full"></div>
+</div>
+</div>
+</div>
+<!-- ========================================== -->
+<!-- FRAME 2: FULL-SCREEN ALL ATTACHMENTS VIEW -->
+<!-- ========================================== -->
+<div class="flex flex-col items-center w-full max-w-[390px]">
+<div class="w-full flex items-center justify-between mb-3 px-1 text-xs font-mono text-on-surface-variant">
+<span class="flex items-center gap-1.5 font-medium text-white">
+<span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          STATE 2: ALL ATTACHMENTS (DEFAULT)
+        </span>
+<span class="text-[11px] text-on-surface-muted">SELECT ACTION IN HEADER</span>
+</div>
+<!-- Phone Shell -->
+<div class="w-full h-[844px] rounded-[44px] bg-surface border-[3px] border-slate-800 shadow-2xl relative flex flex-col overflow-hidden ring-1 ring-white/10 select-none">
+<!-- Android Status Bar (28dp) -->
+<div class="w-full h-8 px-6 pt-2 flex items-center justify-between text-xs font-mono text-on-surface-variant shrink-0 z-30">
+<span class="font-semibold text-white tracking-tight">09:41</span>
+<div class="w-20 h-4 bg-black rounded-full mx-auto self-center"></div>
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined sm text-on-surface-variant">signal_cellular_alt</span>
+<span class="material-symbols-outlined sm text-on-surface-variant">wifi</span>
+<span class="material-symbols-outlined sm text-on-surface-variant">battery_full</span>
+</div>
+</div>
+<!-- Refined Top App Bar: No isolated count badge; explicit "Select" action button for multi-select entry -->
+<nav class="h-14 px-3 flex items-center justify-between border-b border-outline-variant/30 shrink-0 bg-surface/90 backdrop-blur-md z-20">
+<div class="flex items-center gap-2.5">
+<button aria-label="Back to editor" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:text-white hover:bg-surface-container active:scale-95 transition-all">
+<span class="material-symbols-outlined">arrow_back</span>
+</button>
+<span class="font-semibold text-base text-white tracking-tight">All attachments</span>
+</div>
+<div class="flex items-center gap-1">
+<!-- Explicit 'Select' Text Action Button -->
+<button aria-label="Enter selection mode" class="h-8 px-3 rounded-lg text-xs font-medium text-primary hover:text-primary-light hover:bg-primary/10 active:scale-95 transition-all">
+              Select
+            </button>
+<button aria-label="Sort attachments" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:text-white hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined">sort</span>
+</button>
+<button aria-label="More options" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:text-white hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+</nav>
+<!-- Rounded Filename Search Bar (48dp Touch Region) with subtle helper text -->
+<div class="px-4 pt-3 pb-2 shrink-0 bg-surface">
+<div class="relative w-full">
+<span class="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-muted">search</span>
+<input class="w-full h-11 pl-10 pr-9 rounded-xl bg-surface-container/90 border border-outline-variant/40 text-sm text-white placeholder-on-surface-muted focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/60 transition-all font-sans" placeholder="Search attachments..." readonly="" type="text" value=""/>
+</div>
+<!-- Subtle helper text carrying the total count cleanly -->
+<div class="flex items-center justify-between mt-2 px-0.5 text-[11px] font-mono text-on-surface-muted">
+<span>SAVED ATTACHMENTS (3 FILES • 709.4 MB)</span>
+<span>SORT: DATE DESC</span>
+</div>
+</div>
+<!-- Space-Efficient Vertical File List -->
+<div class="flex-1 overflow-y-auto divide-y divide-outline-variant/20 px-4 no-scrollbar">
+<!-- Row 1: Project overview.pdf -->
+<div class="py-3 flex items-center justify-between gap-3 hover:bg-surface-container-high/30 -mx-2 px-2 rounded-xl transition-colors cursor-pointer" title="Long press or tap Select to select">
+<div class="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined">description</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="text-sm font-medium text-white truncate leading-snug">Project overview.pdf</div>
+<div class="flex items-center gap-1.5 mt-0.5 text-xs font-mono text-on-surface-variant">
+<span class="uppercase font-semibold text-red-400/90">PDF</span>
+<span class="text-on-surface-muted">•</span>
+<span>1.2 MB</span>
+<span class="text-on-surface-muted">•</span>
+<span class="text-on-surface-muted">Modified Oct 14, 14:15</span>
+</div>
+</div>
+<div class="flex items-center shrink-0">
+<button aria-label="Actions for Project overview.pdf" class="w-11 h-11 rounded-full flex items-center justify-center text-on-surface-muted hover:text-white hover:bg-surface-container active:scale-95 transition-all">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Row 2: Workshop recording.mp4 -->
+<div class="py-3 flex items-center justify-between gap-3 hover:bg-surface-container-high/30 -mx-2 px-2 rounded-xl transition-colors cursor-pointer">
+<div class="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined">videocam</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="text-sm font-medium text-white truncate leading-snug">Workshop recording.mp4</div>
+<div class="flex items-center gap-1.5 mt-0.5 text-xs font-mono text-on-surface-variant">
+<span class="uppercase font-semibold text-purple-400/90">MP4</span>
+<span class="text-on-surface-muted">•</span>
+<span>708 MB</span>
+<span class="text-on-surface-muted">•</span>
+<span class="text-on-surface-muted">Modified Oct 12, 09:30</span>
+</div>
+</div>
+<div class="flex items-center shrink-0">
+<button aria-label="Actions for Workshop recording.mp4" class="w-11 h-11 rounded-full flex items-center justify-center text-on-surface-muted hover:text-white hover:bg-surface-container active:scale-95 transition-all">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Row 3: Budget forecast.xlsx -->
+<div class="py-3 flex items-center justify-between gap-3 hover:bg-surface-container-high/30 -mx-2 px-2 rounded-xl transition-colors cursor-pointer">
+<div class="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined">table_chart</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center gap-1.5">
+<span class="text-sm font-medium text-white truncate leading-snug">Budget forecast.xlsx</span>
+<span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-surface-container-highest text-on-surface-variant border border-outline-variant/50" title="Disambiguated duplicate identifier">#b42</span>
+</div>
+<div class="flex items-center gap-1.5 mt-0.5 text-xs font-mono text-on-surface-variant">
+<span class="uppercase font-semibold text-emerald-400/90">XLSX</span>
+<span class="text-on-surface-muted">•</span>
+<span>186 KB</span>
+<span class="text-on-surface-muted">•</span>
+<span class="text-on-surface-muted">Modified Oct 10, 18:02</span>
+</div>
+</div>
+<div class="flex items-center shrink-0">
+<button aria-label="Actions for Budget forecast.xlsx" class="w-11 h-11 rounded-full flex items-center justify-center text-on-surface-muted hover:text-white hover:bg-surface-container active:scale-95 transition-all">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Helper hint to enter selection via long-press -->
+<div class="py-6 flex flex-col items-center justify-center text-center text-on-surface-muted">
+<span class="material-symbols-outlined text-slate-700 text-2xl mb-1">touch_app</span>
+<p class="text-xs font-mono">Long-press any file or tap Select</p>
+<p class="text-[11px] text-on-surface-muted mt-0.5">3 items · Total 709.4 MB local encrypted storage</p>
+</div>
+</div>
+<!-- Android Home Navigation Bar (16dp) -->
+<div class="w-full h-4 pb-1 flex items-center justify-center shrink-0 bg-surface z-30">
+<div class="w-32 h-1 bg-slate-600/70 rounded-full"></div>
+</div>
+</div>
+</div>
+<!-- ====================================================== -->
+<!-- FRAME 3: MULTI-SELECTION STATE WITH REMOVE CONFIRMATION -->
+<!-- ====================================================== -->
+<div class="flex flex-col items-center w-full max-w-[390px]">
+<div class="w-full flex items-center justify-between mb-3 px-1 text-xs font-mono text-on-surface-variant"><span class="flex items-center gap-1.5 font-medium text-white"><span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>STATE 3: MULTI-SELECT &amp; EXPORT PIPELINE</span><span class="text-[11px] text-on-surface-muted">DETERMINATE PROGRESS</span></div>
+<!-- Phone Shell -->
+<div class="w-full h-[844px] rounded-[44px] bg-surface border-[3px] border-slate-800 shadow-2xl relative flex flex-col overflow-hidden ring-1 ring-white/10 select-none">
+<!-- Android Status Bar (28dp) -->
+<div class="w-full h-8 px-6 pt-2 flex items-center justify-between text-xs font-mono text-on-surface-variant shrink-0 z-30">
+<span class="font-semibold text-white tracking-tight">09:41</span>
+<div class="w-20 h-4 bg-black rounded-full mx-auto self-center"></div>
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined sm text-on-surface-variant">signal_cellular_alt</span>
+<span class="material-symbols-outlined sm text-on-surface-variant">wifi</span>
+<span class="material-symbols-outlined sm text-on-surface-variant">battery_full</span>
+</div>
+</div>
+<!-- Contextual Top App Bar for Selection Mode (56dp) -->
+<nav class="h-14 px-3 flex items-center justify-between border-b border-primary/30 shrink-0 bg-surface-container-high/95 backdrop-blur-md z-20">
+<div class="flex items-center gap-2.5">
+<!-- Dismiss selection mode (X icon) -->
+<button aria-label="Exit selection mode" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:text-white hover:bg-surface-container-highest active:scale-95 transition-all">
+<span class="material-symbols-outlined">close</span>
+</button>
+<div class="flex items-center gap-2">
+<span class="font-semibold text-base text-white tracking-tight">2 selected</span>
+</div>
+</div>
+<div class="flex items-center gap-1">
+<button aria-label="Select all files" class="h-8 px-3 rounded-lg text-xs font-medium text-primary hover:text-primary-light hover:bg-primary/10 active:scale-95 transition-all">
+              Select all
+            </button>
+<button aria-label="More selection options" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:text-white hover:bg-surface-container-highest transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+</nav>
+<!-- Search Bar in Selection Mode (Disabled/Subdued state) -->
+<div class="px-4 pt-3 pb-2 shrink-0 bg-surface">
+<div class="flex items-center justify-between px-0.5 text-[11px] font-mono text-on-surface-muted">
+<span>SELECT FILES FOR BATCH ACTIONS</span>
+<span class="text-primary font-medium">2 OF 3 SELECTED</span>
+</div>
+</div>
+<!-- Space-Efficient Vertical File List with Leading Checkboxes -->
+<div class="flex-1 overflow-y-auto px-4 divide-y divide-outline-variant/15 no-scrollbar">
+<!-- Row 1: Selected File (Project overview.pdf) -->
+<div class="py-2.5 my-1 flex items-center gap-3 bg-primary/10 -mx-2 px-3 rounded-xl border border-primary/30 transition-colors">
+<!-- Leading Checkbox (Checked 48dp region) -->
+<div aria-label="Selected" class="w-7 h-7 rounded-lg bg-primary text-black flex items-center justify-center shrink-0 shadow-sm">
+<span class="material-symbols-outlined sm font-bold">check</span>
+</div>
+<!-- Type Icon Container -->
+<div class="w-9 h-9 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[18px]">description</span>
+</div>
+<!-- Content -->
+<div class="flex-1 min-w-0">
+<div class="text-sm font-medium text-white truncate leading-snug">Project overview.pdf</div>
+<div class="flex items-center gap-1.5 mt-0.5 text-[11px] font-mono text-on-surface-variant">
+<span class="uppercase font-semibold text-red-400">PDF</span>
+<span>•</span>
+<span>1.2 MB</span>
+</div>
+</div>
+</div>
+<!-- Row 2: Selected File (Workshop recording.mp4) -->
+<div class="py-2.5 my-1 flex items-center gap-3 bg-primary/10 -mx-2 px-3 rounded-xl border border-primary/30 transition-colors">
+<!-- Leading Checkbox (Checked 48dp region) -->
+<div aria-label="Selected" class="w-7 h-7 rounded-lg bg-primary text-black flex items-center justify-center shrink-0 shadow-sm">
+<span class="material-symbols-outlined sm font-bold">check</span>
+</div>
+<!-- Type Icon Container -->
+<div class="w-9 h-9 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[18px]">videocam</span>
+</div>
+<!-- Content -->
+<div class="flex-1 min-w-0">
+<div class="text-sm font-medium text-white truncate leading-snug">Workshop recording.mp4</div>
+<div class="flex items-center gap-1.5 mt-0.5 text-[11px] font-mono text-on-surface-variant">
+<span class="uppercase font-semibold text-purple-400">MP4</span>
+<span>•</span>
+<span>708 MB</span>
+</div>
+</div>
+</div>
+<!-- Row 3: Unselected File (Budget forecast.xlsx) -->
+<div class="py-2.5 my-1 flex items-center gap-3 hover:bg-surface-container-high/30 -mx-2 px-3 rounded-xl transition-colors">
+<!-- Leading Checkbox (Unchecked 48dp region) -->
+<div aria-label="Unselected" class="w-7 h-7 rounded-lg border-2 border-outline-variant hover:border-on-surface-muted bg-surface-container flex items-center justify-center shrink-0 transition-colors"></div>
+<!-- Type Icon Container -->
+<div class="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[18px]">table_chart</span>
+</div>
+<!-- Content -->
+<div class="flex-1 min-w-0">
+<div class="flex items-center gap-1.5">
+<span class="text-sm font-medium text-on-surface truncate leading-snug">Budget forecast.xlsx</span>
+<span class="px-1 py-0.2 rounded text-[9px] font-mono bg-surface-container-highest text-on-surface-variant">#b42</span>
+</div>
+<div class="flex items-center gap-1.5 mt-0.5 text-[11px] font-mono text-on-surface-muted">
+<span class="uppercase font-semibold text-emerald-400/80">XLSX</span>
+<span>•</span>
+<span>186 KB</span>
+</div>
+</div>
+</div>
+</div>
+<!-- ============================================== -->
+<!-- REMOVE CONFIRMATION SHEET OVERLAY             -->
+<!-- ============================================== -->
+<div class="shrink-0 bg-surface-container-high/95 border-t border-outline-variant/40 p-4 shadow-xl z-20 backdrop-blur-md"><div class="flex items-start justify-between gap-3 mb-2"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2 mb-1"><h3 class="text-sm font-semibold text-white tracking-tight leading-none">2 attachments</h3><span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-primary/15 text-primary border border-primary/20 shrink-0">Decrypting</span></div><p class="text-xs text-on-surface-variant leading-snug line-clamp-2 break-words">File 1 of 2 · Workshop recording.mp4</p></div><button aria-label="Cancel export" class="min-h-[44px] px-3 rounded-lg border border-outline-variant/50 hover:border-outline-variant text-rose-400 hover:text-rose-300 hover:bg-surface-container active:scale-95 text-xs font-medium flex items-center justify-center shrink-0 transition-all">Cancel export</button></div><div class="w-full bg-surface-container-highest rounded-full h-1.5 overflow-hidden my-2.5"><div class="bg-primary h-full rounded-full transition-all duration-300" style="width: 50%"></div></div><div class="flex items-center justify-between text-[11px] font-mono text-on-surface-muted"><span class="truncate">350 MiB / 700 MiB · 50%</span><span class="shrink-0 text-primary/80">Stage 1: Local Decrypt</span></div></div>
+<!-- Contextual Bottom Action Bar (Docked Touch Region 56dp) -->
+<div class="h-14 px-4 bg-surface-container-highest border-t border-outline-variant/40 flex items-center justify-around shrink-0 z-30"><button aria-disabled="true" aria-label="Share or save selected files (disabled while exporting)" class="flex flex-col items-center justify-center text-on-surface-muted opacity-40 cursor-not-allowed text-[11px] font-medium gap-0.5" disabled=""><span class="material-symbols-outlined">share</span><span>Share / Save</span></button><div class="w-px h-6 bg-outline-variant/30"></div><button aria-disabled="true" aria-label="Remove selected files (disabled while exporting)" class="flex flex-col items-center justify-center text-on-surface-muted opacity-40 cursor-not-allowed text-[11px] font-medium gap-0.5" disabled=""><span class="material-symbols-outlined">delete</span><span>Remove</span></button></div>
+<!-- Android Home Navigation Bar (16dp) -->
+<div class="w-full h-4 pb-1 flex items-center justify-center shrink-0 bg-surface-container-highest z-30">
+<div class="w-32 h-1 bg-slate-600/70 rounded-full"></div>
+</div>
+</div>
+</div>
+</main>
+<!-- Bottom Specification Callout Details -->
+<footer class="w-full max-w-[1400px] mt-8 pt-6 border-t border-outline-variant/30 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+<div class="p-3.5 rounded-xl bg-surface-container border border-outline-variant/30 flex flex-col gap-1">
+<div class="flex items-center gap-1.5 text-white font-medium">
+<span class="material-symbols-outlined sm text-primary">view_stream</span>
+<span>Border-Free In-Editor Dock</span>
+</div>
+<p class="text-on-surface-variant leading-relaxed">
+        The attachment dock is seamlessly integrated without perimeter borders, preserving editor focus. Compact horizontal rows render live in-flight progress with direct Cancel control for <code class="text-primary font-mono">sample-document.pdf</code>.
+      </p>
+</div>
+<div class="p-3.5 rounded-xl bg-surface-container border border-outline-variant/30 flex flex-col gap-1">
+<div class="flex items-center gap-1.5 text-white font-medium">
+<span class="material-symbols-outlined sm text-emerald-400">check_box</span>
+<span>Explicit Multi-Selection Mode</span>
+</div>
+<p class="text-on-surface-variant leading-relaxed">
+        Removed isolated count badges in favor of an explicit <code class="text-primary font-mono">'Select'</code> button and long-press entry. Total count is displayed unobtrusively in list helper headers (<code class="text-on-surface font-mono">3 files • 709.4 MB</code>).
+      </p>
+</div>
+<div class="p-3.5 rounded-xl bg-surface-container border border-outline-variant/30 flex flex-col gap-1"><div class="flex items-center gap-1.5 text-white font-medium"><span class="material-symbols-outlined sm text-primary">sync</span><span>Multi-Select &amp; Export Pipeline</span></div><p class="text-on-surface-variant leading-relaxed">Selection mode features deterministic per-file progress (<code class="text-primary font-mono">350 MiB / 700 MiB · 50%</code>) with a compact Decrypting phase pill, thin progress bar, and accessible 48dp Cancel control. Bottom batch actions are safely locked during export.</p></div>
+</footer>
+</body></html>

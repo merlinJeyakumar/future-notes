@@ -1,0 +1,321 @@
+import Flutter
+import UIKit
+import Foundation
+import CryptoKit
+import Security
+import Darwin
+import os
+
+/// Native document capabilities for the shared provider coordinator. Bookmarks
+/// identify selected roots; child tokens are opaque, process-local capabilities.
+/// NSFileCoordinator protects individual accesses, not a multi-file transaction.
+final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
+  private weak var host: UIViewController?
+  private let queue = DispatchQueue(label: "future-notes.documents")
+  private var channels: [FlutterMethodChannel] = []
+  private var picker: FlutterResult?
+  private var pickingFolder = false
+  private var roots: [String: URL] = [:]
+  private var entries: [String: (String, URL)] = [:]
+  private var entryKeys: [String: String] = [:]
+  private var leases: [String: (String, URL, FileHandle, Bool)] = [:]
+  private var interaction: UIDocumentInteractionController?
+  private var background: UIBackgroundTaskIdentifier = .invalid
+  private var cover: UIView?
+  private let fm = FileManager.default
+  private let jobs: FlutterMethodChannel
+  private let privateRoot: URL
+  private let cacheRoot: URL
+  private let selection: URL
+  private let ledger: URL
+  private let interruptedLedger: URL
+
+  init(controller: FlutterViewController) throws {
+    host = controller
+    jobs = FlutterMethodChannel(name: "future_notes/jobs", binaryMessenger: controller.binaryMessenger)
+    privateRoot = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("FutureNotes", isDirectory: true)
+    cacheRoot = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("attachment-previews", isDirectory: true)
+    selection = privateRoot.appendingPathComponent("library.json")
+    ledger = privateRoot.appendingPathComponent("jobs.json")
+    interruptedLedger = privateRoot.appendingPathComponent("interrupted-jobs.json")
+    super.init()
+    try protectDirectory(privateRoot)
+    try protectDirectory(cacheRoot)
+    install("future_notes/documents", controller) { [weak self] call, result in self?.documentCall(call, result) }
+    install("future_notes/files", controller) { [weak self] call, result in self?.fileCall(call, result) }
+    install("future_notes/private_drafts", controller) { [weak self] call, result in
+      guard let self = self else { return }
+      self.queue.async { self.reply(result) { try self.draftCall(call) } }
+    }
+    jobs.setMethodCallHandler { [weak self] call, result in self?.jobCall(call, result) }
+    NotificationCenter.default.addObserver(self, selector: #selector(coverSnapshot), name: UIApplication.willResignActiveNotification, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(uncoverSnapshot), name: UIApplication.didBecomeActiveNotification, object: nil)
+  }
+
+  private func install(_ name: String, _ controller: FlutterViewController, _ handler: @escaping FlutterMethodCallHandler) {
+    let channel = FlutterMethodChannel(name: name, binaryMessenger: controller.binaryMessenger)
+    channel.setMethodCallHandler(handler); channels.append(channel)
+  }
+  private func failure(_ message: String) -> NSError { NSError(domain: "FutureNotes", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
+  private func reply(_ result: @escaping FlutterResult, _ work: () throws -> Any?) {
+    do { let value = try work(); DispatchQueue.main.async { result(value) } }
+    catch { DispatchQueue.main.async { result(FlutterError(code: "native_document_failed", message: "The selected document operation failed. Existing material was retained.", details: nil)) } }
+  }
+  private func protectDirectory(_ url: URL) throws {
+    try fm.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+    var value = url; var flags = URLResourceValues(); flags.isExcludedFromBackup = true
+    try value.setResourceValues(flags)
+  }
+  private func atomic(_ data: Data, _ url: URL) throws {
+    try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    var value = url; var flags = URLResourceValues(); flags.isExcludedFromBackup = true; try value.setResourceValues(flags)
+  }
+  private func readPrivate(_ url: URL, limit: Int) throws -> Data? {
+    if !fm.fileExists(atPath: url.path) { return nil }
+    let size = (try url.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? limit + 1
+    if size > limit { throw failure("Private record exceeds its limit.") }
+    return try Data(contentsOf: url)
+  }
+  private func name(_ value: Any?) throws -> String {
+    guard let value = value as? String, !value.isEmpty, value.count <= 240, value != ".", value != "..", !value.contains("/"), !value.contains("\\"), !value.unicodeScalars.contains(where: { $0.value < 32 }) else { throw failure("Invalid document name.") }
+    return value
+  }
+  private func root(_ token: String) throws -> URL {
+    if let value = roots[token] { return value }
+    guard let data = Data(base64Encoded: token) else { throw failure("Invalid bookmark.") }
+    var stale = false
+    let url = try URL(resolvingBookmarkData: data, options: [.withoutUI], relativeTo: nil, bookmarkDataIsStale: &stale)
+    guard !stale, url.startAccessingSecurityScopedResource() else { throw failure("Select the folder again.") }
+    do {
+      let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isUbiquitousItemKey, .volumeIsLocalKey])
+      guard values.isDirectory == true, values.isUbiquitousItem != true, values.volumeIsLocal == true else { throw failure("Select a local device folder.") }
+      roots[token] = url; return url
+    } catch { url.stopAccessingSecurityScopedResource(); throw error }
+  }
+  private func owned(_ token: String, _ library: String) throws -> URL {
+    let parent = try root(library).standardizedFileURL.resolvingSymlinksInPath()
+    guard let entry = entries[token], entry.0 == library else { throw failure("Invalid document capability.") }
+    let url = entry.1.standardizedFileURL
+    let resolved = url.resolvingSymlinksInPath()
+    guard url == resolved, resolved == parent || resolved.path.hasPrefix(parent.path + "/") else { throw failure("Document escaped the selected folder.") }
+    return url
+  }
+  private func coordinate<T>(_ url: URL, writing: Bool = false, _ block: @escaping (URL) throws -> T) throws -> T {
+    var coordination: NSError?
+    var operation: Error?
+    var output: T?
+    let accessor: (URL) -> Void = { actual in do { output = try block(actual) } catch { operation = error } }
+    let coordinator = NSFileCoordinator(filePresenter: nil)
+    if writing { coordinator.coordinate(writingItemAt: url, options: [], error: &coordination, byAccessor: accessor) }
+    else { coordinator.coordinate(readingItemAt: url, options: [], error: &coordination, byAccessor: accessor) }
+    if let error = coordination { throw error }; if let error = operation { throw error }
+    guard let value = output else { throw failure("Access was not acknowledged.") }; return value
+  }
+  private func metadata(_ url: URL, _ library: String) throws -> [String: Any] {
+    let values = try url.resourceValues(forKeys: [.nameKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey])
+    guard values.isSymbolicLink != true else { throw failure("Linked documents are unsupported.") }
+    let key = library + "\n" + url.standardizedFileURL.path
+    let token = entryKeys[key] ?? UUID().uuidString
+    entryKeys[key] = token; entries[token] = (library, url)
+    return ["token": token, "name": values.name ?? url.lastPathComponent, "directory": values.isDirectory == true,
+      "length": values.fileSize.map { NSNumber(value: $0) as Any } ?? NSNull(), "modified": values.contentModificationDate.map { NSNumber(value: Int64($0.timeIntervalSince1970 * 1000)) as Any } ?? NSNull()]
+  }
+  private func source(_ url: URL, owner: String, scoped: Bool) throws -> [String: Any] {
+    let identity: String
+    if owner == "picked" { identity = try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil).base64EncodedString() }
+    else { identity = url.absoluteString }
+    let handle = try FileHandle(forReadingFrom: url)
+    var status = stat()
+    guard fstat(handle.fileDescriptor, &status) == 0, (status.st_mode & S_IFMT) == S_IFREG else { handle.closeFile(); throw failure("A seekable native file is required.") }
+    let lease = UUID().uuidString
+    leases[lease] = (owner, url, handle, scoped)
+    return ["lease": lease, "path": url.path, "identity": identity, "length": status.st_size, "name": url.lastPathComponent]
+  }
+  private func closeLease(_ lease: String, owner: String) {
+    if let value = leases[lease], value.0 == owner { value.2.closeFile(); if value.3 { value.1.stopAccessingSecurityScopedResource() }; leases.removeValue(forKey: lease) }
+  }
+  private func documentCall(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    if call.method == "selectLocalFolder" || call.method == "pickFile" {
+      guard picker == nil, let host = host else { result(FlutterError(code: "picker_busy", message: "Finish the current picker first.", details: nil)); return }
+      picker = result; pickingFolder = call.method == "selectLocalFolder"
+      let controller = UIDocumentPickerViewController(documentTypes: [pickingFolder ? "public.folder" : "public.item"], in: .open)
+      controller.delegate = self; controller.allowsMultipleSelection = false; host.present(controller, animated: true); return
+    }
+    queue.async { self.reply(result) { try self.documentWork(call) } }
+  }
+  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { let result = picker; picker = nil; result?(nil) }
+  func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+    guard let result = picker else { return }; picker = nil
+    let folder = pickingFolder
+    queue.async {
+      self.reply(result) {
+        guard urls.count == 1, let url = urls.first, url.isFileURL, url.startAccessingSecurityScopedResource() else { throw self.failure("Access was not granted.") }
+        if folder {
+          defer { url.stopAccessingSecurityScopedResource() }
+          let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isUbiquitousItemKey, .volumeIsLocalKey])
+          guard values.isDirectory == true, values.isUbiquitousItem != true, values.volumeIsLocal == true else { throw self.failure("Select a local-device folder.") }
+          return try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil).base64EncodedString()
+        }
+        do { return try self.source(url, owner: "picked", scoped: true) }
+        catch { url.stopAccessingSecurityScopedResource(); throw error }
+      }
+    }
+  }
+  private func documentWork(_ call: FlutterMethodCall) throws -> Any? {
+    let args = call.arguments as? [String: Any] ?? [:]
+    if call.method == "forgetPickedSource" { return nil } // Scope ends with its source lease; no global read grant exists.
+    if call.method == "reopenPickedSource" {
+      guard let encoded = args["identity"] as? String, let data = Data(base64Encoded: encoded) else { throw failure("Missing input bookmark.") }
+      var stale = false
+      let url = try URL(resolvingBookmarkData: data, options: .withoutUI, relativeTo: nil, bookmarkDataIsStale: &stale)
+      guard !stale, url.startAccessingSecurityScopedResource() else { throw failure("Select the input again.") }
+      do { return try source(url, owner: "picked", scoped: true) } catch { url.stopAccessingSecurityScopedResource(); throw error }
+    }
+    if call.method == "closePickedSource" { closeLease(args["lease"] as? String ?? "", owner: "picked"); return nil }
+    guard let library = args["library"] as? String else { throw failure("Missing library capability.") }
+    if call.method == "root" { return try metadata(root(library), library) }
+    if call.method == "closeSource" { closeLease(args["lease"] as? String ?? "", owner: library); return nil }
+    let url = try owned(args["document"] as? String ?? "", library)
+    switch call.method {
+    case "stat": return try coordinate(url) { try self.metadata($0, library) }
+    case "children": return try coordinate(url) { parent in
+      let children = try self.fm.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil, options: [])
+      if children.count > 10000 { throw self.failure("Inventory exceeds its limit.") }
+      return try children.map { try self.metadata($0, library) }
+    }
+    case "create":
+      let childName = try name(args["name"])
+      return try coordinate(url, writing: true) { parent in
+        let child = parent.appendingPathComponent(childName, isDirectory: args["directory"] as? Bool == true)
+        if self.fm.fileExists(atPath: child.path) { throw self.failure("The exact name already exists.") }
+        if args["directory"] as? Bool == true { try self.fm.createDirectory(at: child, withIntermediateDirectories: false) }
+        else { let fd = Darwin.open(child.path, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR); guard fd >= 0 else { throw self.failure("Exclusive creation failed.") }; Darwin.close(fd) }
+        return try self.metadata(child, library)
+      }
+    case "read":
+      let offset = (args["offset"] as? NSNumber)?.int64Value ?? -1
+      let length = (args["length"] as? NSNumber)?.intValue ?? -1
+      guard offset >= 0, length >= 0, length <= 1048576 else { throw failure("Invalid read range.") }
+      return try coordinate(url) { actual in let handle = try FileHandle(forReadingFrom: actual); defer { handle.closeFile() }; try handle.seek(toOffset: UInt64(offset)); return FlutterStandardTypedData(bytes: try handle.read(upToCount: length) ?? Data()) }
+    case "append":
+      let offset = (args["offset"] as? NSNumber)?.int64Value ?? -1
+      guard let bytes = (args["bytes"] as? FlutterStandardTypedData)?.data, offset >= 0, bytes.count <= 1048576 else { throw failure("Invalid write range.") }
+      return try coordinate(url, writing: true) { actual in let handle = try FileHandle(forWritingTo: actual); defer { handle.closeFile() }; guard try handle.seekToEnd() == UInt64(offset) else { throw self.failure("Write offset changed.") }; try handle.write(contentsOf: bytes); return NSNull() }
+    case "flush": return try coordinate(url, writing: true) { actual in let handle = try FileHandle(forWritingTo: actual); defer { handle.closeFile() }; try handle.synchronize(); return NSNull() }
+    case "rename":
+      let newName = try name(args["name"])
+      guard url != (try root(library)) else { throw failure("Cannot rename the library root.") }
+      return try coordinate(url.deletingLastPathComponent(), writing: true) { parent in
+        let next = parent.appendingPathComponent(newName)
+        guard !self.fm.fileExists(atPath: next.path) else { throw self.failure("Rename target exists.") }
+        try self.fm.moveItem(at: url, to: next); return try self.metadata(next, library)
+      }
+    case "delete":
+      guard url != (try root(library)) else { throw failure("Cannot remove the library root.") }
+      return try coordinate(url, writing: true) { actual in
+        if (try actual.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true && !(try self.fm.contentsOfDirectory(atPath: actual.path)).isEmpty { throw self.failure("Nonempty folder retained.") }
+        try self.fm.removeItem(at: actual); return NSNull()
+      }
+    case "openSource": return try coordinate(url) { try self.source($0, owner: library, scoped: false) }
+    default: throw failure("Unsupported document action.")
+    }
+  }
+
+  private func fileCall(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    let args = call.arguments as? [String: Any] ?? [:]
+    if call.method == "openFile" {
+      do {
+        guard let path = args["path"] as? String, let host = host else { throw failure("Attachment unavailable.") }
+        let url = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()
+        guard url.path.hasPrefix(cacheRoot.path + "/"), fm.fileExists(atPath: url.path) else { throw failure("Unowned attachment.") }
+        let controller = UIDocumentInteractionController(url: url); interaction = controller
+        guard controller.presentOpenInMenu(from: CGRect(x: host.view.bounds.midX, y: host.view.bounds.midY, width: 1, height: 1), in: host.view, animated: true) else { throw failure("No application can open this attachment.") }
+        result(nil)
+      } catch { result(FlutterError(code: "external_open_failed", message: "This attachment could not be opened externally.", details: nil)) }
+      return
+    }
+    if call.method == "revokeFiles" { interaction?.dismissMenu(animated: false); interaction = nil; result(nil); return }
+    queue.async { self.reply(result) {
+      switch call.method {
+      case "cacheRoot": return self.cacheRoot.path
+      case "privateRoot": return self.privateRoot.path
+      case "readLibrarySelection": return try self.readPrivate(self.selection, limit: 65536).flatMap { String(data: $0, encoding: .utf8) }
+      case "writeLibrarySelection":
+        guard let json = args["json"] as? String, let data = json.data(using: .utf8), data.count <= 65536 else { throw self.failure("Invalid selection record.") }
+        _ = try JSONSerialization.jsonObject(with: data); try self.atomic(data, self.selection); return nil
+      default: throw self.failure("Unsupported file action.")
+      }
+    } }
+  }
+  private func draftKey() throws -> SymmetricKey {
+    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "FutureNotes.private-draft.v1", kSecAttrAccount as String: Bundle.main.bundleIdentifier ?? "FutureNotes", kSecAttrSynchronizable as String: false]
+    var read = query; read[kSecReturnData as String] = true; read[kSecMatchLimit as String] = kSecMatchLimitOne
+    var value: CFTypeRef?
+    let status = SecItemCopyMatching(read as CFDictionary, &value)
+    if status == errSecSuccess, let bytes = value as? Data, bytes.count == 32 { return SymmetricKey(data: bytes) }
+    guard status == errSecItemNotFound else { throw failure("Protected recovery key unavailable.") }
+    let key = SymmetricKey(size: .bits256); let bytes = key.withUnsafeBytes { Data($0) }
+    var add = query; add[kSecValueData as String] = bytes; add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+    guard SecItemAdd(add as CFDictionary, nil) == errSecSuccess else { throw failure("Recovery key could not be created.") }; return key
+  }
+  private func draftCall(_ call: FlutterMethodCall) throws -> Any? {
+    let args = call.arguments as? [String: Any] ?? [:]
+    guard let library = args["library"] as? String, library.utf8.count <= 4096 else { throw failure("Missing recovery identity.") }
+    let hash = SHA256.hash(data: Data(library.utf8)).map { String(format: "%02x", $0) }.joined()
+    let url = privateRoot.appendingPathComponent("draft-\(hash).bin")
+    let aad = Data(("future-notes-private-draft-v1:" + library).utf8)
+    switch call.method {
+    case "discard": if fm.fileExists(atPath: url.path) { try fm.removeItem(at: url) }; return nil
+    case "read":
+      guard let bytes = try readPrivate(url, limit: 32 * 1024 * 1024 + 64) else { return nil }
+      let value = try AES.GCM.open(AES.GCM.SealedBox(combined: bytes), using: draftKey(), authenticating: aad)
+      guard let text = String(data: value, encoding: .utf8) else { throw failure("Invalid recovery encoding.") }; return text
+    case "write":
+      guard let text = args["json"] as? String, let bytes = text.data(using: .utf8), bytes.count <= 32 * 1024 * 1024 else { throw failure("Recovery exceeds its limit.") }
+      _ = try JSONSerialization.jsonObject(with: bytes)
+      guard let encrypted = try AES.GCM.seal(bytes, using: draftKey(), authenticating: aad).combined else { throw failure("Recovery encryption failed.") }
+      try atomic(encrypted, url); return nil
+    default: throw failure("Unsupported recovery action.")
+    }
+  }
+  private func jobCall(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    do {
+      if call.method == "interruptedJobs" {
+        var records: [String: [String: Any]] = [:]
+        for url in [interruptedLedger, ledger] {
+          if let bytes = try readPrivate(url, limit: 2 * 1024 * 1024), let values = try JSONSerialization.jsonObject(with: bytes) as? [[String: Any]] {
+            for value in values { guard let id = value["id"] as? String else { throw failure("Invalid job identity.") }; records[id] = value }
+          }
+        }
+        let bytes = try JSONSerialization.data(withJSONObject: Array(records.values))
+        guard bytes.count <= 2 * 1024 * 1024 else { throw failure("Job recovery exceeds its limit.") }
+        try atomic(bytes, interruptedLedger); result(String(data: bytes, encoding: .utf8)); return
+      }
+      if call.method == "acknowledgeInterrupted" { if fm.fileExists(atPath: interruptedLedger.path) { try fm.removeItem(at: interruptedLedger) }; result(nil); return }
+      guard call.method == "update", let args = call.arguments as? [String: Any], let values = args["jobs"] as? [[String: Any]], values.count <= 10000 else { throw failure("Invalid job update.") }
+      // No passwords or plaintext are persisted. Expiration requests the same
+      // safe cancellation used by the foreground UI; no new writer is created.
+      try atomic(JSONSerialization.data(withJSONObject: values), ledger)
+      if values.isEmpty { endBackground() }
+      else if background == .invalid {
+        background = UIApplication.shared.beginBackgroundTask(withName: "Future Notes attachment work") { [weak self] in self?.jobs.invokeMethod("timeout", arguments: nil); self?.endBackground() }
+        if background == .invalid { jobs.invokeMethod("cancelSafeJobs", arguments: nil); throw failure("Background time unavailable.") }
+      }
+      let thermal: Int
+      switch ProcessInfo.processInfo.thermalState { case .nominal: thermal = 0; case .fair: thermal = 1; case .serious: thermal = 3; case .critical: thermal = 4; @unknown default: thermal = 4 }
+      result(["processors": ProcessInfo.processInfo.activeProcessorCount, "availableBytes": os_proc_available_memory(), "processCpu": 0.0, "systemCpu": 0.0, "thermal": thermal, "detected": false])
+    } catch { result(FlutterError(code: "job_host_failed", message: "Background time is unavailable. Keep the app open and retry unfinished work.", details: nil)) }
+  }
+  private func endBackground() { if background != .invalid { UIApplication.shared.endBackgroundTask(background); background = .invalid } }
+  @objc private func coverSnapshot() {
+    guard cover == nil, let window = host?.view.window else { return }
+    let view = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial)); view.frame = window.bounds; view.autoresizingMask = [.flexibleWidth, .flexibleHeight]; view.isUserInteractionEnabled = true
+    window.addSubview(view); cover = view
+  }
+  @objc private func uncoverSnapshot() { cover?.removeFromSuperview(); cover = nil }
+  deinit {
+    NotificationCenter.default.removeObserver(self)
+    for value in leases.values { value.2.closeFile(); if value.3 { value.1.stopAccessingSecurityScopedResource() } }
+    for url in roots.values { url.stopAccessingSecurityScopedResource() }
+  }
+}

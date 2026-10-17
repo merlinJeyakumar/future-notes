@@ -2,6 +2,36 @@
   "projectId": "6056916933162144137",
   "screens": [
     {
+      "id": "3e032dc43c1643d48a581a0b0289d2b5",
+      "title": "Future Notes - Android Phone Workspace Reference",
+      "updated": "2026-10-17",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Mobile-only phone reference board; desktop app unchanged; Flash fallback because Pro unavailable",
+      "localHtml": ".stitch/designs/mobile-workspace-isolated.html",
+      "localScreenshot": ".stitch/designs/mobile-workspace-isolated.png"
+    },
+    {
+      "id": "710fdb1c6b134f8a89593dc38820ce8b",
+      "title": "Future Notes - Android Unfinished Work",
+      "updated": "2026-10-17",
+      "deviceType": "MOBILE",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Retained per-job recovery actions; synthetic content; Flash fallback because Pro unavailable",
+      "localHtml": ".stitch/designs/android-unfinished-work.html",
+      "localScreenshot": ".stitch/designs/android-unfinished-work.png"
+    },
+    {
+      "id": "d7284551a79345ea8feeae95ce1e4bc9",
+      "title": "Future Notes - Android Phone Note Editor & Companion Views",
+      "updated": "2026-10-16",
+      "deviceType": "MOBILE",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Android parity reference sheet; synthetic content only; generated with available Flash model",
+      "localHtml": ".stitch/designs/android-parity-preview.html",
+      "localScreenshot": ".stitch/designs/android-parity-preview.png"
+    },
+    {
       "title": "Future Notes - Offline Note Workspace",
       "updated": "2026-10-15",
       "designSystemId": "assets/15757192085103975382",
@@ -290,6 +320,116 @@
       "purpose": "Gallery geometry reference: 16 px margin, title/search/cards sharing the left edge, top-left grid and responsive equal-width columns filling full rows. Synthetic filenames only; existing card height/actions retained.",
       "localHtml": ".stitch/designs/attachment-gallery-alignment-20261016.html",
       "localScreenshot": ".stitch/designs/attachment-gallery-alignment-20261016.png"
+    },
+    {
+      "id": "6a5ed9870b6544ba8a0ea5c4e8f6d204",
+      "title": "Future Notes - Refined Android Phone Editor Formatting Toolbar",
+      "updated": "2026-10-17",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Mobile editing controls only: raised unified formatting card, grouped icons, circular active states, touch Format toggle and clear Save. Desktop presentation preserved.",
+      "localHtml": ".stitch/designs/mobile-editor-toolbar.html",
+      "localScreenshot": ".stitch/designs/mobile-editor-toolbar.png"
+    },
+    {
+      "id": "561aa50459c944b4b9d68819fe3b04dd",
+      "title": "Future Notes - Android Notes List with Notification Bell & Direct Import",
+      "updated": "2026-10-17",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Mobile list only: count badge and direct Import action; conditional per-job notification bell, individual progress/recovery, no permanent unfinished-work menu. Desktop unchanged.",
+      "localHtml": ".stitch/designs/mobile-list-job-notifications.html",
+      "localScreenshot": ".stitch/designs/mobile-list-job-notifications.png"
+    },
+    {
+      "id": "c872b2b025394cfd9b1c8389f8498588",
+      "title": "Future Notes - Low-Profile Segmented Editor Rail",
+      "updated": "2026-10-17",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Mobile mode selector only: 36dp visible rail, inset active pill, no hard separator, retained 48dp touch areas and existing conversion/focus behavior.",
+      "localHtml": ".stitch/designs/mobile-mode-selector.html",
+      "localScreenshot": ".stitch/designs/mobile-mode-selector.png"
+    },
+    {
+      "id": "a3aa3a08b55646a990246a905ce3d437",
+      "title": "Future Notes - Android Phone Editor Outlined Save Action in Secondary Row",
+      "updated": "2026-10-17",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Mobile Save action only: remove title-row pill; place Save icon after Attach/Lock at the far right, retaining 48dp targets and responsive in-flow wrapping.",
+      "localHtml": ".stitch/designs/mobile-save-placement.html",
+      "localScreenshot": ".stitch/designs/mobile-save-placement.png"
+    },
+    {
+      "id": "0c33992bd22240acb1f4501a51d6f96d",
+      "title": "Future Notes - Android Phone Editor Pinned Job Progress & Header Bell",
+      "updated": "2026-10-17",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Mobile progress visibility repair: pinned compact current-note add/open status outside the gallery scroll; conditional editor notification bell shares the list panel. No OS permission or desktop changes.",
+      "localHtml": ".stitch/designs/mobile-progress-visibility.html",
+      "localScreenshot": ".stitch/designs/mobile-progress-visibility.png"
+    },
+    {
+      "id": "a730263182774f32a0b8e94bcf87dc12",
+      "title": "Future Notes - Android Notes List Leading Icon Processing Ring",
+      "updated": "2026-10-17",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Mobile notes-list activity only: subtle loading ring preserves the leading lock/file icon and fixed row geometry, scoped to exact library and note identity. Reduced motion uses a static sync badge. Desktop unchanged. Stitch represents two phone reference frames on a DESKTOP board.",
+      "localHtml": ".stitch/designs/mobile-note-activity.html",
+      "localScreenshot": ".stitch/designs/mobile-note-activity.png"
+    },
+    {
+      "id": "b7d28cc8d5bb44eab273a35550ec26ff",
+      "title": "Future Notes - Android App Settings Attachment Performance",
+      "updated": "2026-10-17",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Superseded by corrected screen cf4f4cba731947079088b6879f94c51a; local assets now contain the factual correction. Initial generated crypto/version claims were not implemented.",
+      "localHtml": ".stitch/designs/android-native-performance.html",
+      "localScreenshot": ".stitch/designs/android-native-performance.png"
+    },
+    {
+      "id": "cf4f4cba731947079088b6879f94c51a",
+      "title": "Future Notes - Android Settings Attachment Performance (Factual Corrections v1.4.1+8)",
+      "updated": "2026-10-17",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Corrected mobile performance reference: version 1.4.1+8, Android system AES using the unchanged desktop-compatible format, synthetic telemetry and existing optional viewing checks. No Keystore/XChaCha20 or memory-kill guarantees. Desktop unchanged.",
+      "localHtml": ".stitch/designs/android-native-performance.html",
+      "localScreenshot": ".stitch/designs/android-native-performance.png"
+    },
+    {
+      "id": "747c3baa1922408da7b448cef36ade29",
+      "title": "Future Notes - Android Mobile Attachment Presentation Reference",
+      "updated": "2026-10-17",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Mobile-only attachment rows and full-screen searchable file list. Preserves collapsed icons, worker/cache ownership and immediate lock teardown. Generated sorting and batch actions are reference-only, not added.",
+      "localHtml": ".stitch/designs/mobile-attachments-list.html",
+      "localScreenshot": ".stitch/designs/mobile-attachments-list.png"
+    },
+    {
+      "id": "adb7fdc5126443878b694e0780035a17",
+      "title": "Future Notes - Android Mobile Attachment Multi-Selection & Management Reference",
+      "updated": "2026-10-17",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Mobile selection controls, quiet total count below search, confirmed bulk removal and one Share/Save sheet. Border-free editor dock. No move-files, sort or cloud actions added.",
+      "localHtml": ".stitch/designs/mobile-attachment-selection.html",
+      "localScreenshot": ".stitch/designs/mobile-attachment-selection.png"
+    },
+    {
+      "id": "35d3916deb0a4687ac0d68771154abce",
+      "title": "Future Notes - Android Multi-Selection Determinate Export Progress",
+      "updated": "2026-10-17",
+      "deviceType": "DESKTOP",
+      "designSystemId": "assets/15757192085103975382",
+      "purpose": "Compact current-file caption, separate phase and live per-file byte progress during multi-file export.",
+      "localHtml": ".stitch/designs/mobile-export-progress.html",
+      "localScreenshot": ".stitch/designs/mobile-export-progress.png"
     }
   ]
 }

@@ -70,6 +70,7 @@ class AttachmentOpenCache {
     required this.sourceResolver,
     this.sourcePreparer,
     this.performance,
+    this.sourceValidator,
     AttachmentTransformWorker? worker,
     CacheFileRemover? removeFile,
   }) : _worker = worker ?? AttachmentTransformWorker(),
@@ -82,6 +83,12 @@ class AttachmentOpenCache {
   final AttachmentSourceResolver sourceResolver;
   final AttachmentSourcePreparer? sourcePreparer;
   final AttachmentPerformance Function()? performance;
+  final Future<bool> Function(
+    NoteReference reference,
+    String id,
+    StreamingFileSource source,
+  )?
+  sourceValidator;
   final AttachmentTransformWorker _worker;
   final CacheFileRemover _removeFile;
   final _entries = <String, _Entry>{};
@@ -95,7 +102,13 @@ class AttachmentOpenCache {
   Future<CacheCleanupResult>? _closing;
   int transformCount = 0;
   String _noteKey(NoteReference reference) => sha256
-      .convert(utf8.encode(p.normalize(reference.contentPath).toLowerCase()))
+      .convert(
+        utf8.encode(
+          Platform.isWindows
+              ? p.normalize(reference.contentPath).toLowerCase()
+              : p.normalize(reference.contentPath),
+        ),
+      )
       .toString();
   String keyFor(NoteReference reference, String id, int credentials) =>
       '${_noteKey(reference)}:$id:$credentials';
@@ -286,15 +299,20 @@ class AttachmentOpenCache {
       if (cached != null) {
         await _safe(cached.file.path);
         final file = await File(cached.file.path).stat();
-        final source = await File(cached.source.path).stat();
+        final source = sourceValidator == null
+            ? await File(cached.source.path).stat()
+            : null;
+        final sourceCurrent = sourceValidator == null
+            ? source!.type == FileSystemEntityType.file &&
+                  source.size == cached.source.length &&
+                  source.modified == cached.sourceModified
+            : await sourceValidator!(reference, attachment.id, cached.source);
         if ((!policy.checkBeforeOpen || cached.checkedSource) &&
             (!policy.verifyAfterOpen || cached.verifiedOutput) &&
             file.type == FileSystemEntityType.file &&
             file.size == cached.file.length &&
             file.modified == cached.cachedModified &&
-            source.type == FileSystemEntityType.file &&
-            source.size == cached.source.length &&
-            source.modified == cached.sourceModified) {
+            sourceCurrent) {
           return OperationResult.success(cached.file);
         }
         _entries.remove(key);

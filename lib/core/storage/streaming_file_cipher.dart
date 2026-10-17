@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:pointycastle/export.dart' hide Digest;
+import '../platform/android_native_cipher.dart';
 
 /// A reopenable file or package record. Bounds are checked before opening and
 /// after consumption; callers own the source until the operation settles.
@@ -78,7 +79,26 @@ class StreamingFileCipher {
     bool verifyOutput = true,
     int? expectedPlaintextBytes,
     bool requireWholeSource = false,
+    double Function()? duty,
+    bool useNative = true,
   }) async {
+    if (useNative && AndroidNativeCipher.ready) {
+      return AndroidNativeCipher.transform(
+        source: source,
+        destination: destination,
+        decryptSource: decryptSource,
+        encryptDestination: encryptDestination,
+        sourcePassword: sourcePassword,
+        destinationPassword: destinationPassword,
+        cancelled: cancelled,
+        duty: duty,
+        progress: progress,
+        maxPlaintextBytes: maxPlaintextBytes,
+        verifyOutput: verifyOutput,
+        expectedPlaintextBytes: expectedPlaintextBytes,
+        requireWholeSource: requireWholeSource,
+      );
+    }
     if (source.offset < 0 || source.length < 0 || source.path == destination) {
       throw const FormatException('Invalid streaming source.');
     }
@@ -381,7 +401,7 @@ class LegacyFileReader {
   final File _file;
   final FileStat _before;
   final RandomAccessFile _input;
-  final SICStreamCipher? _cipher;
+  final _ReaderCipher? _cipher;
   final StreamingFileSource _source;
   final _DigestSink _rawDigest;
   final ByteConversionSink _rawHash;
@@ -440,10 +460,15 @@ class LegacyFileReader {
       if (tail.length != 16) {
         throw const FormatException('Truncated package tail.');
       }
-      final plaintext = StreamingFileCipher._cipher(
-        password,
-        counter,
-      ).process(tail);
+      final plaintext = AndroidNativeCipher.ready
+          ? await AndroidNativeCipher.buffer(
+              tail,
+              StreamingFileCipher._key(password),
+              counter,
+              encrypt: false,
+              padding: false,
+            )
+          : StreamingFileCipher._cipher(password, counter).process(tail);
       final padding = plaintext.last;
       if (padding < 1 ||
           padding > 16 ||
@@ -455,7 +480,7 @@ class LegacyFileReader {
         file,
         before,
         input,
-        StreamingFileCipher._cipher(password, iv),
+        await _ReaderCipher.create(password, iv),
         source.length - 16 - padding,
         source,
         digest,
@@ -481,7 +506,10 @@ class LegacyFileReader {
         throw const FormatException('Truncated package record.');
       }
       _rawHash.add(bytes);
-      output.setAll(offset, _cipher == null ? bytes : _cipher.process(bytes));
+      output.setAll(
+        offset,
+        _cipher == null ? bytes : await _cipher.process(bytes),
+      );
       offset += bytes.length;
     }
     remaining -= count;
@@ -528,7 +556,11 @@ class LegacyFileReader {
         }
       }
     } finally {
-      await _input.close();
+      try {
+        await _input.close();
+      } finally {
+        await _cipher?.close();
+      }
     }
     final after = await _file.stat();
     if (_before.size != after.size ||
@@ -536,5 +568,26 @@ class LegacyFileReader {
         _before.changed != after.changed) {
       throw const FormatException('Package source changed during reading.');
     }
+  }
+}
+
+class _ReaderCipher {
+  _ReaderCipher(this.dart, this.native);
+  final SICStreamCipher? dart;
+  final NativeCipherSession? native;
+  static Future<_ReaderCipher> create(String? password, Uint8List iv) async =>
+      AndroidNativeCipher.ready
+      ? _ReaderCipher(
+          null,
+          await AndroidNativeCipher.session(
+            StreamingFileCipher._key(password),
+            iv,
+          ),
+        )
+      : _ReaderCipher(StreamingFileCipher._cipher(password, iv), null);
+  Future<Uint8List> process(Uint8List bytes) async =>
+      native != null ? await native!.process(bytes) : dart!.process(bytes);
+  Future<void> close() async {
+    await native?.close();
   }
 }

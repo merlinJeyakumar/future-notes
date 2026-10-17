@@ -41,19 +41,35 @@ class NoteImportService {
         throw const FormatException('The selected library changed.');
       }
       if (reference.format == NoteStorageFormat.legacyFile) {
-        final input = await File(reference.contentPath).open();
-        try {
-          final header = await input.read(6);
+        if (files is NoteMetadataReader) {
+          final header = await (files as NoteMetadataReader).noteMetadataHeader(
+            reference,
+            6,
+          );
           final packs = PackService(cipher);
           if (packs.isZip(header) ||
-              (header.length == 6 && packs.isPack(header) && header[4] == 1)) {
-            continue; // Export packages do not publish a library note identity.
+              (header.length == 6 && packs.isPack(header) && header[4] == 1))
+            continue;
+        } else {
+          final input = await File(reference.contentPath).open();
+          try {
+            final header = await input.read(6);
+            final packs = PackService(cipher);
+            if (packs.isZip(header) ||
+                (header.length == 6 &&
+                    packs.isPack(header) &&
+                    header[4] == 1)) {
+              continue; // Export packages do not publish a library note identity.
+            }
+          } finally {
+            await input.close();
           }
-        } finally {
-          await input.close();
         }
       }
-      if (await File(reference.contentPath).length() > 32 * 1024 * 1024) {
+      final metadataLength = files is NoteMetadataReader
+          ? await (files as NoteMetadataReader).noteMetadataLength(reference)
+          : await File(reference.contentPath).length();
+      if (metadataLength > 32 * 1024 * 1024) {
         if (name.startsWith('note_') ||
             p.extension(name).toLowerCase() == '.enc') {
           throw const FormatException(

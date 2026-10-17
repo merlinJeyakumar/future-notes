@@ -32,7 +32,14 @@ class OfficePreviewService {
   Future<String> load(String path) {
     final dll =
         libraryPath ??
-        p.join(p.dirname(Platform.resolvedExecutable), 'office_oxide.dll');
+        (Platform.isAndroid
+            ? 'liboffice_oxide.so'
+            : Platform.isIOS
+            ? '' // Statically linked symbols in the application image.
+            : p.join(
+                p.dirname(Platform.resolvedExecutable),
+                'office_oxide.dll',
+              ));
     return Isolate.run(() => readOfficePreview(path, dll));
   }
 }
@@ -41,7 +48,9 @@ String readOfficePreview(String path, String libraryPath) {
   validateOfficePreviewSource(path);
   final before = File(path).statSync();
   try {
-    final library = DynamicLibrary.open(libraryPath);
+    final library = libraryPath.isEmpty && Platform.isIOS
+        ? DynamicLibrary.process()
+        : DynamicLibrary.open(libraryPath);
     final open = library
         .lookupFunction<
           Pointer<Void> Function(Pointer<Utf8>, Pointer<Int32>),

@@ -16,6 +16,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.nativedevps.futurenotes"
+    buildFeatures { buildConfig = true }
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -42,15 +43,34 @@ android {
         applicationId = "com.nativedevps.futurenotes"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["appLabel"] = "Future Notes"
+    }
+
+    flavorDimensions += "distribution"
+    sourceSets.getByName("main") {
+        jniLibs.srcDir("../../.native-deps/office-oxide/android")
+        assets.srcDir("../../.native-deps/office-oxide/licenses")
+    }
+    productFlavors {
+        create("production") {
+            dimension = "distribution"
+            signingConfig = signingConfigs.getByName("release")
+        }
+        create("preview") {
+            dimension = "distribution"
+            applicationIdSuffix = ".preview"
+            manifestPlaceholders["appLabel"] = "Future Notes Preview"
+            // A separate validation identity. Never use this to upgrade production.
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

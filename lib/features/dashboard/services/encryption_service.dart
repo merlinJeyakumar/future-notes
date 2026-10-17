@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart' hide Key;
 import 'package:encrypt/encrypt.dart';
 import 'dart:convert'; // For utf8
 import 'dart:typed_data'; // For Uint8List
+import 'package:flutter/services.dart' show ServicesBinding, RootIsolateToken;
+import '../../../core/platform/android_native_cipher.dart';
 import '../../../core/operations/decryption_result.dart';
 
 abstract class IEncryptionService {
@@ -25,13 +27,23 @@ abstract class IEncryptionService {
 }
 
 class EncryptionService implements IEncryptionService {
+  final bool useNative;
   late final Key _defaultKey;
   static const String _appSecretKey = 'MySuperSecretAppKeyForJsonStore!';
   static const String _appIV = '1234567890123456';
 
-  EncryptionService() {
+  EncryptionService({this.useNative = true}) {
     _defaultKey = Key.fromUtf8(_appSecretKey);
   }
+
+  Future<T> _compute<T>(
+    ComputeCallback<Map<String, dynamic>, T> task,
+    Map<String, dynamic> args,
+  ) => compute(task, {
+    ...args,
+    if (useNative && AndroidNativeCipher.ready)
+      'nativeToken': ServicesBinding.rootIsolateToken,
+  });
 
   Key _deriveKey(String password) {
     final bytes = utf8.encode(password);
@@ -47,7 +59,7 @@ class EncryptionService implements IEncryptionService {
   @override
   Future<String> encrypt(String plainText, {String? password}) async {
     final key = password != null ? _deriveKey(password) : _defaultKey;
-    return compute(_encryptStringTask, {
+    return _compute(_encryptStringTask, {
       'text': plainText,
       'keyBytes': key.bytes,
     });
@@ -67,14 +79,14 @@ class EncryptionService implements IEncryptionService {
     final key = password != null ? _deriveKey(password) : _defaultKey;
     final defaultKey = _defaultKey;
 
-    final res1 = await compute(_decryptStringTask, {
+    final res1 = await _compute(_decryptStringTask, {
       'text': encryptedText,
       'keyBytes': key.bytes,
     });
     if (res1.isSuccess) return res1;
 
     if (password != null) {
-      final res2 = await compute(_decryptStringTask, {
+      final res2 = await _compute(_decryptStringTask, {
         'text': encryptedText,
         'keyBytes': defaultKey.bytes,
       });
@@ -88,7 +100,7 @@ class EncryptionService implements IEncryptionService {
   @override
   Future<Uint8List> encryptBinary(Uint8List data, {String? password}) async {
     final key = password != null ? _deriveKey(password) : _defaultKey;
-    return compute(_encryptBinaryTask, {'data': data, 'keyBytes': key.bytes});
+    return _compute(_encryptBinaryTask, {'data': data, 'keyBytes': key.bytes});
   }
 
   @override
@@ -105,14 +117,14 @@ class EncryptionService implements IEncryptionService {
     final key = password != null ? _deriveKey(password) : _defaultKey;
     final defaultKey = _defaultKey;
 
-    final res1 = await compute(_decryptBinaryTask, {
+    final res1 = await _compute(_decryptBinaryTask, {
       'data': data,
       'keyBytes': key.bytes,
     });
     if (res1.isSuccess) return res1;
 
     if (password != null) {
-      final res2 = await compute(_decryptBinaryTask, {
+      final res2 = await _compute(_decryptBinaryTask, {
         'data': data,
         'keyBytes': defaultKey.bytes,
       });
@@ -126,7 +138,7 @@ class EncryptionService implements IEncryptionService {
   @override
   Future<String> encryptApp(String plainText) async {
     final key = Key.fromUtf8(_appSecretKey);
-    return compute(_encryptAppTask, {
+    return _compute(_encryptAppTask, {
       'text': plainText,
       'keyBytes': key.bytes,
       'iv': _appIV,
@@ -144,7 +156,7 @@ class EncryptionService implements IEncryptionService {
     String encryptedText,
   ) async {
     final key = Key.fromUtf8(_appSecretKey);
-    return compute(_decryptAppTask, {
+    return _compute(_decryptAppTask, {
       'text': encryptedText,
       'keyBytes': key.bytes,
       'iv': _appIV,
@@ -180,8 +192,14 @@ Future<String> _encryptStringTask(Map<String, dynamic> args) async {
   final text = args['text'] as String;
   final key = Key(args['keyBytes'] as Uint8List);
   final iv = IV.fromLength(16);
-  final encrypted = _encryptCompatible(key, iv, utf8.encode(text));
-  return "${iv.base64}:${encrypted.base64}";
+  final encrypted = await _crypt(
+    args,
+    key,
+    iv,
+    Uint8List.fromList(utf8.encode(text)),
+    true,
+  );
+  return "${iv.base64}:${base64Encode(encrypted)}";
 }
 
 Future<DecryptionResult<String>> _decryptStringTask(
@@ -190,7 +208,6 @@ Future<DecryptionResult<String>> _decryptStringTask(
   try {
     final encryptedText = args['text'] as String;
     final key = Key(args['keyBytes'] as Uint8List);
-    final encrypter = Encrypter(AES(key));
 
     if (encryptedText.contains(':')) {
       final parts = encryptedText.split(':');
@@ -198,13 +215,17 @@ Future<DecryptionResult<String>> _decryptStringTask(
         final iv = IV.fromBase64(parts[0]);
         final encrypted = Encrypted.fromBase64(parts[1]);
         _validateLegacyCipher(iv.bytes, encrypted.bytes);
-        return DecryptionResult.success(encrypter.decrypt(encrypted, iv: iv));
+        return DecryptionResult.success(
+          utf8.decode(await _crypt(args, key, iv, encrypted.bytes, false)),
+        );
       }
     }
     final iv = IV(key.bytes.sublist(0, 16));
     final encrypted = Encrypted.fromBase64(encryptedText);
     _validateLegacyCipher(iv.bytes, encrypted.bytes);
-    return DecryptionResult.success(encrypter.decrypt(encrypted, iv: iv));
+    return DecryptionResult.success(
+      utf8.decode(await _crypt(args, key, iv, encrypted.bytes, false)),
+    );
   } catch (e) {
     return const DecryptionResult.failure(DecryptionFailure.invalidCiphertext);
   }
@@ -214,10 +235,10 @@ Future<Uint8List> _encryptBinaryTask(Map<String, dynamic> args) async {
   final data = args['data'] as Uint8List;
   final key = Key(args['keyBytes'] as Uint8List);
   final iv = IV.fromLength(16);
-  final encrypted = _encryptCompatible(key, iv, data);
+  final encrypted = await _crypt(args, key, iv, data, true);
   final combined = BytesBuilder();
   combined.add(iv.bytes);
-  combined.add(encrypted.bytes);
+  combined.add(encrypted);
   return combined.toBytes();
 }
 
@@ -238,9 +259,8 @@ Future<DecryptionResult<Uint8List>> _decryptBinaryTask(
     _validateLegacyCipher(ivBytes, cipherBytes);
     final iv = IV(ivBytes);
     final encrypted = Encrypted(cipherBytes);
-    final encrypter = Encrypter(AES(key));
     return DecryptionResult.success(
-      Uint8List.fromList(encrypter.decryptBytes(encrypted, iv: iv)),
+      await _crypt(args, key, iv, encrypted.bytes, false),
     );
   } catch (e) {
     return const DecryptionResult.failure(DecryptionFailure.invalidCiphertext);
@@ -252,8 +272,14 @@ Future<String> _encryptAppTask(Map<String, dynamic> args) async {
   final key = Key(args['keyBytes'] as Uint8List);
   final ivStr = args['iv'] as String;
   final iv = IV.fromUtf8(ivStr);
-  final encrypted = _encryptCompatible(key, iv, utf8.encode(text));
-  return encrypted.base64;
+  final encrypted = await _crypt(
+    args,
+    key,
+    iv,
+    Uint8List.fromList(utf8.encode(text)),
+    true,
+  );
+  return base64Encode(encrypted);
 }
 
 Future<DecryptionResult<String>> _decryptAppTask(
@@ -264,13 +290,37 @@ Future<DecryptionResult<String>> _decryptAppTask(
     final key = Key(args['keyBytes'] as Uint8List);
     final ivStr = args['iv'] as String;
     final iv = IV.fromUtf8(ivStr);
-    final encrypter = Encrypter(AES(key));
     final encrypted = Encrypted.fromBase64(text);
     _validateLegacyCipher(iv.bytes, encrypted.bytes);
-    return DecryptionResult.success(encrypter.decrypt(encrypted, iv: iv));
+    return DecryptionResult.success(
+      utf8.decode(await _crypt(args, key, iv, encrypted.bytes, false)),
+    );
   } catch (e) {
     return const DecryptionResult.failure(DecryptionFailure.invalidCiphertext);
   }
+}
+
+Future<Uint8List> _crypt(
+  Map<String, dynamic> args,
+  Key key,
+  IV iv,
+  Uint8List bytes,
+  bool encrypt,
+) async {
+  final token = args['nativeToken'] as RootIsolateToken?;
+  if (token != null && bytes.length <= 32 * 1024 * 1024) {
+    AndroidNativeCipher.initialize(token);
+    return AndroidNativeCipher.buffer(
+      bytes,
+      key.bytes,
+      iv.bytes,
+      encrypt: encrypt,
+    );
+  }
+  if (encrypt) return _encryptCompatible(key, iv, bytes).bytes;
+  return Uint8List.fromList(
+    Encrypter(AES(key)).decryptBytes(Encrypted(bytes), iv: iv),
+  );
 }
 
 Encrypted _encryptCompatible(Key key, IV iv, List<int> bytes) {

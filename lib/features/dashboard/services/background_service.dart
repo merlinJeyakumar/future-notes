@@ -69,7 +69,19 @@ class DiscoveryFailureEvent {
   final OperationResult<void> result;
 }
 
-class BackgroundService {
+abstract interface class LibraryDiscovery {
+  bool get isReady;
+  DiscoveryRequest? get requestedScan;
+  Stream<DiscoverySnapshot> get discoveriesStream;
+  Stream<DiscoveryFailureEvent> get failuresStream;
+  bool isCurrent(DiscoveryRequest request);
+  Future<void> init();
+  void invalidateRequests();
+  void loadRecentFiles(String directoryPath);
+  void dispose();
+}
+
+class BackgroundService implements LibraryDiscovery {
   BackgroundService({
     StorageEnvironment environment = const StorageEnvironment.production(),
     BackgroundWorkerLauncher? launcher,

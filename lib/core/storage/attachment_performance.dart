@@ -14,6 +14,15 @@ class AttachmentPerformance {
   final bool verifyAfterOpen;
   static const defaults = AttachmentPerformance();
 
+  /// Mobile plaintext attachment exports share the optional viewing scans.
+  /// Desktop exports retain their existing checked-source/readback policy.
+  ({bool checkSource, bool verifyOutput}) exportChecks({
+    required bool mobile,
+  }) => (
+    checkSource: !mobile || checkBeforeOpen,
+    verifyOutput: !mobile || verifyAfterOpen,
+  );
+
   factory AttachmentPerformance.fromJson(Object? value) {
     if (value == null) return defaults;
     if (value is! Map) {

@@ -1,4 +1,5 @@
 import 'dart:isolate';
+import 'dart:io';
 
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
@@ -7,6 +8,7 @@ import '../operations/operation_result.dart';
 import 'native_storage_primitives.dart';
 import 'storage_environment.dart';
 import 'windows_file_actions.dart';
+import 'posix_file_actions.dart';
 
 /// Only explicit export destinations use this helper. Candidates live beside
 /// the reviewed destination; replacement never truncates the old export.
@@ -29,10 +31,12 @@ class ExternalFileExport {
     final primitives = NativeStoragePrimitives(
       const StorageEnvironment.production(),
     );
-    final actions = WindowsFileActions(
-      root: p.dirname(destination),
-      environment: const StorageEnvironment.production(),
-    );
+    final StorageFileActions actions = Platform.isAndroid || Platform.isIOS
+        ? PosixFileActions(p.dirname(destination))
+        : WindowsFileActions(
+            root: p.dirname(destination),
+            environment: const StorageEnvironment.production(),
+          );
     String? prior;
     try {
       if (!p.isAbsolute(destination) ||

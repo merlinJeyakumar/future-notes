@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Future Notes - Android App Settings Attachment Performance</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            // Future Notes dark Material tokens based on #0B0F17 & #131A26
+            surface: {
+              DEFAULT: "#0B0F17",
+              container: "#131A26",
+              "container-low": "#0F1420",
+              "container-high": "#1A2332",
+              "container-highest": "#222D40"
+            },
+            primary: {
+              DEFAULT: "#4299E1",
+              container: "#1E3A5F",
+              hover: "#3182CE"
+            },
+            secondary: {
+              container: "#1E293B"
+            },
+            "on-surface": "#F1F5F9",
+            "on-surface-variant": "#94A3B8",
+            "on-secondary-container": "#93C5FD",
+            "on-primary-container": "#BFDBFE",
+            "outline-variant": "#334155"
+          },
+          borderRadius: {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          fontFamily: {
+            headline: ["Public Sans", "sans-serif"],
+            display: ["Public Sans", "sans-serif"],
+            body: ["Public Sans", "sans-serif"],
+            label: ["Public Sans", "sans-serif"],
+            mono: ["JetBrains Mono", "monospace"]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      line-height: 1;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .material-symbols-fill {
+      font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+    /* Hide scrollbars in phone mockup */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    /* Custom Slider Accent */
+    input[type=range]::-webkit-slider-thumb {
+      appearance: none;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #4299E1;
+      cursor: pointer;
+      border: 3px solid #0B0F17;
+      box-shadow: 0 0 0 1px #4299E1;
+    }
+  </style>
+</head>
+<body class="bg-[#070A0F] text-on-surface font-body min-h-screen antialiased selection:bg-primary/30">
+<!-- Spec Board Layout Wrapper -->
+<div class="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-12">
+<!-- Spec Board Super-Header -->
+<header class="mb-10 pb-6 border-b border-outline-variant/30 flex flex-wrap items-center justify-between gap-4">
+<div>
+<div class="flex items-center gap-2 mb-2">
+<span class="px-2 py-0.5 rounded text-[11px] font-mono font-medium tracking-wide bg-primary-container/80 text-on-primary-container border border-primary/40">
+            SPECIFICATION BOARD • ANDROID RUNTIME
+          </span>
+<span class="text-xs text-on-surface-variant font-mono">MD-309 • v1.4.1+8</span>
+</div>
+<h1 class="font-headline text-2xl sm:text-3xl font-bold tracking-tight text-white flex items-center gap-3">
+          Future Notes - Android App Settings Attachment Performance
+        </h1>
+<p class="text-sm text-on-surface-variant mt-1.5 max-w-3xl">
+          Detailed engineering mockup and interaction tokens for mobile attachment cipher streaming, memory limits, and hardware-governed thermal backoff.
+        </p>
+</div>
+<!-- Quick Context Metatags -->
+<div class="flex items-center gap-3 bg-surface-container-low px-4 py-2.5 rounded-xl border border-outline-variant/30 text-xs">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+<span class="text-slate-300 font-mono">Viewport: 390 × 844 dp</span>
+</div>
+<span class="text-outline-variant">|</span>
+<span class="text-slate-400">Target: Android OS · Legacy Counter-Mode Compatibility</span>
+</div>
+</header>
+<!-- Main Responsive Grid: Spec Cards on Left/Bottom, Phone Centered/Primary -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-start">
+<!-- ================= LEFT COLUMN: Architecture & Guidelines ================= -->
+<div class="lg:col-span-5 space-y-6 order-2 lg:order-1">
+<!-- Spec Card 1 -->
+<section class="bg-surface-container-low rounded-xl border border-outline-variant/30 p-5 shadow-sm">
+<div class="flex items-start justify-between mb-3">
+<div class="flex items-center gap-2.5">
+<div class="p-2 rounded-lg bg-surface-container border border-outline-variant/40 text-primary">
+<span class="material-symbols-outlined text-[20px]">monitor_heart</span>
+</div>
+<div>
+<span class="text-[11px] font-mono text-primary uppercase tracking-wider font-semibold">Specification 01</span>
+<h2 class="text-base font-bold text-white">Adaptive Mobile Telemetry</h2>
+</div>
+</div>
+<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 font-medium">LIVE OBSERVER</span>
+</div>
+<p class="text-xs text-on-surface-variant leading-relaxed mb-3">Telemetry is read-only and queries Android <code class="text-slate-300 font-mono text-[11px]">PowerManager.getThermalHeadroom()</code> and active job dispatchers. System-provider AES ensures compatibility with the desktop-compatible legacy stream.</p>
+<div class="space-y-2 text-xs bg-surface-container/60 p-3 rounded-lg border border-outline-variant/20 font-mono">
+<div class="flex justify-between py-1 border-b border-outline-variant/20">
+<span class="text-slate-400">Logical Cores:</span>
+<span class="text-slate-200">ARM big.LITTLE (8 threads)</span>
+</div>
+<div class="flex justify-between py-1 border-b border-outline-variant/20">
+<span class="text-slate-400">Thermal Throttling:</span>
+<span class="text-emerald-400 font-medium">Nominal (Status: OK)</span>
+</div>
+<div class="flex justify-between py-1">
+<span class="text-slate-400">Cipher Backend:</span>
+<span class="text-blue-300">System JCE Provider (AES/CTR/PKCS7)</span>
+</div>
+</div>
+</section>
+<!-- Spec Card 2 -->
+<section class="bg-surface-container-low rounded-xl border border-outline-variant/30 p-5 shadow-sm">
+<div class="flex items-start justify-between mb-3">
+<div class="flex items-center gap-2.5">
+<div class="p-2 rounded-lg bg-surface-container border border-outline-variant/40 text-primary">
+<span class="material-symbols-outlined text-[20px]">tune</span>
+</div>
+<div>
+<span class="text-[11px] font-mono text-primary uppercase tracking-wider font-semibold">Specification 02</span>
+<h2 class="text-base font-bold text-white">Mobile-Safe Resource Controls</h2>
+</div>
+</div>
+<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-blue-950/60 border border-blue-500/40 text-blue-300 font-medium">CONSTRAINED</span>
+</div>
+<p class="text-xs text-on-surface-variant leading-relaxed mb-3">Provides a baseline target percentage (default <code class="text-slate-300 font-mono text-[11px]">70%</code>). The 128 MiB working memory allowance is a synthetic guideline and does not guarantee avoidance of low-memory kills under intense system pressure.</p>
+<ul class="text-xs text-on-surface-variant space-y-1.5 list-disc list-inside">
+<li><span class="text-slate-200 font-medium">Parallel files:</span> Capped strictly to [Auto, 1, 2, 4] concurrent workers.</li>
+<li><span class="text-slate-200 font-medium">Working Memory Cap:</span> Options restricted to conservative 64, 128, or 256 MiB buffers.</li>
+<li><span class="text-slate-200 font-medium">Reset Action:</span> Deterministically restores persisted profile to 70% / Auto / Auto.</li>
+</ul>
+</section>
+<!-- Spec Card 3 -->
+<section class="bg-surface-container-low rounded-xl border border-outline-variant/30 p-5 shadow-sm">
+<div class="flex items-start justify-between mb-3">
+<div class="flex items-center gap-2.5">
+<div class="p-2 rounded-lg bg-surface-container border border-outline-variant/40 text-primary">
+<span class="material-symbols-outlined text-[20px]">verified_user</span>
+</div>
+<div>
+<span class="text-[11px] font-mono text-primary uppercase tracking-wider font-semibold">Specification 03</span>
+<h2 class="text-base font-bold text-white">Advanced Verification &amp; Throttling</h2>
+</div>
+</div>
+<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-950/60 border border-amber-500/40 text-amber-300 font-medium">FAIL-SAFE</span>
+</div>
+<p class="text-xs text-on-surface-variant leading-relaxed mb-3">
+            Downward adaptive scaling triggers without altering core cryptographic validation integrity. Optional double-read passes protect untrusted mobile storage media.
+          </p>
+<div class="grid grid-cols-2 gap-2 text-xs"><div class="p-2.5 rounded bg-surface-container border border-outline-variant/30"><div class="text-[11px] font-semibold text-slate-300 mb-1">Check-before-open</div><div class="text-[11px] text-on-surface-variant">Optional block-level checksum validation before preview; disabled by default.</div></div><div class="p-2.5 rounded bg-surface-container border border-outline-variant/30"><div class="text-[11px] font-semibold text-slate-300 mb-1">Write-verification</div><div class="text-[11px] text-on-surface-variant">Required synchronous read-back verification before storage commitment.</div></div></div>
+</section>
+<!-- Touch Target UX Compliance Badge -->
+<div class="p-4 rounded-xl border border-primary/20 bg-primary-container/20 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary text-2xl">touch_app</span>
+<div>
+<h3 class="text-xs font-semibold text-white">Material 48dp Touch Targets</h3>
+<p class="text-[11px] text-on-surface-variant">All segmented pills, toggles, and header controls meet Android Ergonomic guidelines.</p>
+</div>
+</div>
+<span class="text-xs font-mono font-semibold text-primary px-2.5 py-1 bg-surface-container rounded border border-primary/30">PASSED</span>
+</div>
+</div>
+<!-- ================= RIGHT COLUMN: Android Phone Mockup (390 x 844 dp) ================= -->
+<div class="lg:col-span-7 flex flex-col items-center justify-center order-1 lg:order-2">
+<!-- Outer Phone Shell Target (390 x 844 dp) -->
+<div class="w-[390px] h-[844px] bg-[#07090E] rounded-[48px] p-3 shadow-2xl shadow-black/80 ring-1 ring-slate-700/60 relative flex flex-col select-none">
+<!-- Inner Bezel -->
+<div class="w-full h-full bg-[#0B0F17] rounded-[38px] overflow-hidden flex flex-col relative border border-outline-variant/30">
+<!-- ================= ANDROID STATUS BAR (28dp height) ================= -->
+<div class="h-7 px-6 bg-surface-container-low/90 backdrop-blur-md flex items-center justify-between text-xs text-slate-300 shrink-0 z-30 pt-1">
+<!-- Left: Clock -->
+<span class="font-semibold text-xs tracking-tight text-white font-mono">09:41</span>
+<!-- Center: Hole Punch Camera -->
+<div class="w-3.5 h-3.5 rounded-full bg-black ring-1 ring-slate-800"></div>
+<!-- Right: Mobile Status Icons -->
+<div class="flex items-center gap-2 text-slate-300">
+<span class="material-symbols-outlined text-[15px]">wifi</span>
+<span class="material-symbols-outlined text-[15px]">signal_cellular_alt</span>
+<div class="flex items-center gap-0.5">
+<span class="text-[10px] font-mono font-medium">92%</span>
+<span class="material-symbols-outlined text-[15px]">battery_full</span>
+</div>
+</div>
+</div>
+<!-- ================= TOP APP BAR (56dp height Android standard) ================= -->
+<header class="h-14 px-2 bg-surface-container border-b border-outline-variant/30 flex items-center justify-between shrink-0 z-20">
+<div class="flex items-center gap-1">
+<!-- Back Arrow with 48dp Touch Target -->
+<button aria-label="Go back" class="w-12 h-12 flex items-center justify-center rounded-full text-slate-300 hover:text-white hover:bg-surface-container-high transition-colors" type="button">
+<span class="material-symbols-outlined text-[22px]">arrow_back</span>
+</button>
+<div class="flex flex-col">
+<h1 class="font-headline text-base font-semibold leading-tight text-white tracking-tight">Attachment performance</h1>
+<span class="text-[11px] text-on-surface-variant font-mono">App settings • v1.4.1+8</span>
+</div>
+</div>
+<!-- Action: Done button with 48dp region -->
+<div class="flex items-center pr-1">
+<button class="h-9 px-3.5 min-w-[48px] flex items-center justify-center rounded-lg bg-primary hover:bg-primary-hover text-surface font-semibold text-xs transition-colors shadow-sm active:scale-95" type="button">
+                  Done
+                </button>
+</div>
+</header>
+<!-- ================= SCROLLABLE CONTENT BODY ================= -->
+<main class="flex-1 overflow-y-auto no-scrollbar p-3.5 space-y-3.5 text-slate-200">
+<!-- Info Banner Note -->
+<section class="bg-surface-container-low rounded-xl p-3 border border-outline-variant/30 flex items-start gap-2.5">
+<span class="material-symbols-outlined text-primary text-[18px] mt-0.5 shrink-0">info</span>
+<p class="text-[11px] text-on-surface-variant leading-relaxed">
+                  Automatic resource management adapts background encryption &amp; hashing when Android reports thermal or low-memory pressure. Safety validations are non-bypassable.
+                </p>
+</section>
+<!-- ================= SECTION 1: LIVE DEVICE CAPABILITIES & TELEMETRY ================= -->
+<section class="bg-surface-container-low rounded-xl border border-outline-variant/30 p-3.5 space-y-2.5">
+<div class="flex items-center justify-between pb-1.5 border-b border-outline-variant/20">
+<span class="text-[11px] font-bold tracking-wider text-slate-400 uppercase font-mono">Live device capabilities &amp; telemetry</span>
+<span class="flex items-center gap-1.5 text-[10px] text-emerald-400 font-mono font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    SYNCED
+                  </span>
+</div>
+<!-- 2x2 Telemetry Metric Grid -->
+<div class="grid grid-cols-2 gap-2 text-xs">
+<!-- Hard Core Metric -->
+<div class="bg-surface-container p-2.5 rounded-lg border border-outline-variant/20">
+<div class="text-[10px] text-on-surface-variant uppercase font-mono tracking-tight">Hardware Cores</div>
+<div class="font-semibold text-white mt-0.5 text-[13px]">8 logical CPUs</div>
+<div class="text-[10px] text-slate-400 font-mono mt-0.5">ARM big.LITTLE</div>
+</div>
+<!-- Memory Cap Metric -->
+<div class="bg-surface-container p-2.5 rounded-lg border border-outline-variant/20">
+<div class="text-[10px] text-on-surface-variant uppercase font-mono tracking-tight">Memory Allowance</div>
+<div class="font-semibold text-white mt-0.5 text-[13px]">128 MiB</div>
+<div class="text-[10px] text-slate-400 font-mono mt-0.5">synthetic cap</div>
+</div>
+<!-- Thermal Status Metric -->
+<div class="bg-surface-container p-2.5 rounded-lg border border-outline-variant/20">
+<div class="text-[10px] text-on-surface-variant uppercase font-mono tracking-tight">Thermal Status</div>
+<div class="flex items-center gap-1.5 font-semibold text-emerald-400 mt-0.5 text-[12px]">
+<span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                      Nominal
+                    </div>
+<div class="text-[10px] text-slate-400 font-mono mt-0.5">No thermal throttle</div>
+</div>
+<!-- Pipeline Queue Metric -->
+<div class="bg-surface-container p-2.5 rounded-lg border border-outline-variant/20">
+<div class="text-[10px] text-on-surface-variant uppercase font-mono tracking-tight">Pipeline Queue</div>
+<div class="font-semibold text-white mt-0.5 text-[13px]">1 active</div>
+<div class="text-[10px] text-slate-400 font-mono mt-0.5">2 queued files</div>
+</div>
+</div>
+<!-- Crypto Engine Hardware Tile -->
+<div class="bg-surface-container p-2.5 rounded-lg border border-outline-variant/20 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px] material-symbols-fill">verified_user</span>
+<div><div class="text-[10px] text-on-surface-variant uppercase font-mono tracking-tight">Crypto Engine</div><div class="text-[11px] font-medium text-white leading-tight">Native Android cipher · desktop-compatible format</div><div class="text-[10px] text-slate-400">System JCE AES/CTR stream compatibility</div></div>
+</div>
+<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-primary-container text-on-primary-container border border-primary/30 font-semibold">Active</span>
+</div>
+</section>
+<!-- ================= SECTION 2: ADAPTIVE RESOURCE TARGET ================= -->
+<section class="bg-surface-container-low rounded-xl border border-outline-variant/30 p-3.5 space-y-3">
+<div class="flex items-center justify-between">
+<div>
+<h2 class="text-xs font-bold text-white uppercase tracking-wider font-mono">Adaptive resource target</h2>
+<p class="text-[11px] text-on-surface-variant">Allocated system envelope limit</p>
+</div>
+<span class="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-primary-container text-on-primary-container border border-primary/40">
+                    70% (Default)
+                  </span>
+</div>
+<!-- Slider Control -->
+<div class="pt-1 px-1">
+<input class="w-full h-1.5 bg-surface-container-highest rounded-lg appearance-none cursor-pointer focus:outline-none accent-primary" max="90" min="10" step="20" type="range" value="70"/>
+<div class="flex justify-between text-[10px] font-mono text-slate-400 mt-2 px-0.5">
+<span>10% (Low)</span>
+<span>50%</span>
+<span class="text-primary font-semibold">70% (Def)</span>
+<span>90% (Max)</span>
+</div>
+</div>
+<p class="text-[10px] text-slate-400 bg-surface-container/60 p-2 rounded border border-outline-variant/20 leading-normal">
+                  Adaptive scheduling target based on Android system load and thermal states, not a static RAM reservation.
+                </p>
+</section>
+<!-- ================= SECTION 3: PROCESSING CONSTRAINTS ================= -->
+<section class="bg-surface-container-low rounded-xl border border-outline-variant/30 p-3.5 space-y-3.5">
+<h2 class="text-xs font-bold text-white uppercase tracking-wider font-mono">Processing constraints</h2>
+<!-- Control A: Parallel files -->
+<div class="space-y-1.5">
+<label class="block text-xs font-medium text-slate-200">Maximum parallel files</label>
+<!-- Segmented Touch Control (48dp accessible height) -->
+<div class="grid grid-cols-4 gap-1 p-1 bg-surface-container rounded-lg border border-outline-variant/30 text-xs text-center font-medium">
+<button class="h-10 flex flex-col items-center justify-center rounded-md bg-secondary-container text-on-secondary-container shadow-sm border border-primary/40 px-1" type="button">
+<span class="text-[11px] font-semibold leading-none">Auto</span>
+<span class="text-[9px] text-blue-300 font-normal">Recom.</span>
+</button>
+<button class="h-10 flex items-center justify-center rounded-md text-on-surface-variant hover:text-white transition-colors" type="button">
+                      1
+                    </button>
+<button class="h-10 flex items-center justify-center rounded-md text-on-surface-variant hover:text-white transition-colors" type="button">
+                      2
+                    </button>
+<button class="h-10 flex items-center justify-center rounded-md text-on-surface-variant hover:text-white transition-colors" type="button">
+                      4
+                    </button>
+</div>
+<p class="text-[10px] text-slate-400">Bounded to prevent background service termination.</p>
+</div>
+<!-- Control B: Working memory cap -->
+<div class="space-y-1.5 pt-1 border-t border-outline-variant/20">
+<label class="block text-xs font-medium text-slate-200">Attachment working memory cap</label>
+<!-- Segmented Touch Control (48dp accessible height) -->
+<div class="grid grid-cols-4 gap-1 p-1 bg-surface-container rounded-lg border border-outline-variant/30 text-xs text-center font-medium">
+<button class="h-10 flex items-center justify-center rounded-md bg-secondary-container text-on-secondary-container shadow-sm border border-primary/40" type="button">
+                      Auto
+                    </button>
+<button class="h-10 flex items-center justify-center rounded-md text-on-surface-variant hover:text-white transition-colors" type="button">
+                      64 MiB
+                    </button>
+<button class="h-10 flex items-center justify-center rounded-md text-on-surface-variant hover:text-white transition-colors" type="button">
+                      128 MiB
+                    </button>
+<button class="h-10 flex items-center justify-center rounded-md text-on-surface-variant hover:text-white transition-colors" type="button">
+                      256 MiB
+                    </button>
+</div>
+<p class="text-[10px] text-slate-400">Synthetic working allowance guideline; does not guarantee avoidance of low-memory kills under pressure.</p>
+</div>
+<!-- Reset to defaults button (48dp touch region) -->
+<div class="pt-1">
+<button class="w-full h-11 flex items-center justify-center gap-2 rounded-lg border border-outline-variant/40 bg-surface-container/50 hover:bg-surface-container text-slate-300 hover:text-white text-xs font-medium transition-colors" type="button">
+<span class="material-symbols-outlined text-[17px] text-slate-400">restart_alt</span>
+                    Reset settings to defaults
+                  </button>
+</div>
+</section>
+<!-- ================= SECTION 4: ADVANCED VERIFICATION ================= -->
+<section class="bg-surface-container-low rounded-xl border border-outline-variant/30 p-3.5 space-y-3">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-slate-400 text-[18px]">verified</span>
+<h2 class="text-xs font-bold text-white uppercase tracking-wider font-mono">Advanced verification</h2>
+</div>
+<span class="material-symbols-outlined text-slate-400 text-[18px]">expand_less</span>
+</div>
+<!-- Switch 1: Check before open -->
+<div class="flex items-start justify-between gap-3 pt-1 border-t border-outline-variant/20">
+<div class="space-y-0.5">
+<div class="text-xs font-medium text-slate-200">Check before open</div>
+<div class="text-[10px] text-on-surface-variant leading-tight">Optional viewing check. Verify block checksums prior to preview (OFF by default).</div>
+</div>
+<!-- Mobile Toggle Switch OFF (48dp target) -->
+<div class="min-w-[48px] h-12 flex items-center justify-end">
+<div class="w-10 h-5 bg-surface-container-highest rounded-full p-0.5 cursor-pointer relative border border-outline-variant/40">
+<div class="w-4 h-4 bg-slate-400 rounded-full shadow-md transform transition-transform"></div>
+</div>
+</div>
+</div>
+<!-- Switch 2: Verify output after encryption -->
+<div class="flex items-start justify-between gap-3 pt-1 border-t border-outline-variant/20">
+<div class="space-y-0.5">
+<div class="text-xs font-medium text-slate-200">Verify output after encryption</div>
+<div class="text-[10px] text-on-surface-variant leading-tight">Synchronous read-back verification before storage commitment (Required · ON).</div>
+</div>
+<!-- Mobile Toggle Switch OFF (48dp target) -->
+<div class="min-w-[48px] h-12 flex items-center justify-end"><div class="w-10 h-5 bg-primary rounded-full p-0.5 cursor-pointer relative border border-primary/40 flex justify-end"><div class="w-4 h-4 bg-white rounded-full shadow-md transform transition-transform"></div></div></div>
+</div>
+<!-- Safety Note Footer inside card -->
+<div class="bg-surface-container/60 p-2.5 rounded-lg border border-outline-variant/20 flex items-start gap-2">
+<span class="material-symbols-outlined text-amber-400 text-[16px] shrink-0 mt-0.5">shield</span>
+<p class="text-[10px] text-slate-400 leading-tight">
+                    Limits adapt downward automatically under heat or memory pressure. Safety protections and block validation cannot be disabled.
+                  </p>
+</div>
+</section>
+<!-- Footer acknowledgment inside phone viewport -->
+<footer class="text-center pt-1 pb-4">
+<p class="text-[10px] text-slate-400 font-mono">
+                  Settings acknowledge on change • Failures automatically retain previous safe configuration.
+                </p>
+</footer>
+</main>
+<!-- ================= ANDROID GESTURE NAVIGATION BAR (16dp height) ================= -->
+<footer class="h-4 bg-surface flex items-center justify-center shrink-0 z-20 pb-1">
+<div class="w-28 h-1 bg-slate-500/60 rounded-full"></div>
+</footer>
+</div>
+</div>
+</div>
+</div>
+<!-- ================= SPEC BOARD COMPONENT ANCHORS & DESIGN TOKENS FOOTER ================= -->
+<div class="mt-14 pt-8 border-t border-outline-variant/30 text-xs text-on-surface-variant space-y-4">
+<div class="flex flex-wrap items-center justify-between gap-4">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-primary"></span>
+<span class="text-slate-200 font-semibold">Future Notes Material Specification System</span>
+<span class="text-slate-400">• Mobile Ergonomics Guideline compliant (48dp touch grid)</span>
+</div>
+<div class="flex items-center gap-4 font-mono text-[11px]">
+<span>Theme: Dark (#0B0F17)</span>
+<span>Accent: #4299E1</span>
+<span>Surface Container: #131A26</span>
+</div>
+</div>
+</div>
+</div>
+</body></html>

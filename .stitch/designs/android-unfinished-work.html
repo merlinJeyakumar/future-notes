@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Future Notes - Unfinished Work Recovery</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Roboto Flex"', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            surface: {
+              DEFAULT: '#111318',
+              dim: '#0c0e12',
+              container: {
+                lowest: '#080a0d',
+                low: '#191c20',
+                DEFAULT: '#1d2024',
+                high: '#282b30',
+                highest: '#33363b',
+              }
+            },
+            primary: {
+              DEFAULT: '#4299E1',
+              container: '#1e3a5f',
+              on: '#0f172a',
+              text: '#90cdf4'
+            },
+            outline: {
+              DEFAULT: '#44474e',
+              variant: '#30343a'
+            },
+            warning: {
+              DEFAULT: '#f59e0b',
+              container: '#3a2e15',
+              text: '#fde68a'
+            },
+            error: {
+              DEFAULT: '#ef4444',
+              container: '#3b1c1c',
+              text: '#fca5a5'
+            },
+            success: {
+              DEFAULT: '#10b981',
+              container: '#133529',
+              text: '#6ee7b7'
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    .material-symbols-outlined.fill-1 {
+      font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+    /* Touch target guarantee */
+    .touch-target {
+      min-height: 48px;
+      min-width: 48px;
+    }
+  </style>
+</head>
+<body class="bg-surface-container-lowest text-neutral-200 antialiased font-sans min-h-screen flex items-center justify-center p-0 md:p-6 select-none">
+
+  <!-- Mobile Android Frame (Pixel style ~390px) -->
+  <main class="w-full max-w-[412px] bg-surface text-neutral-100 flex flex-col min-h-screen md:min-h-[860px] md:max-h-[890px] md:rounded-[36px] md:border md:border-outline-variant/60 shadow-2xl overflow-hidden relative" role="region" aria-label="Future Notes Unfinished Work Recovery">
+
+    <!-- Android Status Bar -->
+    <header class="w-full pt-3 px-6 pb-2 flex justify-between items-center text-xs font-medium text-neutral-400 select-none bg-surface shrink-0 z-10">
+      <span class="tracking-tight text-neutral-300 font-semibold">09:41</span>
+      <div class="flex items-center gap-2">
+        <span class="material-symbols-outlined text-[15px]">signal_cellular_4_bar</span>
+        <span class="material-symbols-outlined text-[15px]">wifi</span>
+        <span class="material-symbols-outlined text-[15px]">battery_std</span>
+      </div>
+    </header>
+
+    <!-- Top App Bar (Material 3 Top App Bar: Back + Title + Done) -->
+    <nav class="h-14 px-2 flex items-center justify-between border-b border-outline-variant/40 bg-surface shrink-0 z-10" aria-label="Screen Navigation">
+      <div class="flex items-center gap-1">
+        <button class="touch-target flex items-center justify-center rounded-full text-neutral-300 hover:text-white hover:bg-surface-container-high transition-colors active:scale-95" aria-label="Navigate back">
+          <span class="material-symbols-outlined text-2xl">arrow_back</span>
+        </button>
+        <div class="flex flex-col">
+          <h1 class="text-base font-semibold text-white tracking-tight leading-tight">Unfinished work</h1>
+          <span class="text-[11px] font-normal text-neutral-400 flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-warning animate-pulse"></span>
+            3 interrupted jobs
+          </span>
+        </div>
+      </div>
+
+      <button class="h-9 px-3.5 mr-1 text-sm font-medium text-primary-text bg-primary-container/60 hover:bg-primary-container rounded-full flex items-center justify-center active:scale-95 transition-all" aria-label="Done, keep unfinished jobs">
+        Done
+      </button>
+    </nav>
+
+    <!-- Content Area: Explanatory Banner + Scrollable Task List -->
+    <div class="flex-1 overflow-y-auto px-4 py-3.5 space-y-3.5" tabindex="0">
+
+      <!-- Short Security/Recovery Explanation Banner -->
+      <section class="bg-surface-container-low rounded-2xl p-3.5 border border-outline-variant/50 flex gap-3 items-start" aria-label="Security and recovery explanation">
+        <div class="w-8 h-8 rounded-full bg-primary-container/80 text-primary flex items-center justify-center shrink-0 mt-0.5">
+          <span class="material-symbols-outlined text-[18px]">lock_clock</span>
+        </div>
+        <div class="space-y-1">
+          <p class="text-xs text-neutral-200 font-medium leading-relaxed">
+            Unlock the note to retry; passwords are never saved.
+          </p>
+          <p class="text-[11px] text-neutral-400 leading-normal">
+            An unexpected process shutdown interrupted active encryption. Interrupted files remain cached locally in memory sandbox until discarded.
+          </p>
+        </div>
+      </section>
+
+      <!-- Section Label -->
+      <div class="flex items-center justify-between px-1 pt-1">
+        <span class="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">Interrupted queue</span>
+        <span class="text-[11px] text-neutral-400 font-mono">Demo note</span>
+      </div>
+
+      <!-- Item 1: report.pdf (Locked Note Status -> Retry Disabled, Open note available) -->
+      <article class="bg-surface-container rounded-2xl p-3.5 border border-outline-variant/60 shadow-sm flex flex-col gap-3 transition-colors" aria-labelledby="item-1-title">
+        <!-- File Header Info -->
+        <div class="flex items-start justify-between gap-2.5">
+          <div class="flex items-start gap-2.5 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-red-950/70 border border-red-500/30 text-red-400 flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-xl">picture_as_pdf</span>
+            </div>
+            <div class="min-w-0 flex-1">
+              <h2 id="item-1-title" class="text-sm font-semibold text-white truncate leading-tight">report.pdf</h2>
+              <p class="text-[11px] text-neutral-400 mt-0.5">PDF · 2 MiB · Note: <span class="text-neutral-300 font-medium">Demo note</span></p>
+            </div>
+          </div>
+          <!-- Stage badge -->
+          <span class="px-2 py-0.5 rounded-md text-[10px] font-medium bg-amber-500/15 text-amber-300 border border-amber-500/30 whitespace-nowrap shrink-0">
+            Interrupted while encrypting
+          </span>
+        </div>
+
+        <!-- Status context (Note is locked) -->
+        <div class="bg-surface-container-high/70 rounded-xl px-3 py-2 flex items-center gap-2 border border-outline-variant/30">
+          <span class="material-symbols-outlined text-[16px] text-amber-400 shrink-0">lock</span>
+          <p class="text-xs text-neutral-300 leading-tight">
+            <strong class="font-medium text-amber-300">Note locked:</strong> Unlock Demo note with password to decrypt keystream.
+          </p>
+        </div>
+
+        <!-- Action Row (Open note, Retry [disabled], Discard) -->
+        <div class="pt-1 border-t border-outline-variant/30 flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-1.5">
+            <!-- Open note action -->
+            <button class="h-9 px-3 text-xs font-medium rounded-lg bg-surface-container-highest text-white hover:bg-surface-container-high flex items-center gap-1.5 active:scale-95 transition-all" aria-label="Open Demo note">
+              <span class="material-symbols-outlined text-[16px] text-primary">edit_note</span>
+              Open note
+            </button>
+
+            <!-- Retry action (DISABLED because note is locked) -->
+            <button disabled class="h-9 px-3 text-xs font-medium rounded-lg bg-neutral-800/60 text-neutral-500 border border-neutral-700/30 cursor-not-allowed flex items-center gap-1.5" aria-disabled="true" title="Unlock note first to retry">
+              <span class="material-symbols-outlined text-[16px]">replay</span>
+              Retry
+            </button>
+          </div>
+
+          <!-- Discard action -->
+          <button class="h-9 px-2.5 text-xs font-medium text-neutral-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-1 active:scale-95 transition-colors" aria-label="Discard report.pdf interrupted job">
+            <span class="material-symbols-outlined text-[16px]">delete_outline</span>
+            Discard
+          </button>
+        </div>
+      </article>
+
+      <!-- Item 2: Field recording.mp4 (Changed input status -> "Choose original file again") -->
+      <article class="bg-surface-container rounded-2xl p-3.5 border border-outline-variant/60 shadow-sm flex flex-col gap-3 transition-colors" aria-labelledby="item-2-title">
+        <!-- File Header Info -->
+        <div class="flex items-start justify-between gap-2.5">
+          <div class="flex items-start gap-2.5 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-purple-950/70 border border-purple-500/30 text-purple-400 flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-xl">videocam</span>
+            </div>
+            <div class="min-w-0 flex-1">
+              <h2 id="item-2-title" class="text-sm font-semibold text-white truncate leading-tight">Field recording.mp4</h2>
+              <p class="text-[11px] text-neutral-400 mt-0.5">Video · 245 MiB · Note: <span class="text-neutral-300 font-medium">Demo note</span></p>
+            </div>
+          </div>
+          <!-- Stage badge -->
+          <span class="px-2 py-0.5 rounded-md text-[10px] font-medium bg-amber-500/15 text-amber-300 border border-amber-500/30 whitespace-nowrap shrink-0">
+            Interrupted while encrypting
+          </span>
+        </div>
+
+        <!-- Status Context: Changed input prompt (Strict requirement: "Choose original file again instead of silently reading a different input") -->
+        <div class="bg-surface-container-high/70 rounded-xl px-3 py-2 flex items-start gap-2 border border-red-500/30 bg-red-950/20">
+          <span class="material-symbols-outlined text-[16px] text-red-400 shrink-0 mt-0.5">warning</span>
+          <div class="space-y-0.5">
+            <p class="text-xs text-neutral-200 leading-tight">
+              <strong class="font-medium text-red-300">File source modified or moved:</strong>
+            </p>
+            <p class="text-[11px] text-neutral-400 leading-snug">
+              Choose original file again instead of silently reading a different input.
+            </p>
+          </div>
+        </div>
+
+        <!-- Action Row -->
+        <div class="pt-1 border-t border-outline-variant/30 flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <button class="h-9 px-3 text-xs font-medium rounded-lg bg-surface-container-highest text-white hover:bg-surface-container-high flex items-center gap-1.5 active:scale-95 transition-all" aria-label="Open Demo note">
+              <span class="material-symbols-outlined text-[16px] text-primary">edit_note</span>
+              Open note
+            </button>
+
+            <!-- Explicit Choose File button matching requirement -->
+            <button class="h-9 px-3 text-xs font-medium rounded-lg bg-primary/20 text-primary-text border border-primary/40 hover:bg-primary/30 flex items-center gap-1.5 active:scale-95 transition-all" aria-label="Choose original file again">
+              <span class="material-symbols-outlined text-[16px]">file_open</span>
+              Choose original file again
+            </button>
+          </div>
+
+          <button class="h-9 px-2.5 text-xs font-medium text-neutral-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-1 active:scale-95 transition-colors" aria-label="Discard Field recording.mp4 interrupted job">
+            <span class="material-symbols-outlined text-[16px]">delete_outline</span>
+            Discard
+          </button>
+        </div>
+      </article>
+
+      <!-- Item 3: Project workbook.xlsx (Ready to finish -> Retry / Resume active) -->
+      <article class="bg-surface-container rounded-2xl p-3.5 border border-outline-variant/60 shadow-sm flex flex-col gap-3 transition-colors" aria-labelledby="item-3-title">
+        <!-- File Header Info -->
+        <div class="flex items-start justify-between gap-2.5">
+          <div class="flex items-start gap-2.5 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-emerald-950/70 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-xl">table_chart</span>
+            </div>
+            <div class="min-w-0 flex-1">
+              <h2 id="item-3-title" class="text-sm font-semibold text-white truncate leading-tight">Project workbook.xlsx</h2>
+              <p class="text-[11px] text-neutral-400 mt-0.5">Spreadsheet · 80 KiB · Note: <span class="text-neutral-300 font-medium">Demo note</span></p>
+            </div>
+          </div>
+          <!-- Stage badge -->
+          <span class="px-2 py-0.5 rounded-md text-[10px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 whitespace-nowrap shrink-0">
+            Ready to finish
+          </span>
+        </div>
+
+        <!-- Concise Status -->
+        <div class="bg-surface-container-high/70 rounded-xl px-3 py-2 flex items-center gap-2 border border-outline-variant/30">
+          <span class="material-symbols-outlined text-[16px] text-emerald-400 shrink-0">verified</span>
+          <p class="text-xs text-neutral-300 leading-tight">
+            Encrypted blocks validated. Ready to commit to vault.
+          </p>
+        </div>
+
+        <!-- Action Row (Open note, Retry/Resume active, Discard) -->
+        <div class="pt-1 border-t border-outline-variant/30 flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-1.5">
+            <button class="h-9 px-3 text-xs font-medium rounded-lg bg-surface-container-highest text-white hover:bg-surface-container-high flex items-center gap-1.5 active:scale-95 transition-all" aria-label="Open Demo note">
+              <span class="material-symbols-outlined text-[16px] text-primary">edit_note</span>
+              Open note
+            </button>
+
+            <!-- Active Retry button -->
+            <button class="h-9 px-3 text-xs font-medium rounded-lg bg-primary text-on-surface font-semibold hover:bg-primary/90 flex items-center gap-1.5 active:scale-95 transition-all" aria-label="Retry finishing attachment">
+              <span class="material-symbols-outlined text-[16px]">replay</span>
+              Finish commit
+            </button>
+          </div>
+
+          <button class="h-9 px-2.5 text-xs font-medium text-neutral-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-1 active:scale-95 transition-colors" aria-label="Discard Project workbook.xlsx interrupted job">
+            <span class="material-symbols-outlined text-[16px]">delete_outline</span>
+            Discard
+          </button>
+        </div>
+      </article>
+
+      <!-- Safeguard Policy Micro-callout -->
+      <footer class="pt-2 pb-6 px-1 text-center" aria-label="Safeguard policy notes">
+        <p class="text-[11px] text-neutral-400 leading-relaxed">
+          <span class="material-symbols-outlined text-[13px] text-neutral-400 align-text-bottom">verified_user</span>
+          Discarding removes only the selected interrupted attachment job. The note <span class="text-neutral-300 font-medium">Demo note</span> and all other verified contents remain untouched.
+        </p>
+      </footer>
+    </div>
+
+    <!-- Android Bottom Navigation / Gesture Pill -->
+    <div class="h-6 w-full flex items-center justify-center shrink-0 bg-surface z-10">
+      <div class="w-32 h-1 bg-neutral-600 rounded-full"></div>
+    </div>
+
+  </main>
+
+</body>
+</html>

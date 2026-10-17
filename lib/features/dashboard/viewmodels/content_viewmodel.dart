@@ -47,6 +47,8 @@ import '../models/attachment_job.dart';
 import '../../../core/storage/library_watch.dart';
 import '../../../core/storage/attachment_open_cache.dart';
 import '../../../core/platform/windows_desktop_actions.dart';
+import '../../../core/platform/mobile_export.dart';
+import '../../../core/platform/attachment_batch_export.dart';
 import '../../../core/storage/owned_settings_persistence.dart';
 import 'package:path/path.dart' as p;
 
@@ -221,7 +223,7 @@ class ContentViewModel extends BaseViewModel {
   Timer? _debounceTimer; // For file watching
   Timer? _searchDebounceTimer;
   StreamSubscription? _fileWatcherSubscription;
-  final BackgroundService? _backgroundService;
+  final LibraryDiscovery? _backgroundService;
   StreamSubscription? _backgroundFilesSubscription;
   StreamSubscription? _backgroundErrorsSubscription;
   StreamSubscription? _documentSubscription;
@@ -310,6 +312,10 @@ class ContentViewModel extends BaseViewModel {
         sourcePreparer:
             (_fileService as TransactionalNoteFiles).attachmentSource,
         performance: () => _settings.attachmentPerformance,
+        sourceValidator: _fileService is AttachmentSourceSession
+            ? (_fileService as AttachmentSourceSession)
+                  .isAttachmentSourceCurrent
+            : null,
       );
     }
     try {
@@ -471,7 +477,18 @@ class ContentViewModel extends BaseViewModel {
         await image.evict();
         await ResizeImage(image, width: 120, height: 120).evict();
       }
+      if (_desktopActions is RevocableAttachmentActions) {
+        await (_desktopActions as RevocableAttachmentActions).revokeFiles(
+          (_attachmentOpenCache?.filesForNote(reference) ?? [])
+              .map((e) => e.path)
+              .toList(),
+        );
+      }
       await _attachmentOpenCache?.invalidateNote(reference);
+      if (_fileService is AttachmentSourceSession) {
+        await (_fileService as AttachmentSourceSession)
+            .releaseAttachmentSources(reference);
+      }
       if (!_disposed) attachmentCacheNotifier.value++;
     } finally {
       _revokingAttachmentAccess = false;
@@ -494,6 +511,8 @@ class ContentViewModel extends BaseViewModel {
   final Set<String> _cancelledAttachmentJobs = {};
   final Set<Future<void>> _activeOwnedJobs = {};
   final Set<AttachmentJobState> _ownedJobStates = {};
+  final _jobRecovery = <String, Map<String, Object?>>{};
+  Map<String, Object?>? attachmentJobRecovery(String id) => _jobRecovery[id];
   final Set<AttachmentJobState> _retiredJobStates = {};
   bool _jobRetirementScheduled = false;
 
@@ -702,6 +721,7 @@ class ContentViewModel extends BaseViewModel {
   bool _isHtmlMode = false;
   bool get isHtmlMode => _isHtmlMode;
 
+  final _nativeDropOwner = const Uuid().v4();
   bool _dropBatchActive = false;
   bool get canAcceptAttachmentDrop =>
       _usesOwnedMutations &&
@@ -812,6 +832,218 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
+  String? get mobileDropTarget => canAcceptAttachmentDrop
+      ? '$_nativeDropOwner:${_session.generation}:${_session.credentialGeneration}:${_noteReference?.binding.root ?? "new"}'
+      : null;
+
+  Future<OperationResult<void>> attachNativeDroppedSources(
+    List<Map<Object?, Object?>> sources,
+    String target,
+  ) async {
+    final files = _fileService;
+    final adopted = <PlatformFile>[];
+    if (files is! NativeDropSourceOwner || files is! PickedSourceOwner)
+      return _cancelledResult();
+    try {
+      for (final source in sources) {
+        adopted.add(
+          (files as NativeDropSourceOwner).adoptDroppedSource(source),
+        );
+      }
+      if (target != mobileDropTarget || !canAcceptAttachmentDrop)
+        return _cancelledResult();
+      final owner = _session.generation;
+      final credential = _session.credentialGeneration;
+      bool owns() =>
+          !_disposed &&
+          owner == _session.generation &&
+          credential == _session.credentialGeneration &&
+          !_isLocked &&
+          _session.canWrite &&
+          !_librarySwitching;
+      if (adopted.any(
+        (f) => f.path == null || f.size > 10 * 1024 * 1024 * 1024,
+      ))
+        return const OperationResult.failure(
+          OperationOutcome.rejectedInput,
+          'Attach regular files up to 10 GiB each.',
+        );
+      if (!_session.isPersisted) {
+        final decision = await _askDraftDecision(
+          const DraftDecisionRequest(
+            DraftDecisionKind.firstAttachment,
+            DraftTransition.navigation,
+          ),
+        );
+        if (!owns() || decision != DraftDecision.save)
+          return _cancelledResult();
+        final saved = await saveNote(allowEmptyFirstSave: true);
+        if (!saved.isSuccess) return saved;
+      }
+      if (!owns()) return _cancelledResult();
+      for (final file in adopted.toList()) {
+        if (!owns()) break;
+        final pending = addOwnedAttachment(file.path!, file.name);
+        adopted.remove(file);
+        unawaited(
+          pending
+              .then(_reportResult)
+              .whenComplete(
+                () => (files as PickedSourceOwner).releasePickedSource(
+                  file.path!,
+                ),
+              ),
+        );
+      }
+      return const OperationResult.success();
+    } finally {
+      for (final file in adopted) {
+        await (files as PickedSourceOwner).releasePickedSource(file.path!);
+      }
+    }
+  }
+
+  bool interruptedJobBelongs(Map<String, dynamic> record) {
+    final recovery = record['recovery'];
+    return recovery is Map &&
+        recovery['library'] == _noteReference?.binding.root;
+  }
+
+  Future<bool> interruptedJobInLibrary(Map<String, dynamic> record) async {
+    final recovery = record['recovery'];
+    return recovery is Map &&
+        recovery['library'] == await _fileService.getUserDataPath();
+  }
+
+  bool canRetryInterrupted(Map<String, dynamic> record) {
+    final recovery = record['recovery'];
+    return record['operation'] == 'add' &&
+        recovery is Map &&
+        interruptedJobBelongs(record) &&
+        recovery['target'] == _currentFileName &&
+        !_isLocked &&
+        _session.canWrite &&
+        _session.isPersisted &&
+        !attachmentJobsNotifier.value.any(
+          (job) =>
+              job.progress.value.id == record['id'] &&
+              job.progress.value.active,
+        );
+  }
+
+  Future<OperationResult<void>> openInterruptedNote(
+    Map<String, dynamic> record,
+  ) async {
+    if (!await interruptedJobInLibrary(record))
+      return const OperationResult.failure(
+        OperationOutcome.conflict,
+        'Select the original library first.',
+      );
+    final recovery = Map<String, dynamic>.from(record['recovery'] as Map);
+    final target = recovery['target'];
+    if (target is! String)
+      return const OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        'This operation has no captured note.',
+      );
+    return loadNote(target);
+  }
+
+  Future<OperationResult<void>> retryInterruptedAttachment(
+    Map<String, dynamic> record,
+  ) async {
+    if (!canRetryInterrupted(record) || _fileService is! PickedSourceRecovery)
+      return const OperationResult.failure(
+        OperationOutcome.conflict,
+        'Open and unlock the original note before retrying.',
+      );
+    final recovery = Map<String, dynamic>.from(record['recovery'] as Map);
+    final id = recovery['attachment'];
+    if (id is! String || !RegExp(r'^[a-f0-9-]{36}$').hasMatch(id))
+      return const OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        'The interrupted attachment identity is unavailable.',
+      );
+    // A killed process may already have published the acknowledged generation.
+    if (_attachments.any((a) => a.id == id)) {
+      await discardInterruptedSource(record);
+      return const OperationResult.success();
+    }
+    final owner = _session.generation;
+    final credential = _session.credentialGeneration;
+    PlatformFile? source;
+    try {
+      try {
+        if (recovery['input'] is Map)
+          source = await (_fileService as PickedSourceRecovery)
+              .reopenPickedSource(
+                Map<String, Object?>.from(recovery['input'] as Map),
+              );
+      } catch (_) {
+        /* Transient drop grants require explicit reselection. */
+      }
+      source ??= (await _fileService.pickFile())?.files.single;
+      if (source == null) return _cancelledResult();
+      if (_disposed ||
+          owner != _session.generation ||
+          credential != _session.credentialGeneration ||
+          _isLocked)
+        return _cancelledResult();
+      if (source.size != recovery['length'])
+        return const OperationResult.failure(
+          OperationOutcome.conflict,
+          'The input length changed. The interrupted record was retained.',
+        );
+      if (_fileService is InterruptedStagingOwner &&
+          recovery['staging'] is String) {
+        await (_fileService as InterruptedStagingOwner)
+            .discardInterruptedStaging(recovery['staging'] as String, id);
+      }
+      if (_disposed ||
+          owner != _session.generation ||
+          credential != _session.credentialGeneration ||
+          _isLocked)
+        return _cancelledResult();
+      return await addOwnedAttachment(
+        source.path!,
+        recovery['fileName'] as String? ?? source.name,
+        expectedHash: recovery['plaintextHash'] as String?,
+        expectedModified: recovery['modified'] as int?,
+        recoveryAttachmentId: id,
+      );
+    } catch (_) {
+      return const OperationResult.failure(
+        OperationOutcome.ioFailure,
+        'The original input is unavailable or changed. Its recovery record was retained.',
+      );
+    } finally {
+      if (source?.path != null)
+        await (_fileService as PickedSourceOwner).releasePickedSource(
+          source!.path!,
+        );
+    }
+  }
+
+  Future<void> discardInterruptedSource(Map<String, dynamic> record) async {
+    final recovery = record['recovery'];
+    if (_fileService is InterruptedStagingOwner &&
+        recovery is Map &&
+        recovery['staging'] is String &&
+        recovery['attachment'] is String) {
+      await (_fileService as InterruptedStagingOwner).discardInterruptedStaging(
+        recovery['staging'] as String,
+        recovery['attachment'] as String,
+      );
+    }
+    if (_fileService is PickedSourceRecovery &&
+        recovery is Map &&
+        recovery['input'] is Map) {
+      await (_fileService as PickedSourceRecovery).forgetPickedSource(
+        Map<String, Object?>.from(recovery['input'] as Map),
+      );
+    }
+  }
+
   Future<void> pickAttachment() async {
     if (_dropBatchActive) return;
     if (_usesOwnedMutations) {
@@ -847,12 +1079,30 @@ class ContentViewModel extends BaseViewModel {
       if (!(await saveNote(allowEmptyFirstSave: true)).isSuccess) return;
     }
     final selection = await _fileService.pickFile();
-    if (_disposed || owner != _session.generation || selection == null) return;
+    if (selection == null) return;
+    if (_disposed || owner != _session.generation) {
+      if (_fileService is PickedSourceOwner) {
+        for (final source in selection.files) {
+          if (source.path != null)
+            await (_fileService as PickedSourceOwner).releasePickedSource(
+              source.path!,
+            );
+        }
+      }
+      return;
+    }
     final selected = selection.files.single;
     final path = selected.path;
     if (path == null) return;
     // Allow another selection immediately while admitted files prepare.
-    unawaited(addOwnedAttachment(path, selected.name).then(_reportResult));
+    unawaited(
+      addOwnedAttachment(path, selected.name).then(_reportResult).whenComplete(
+        () async {
+          if (_fileService is PickedSourceOwner)
+            await (_fileService as PickedSourceOwner).releasePickedSource(path);
+        },
+      ),
+    );
   }
 
   AttachmentJobState _newAttachmentJob(
@@ -870,9 +1120,19 @@ class ContentViewModel extends BaseViewModel {
         phase: AttachmentJobPhase.queued,
         batch: batch,
         originalAttachmentId: originalAttachmentId,
-        operation: batch ? AttachmentJobOperation.protection : operation,
+        operation: batch && operation == AttachmentJobOperation.add
+            ? AttachmentJobOperation.protection
+            : operation,
       ),
     );
+    if (_noteReference case final reference?) {
+      _jobRecovery[id] = {
+        'version': 1,
+        'target': reference.fileName,
+        'library': reference.binding.root,
+        'fileName': fileName,
+      };
+    }
     _ownedJobStates.add(job);
     attachmentJobsNotifier.value = [...attachmentJobsNotifier.value, job];
     _retireTerminalOpenJobs();
@@ -994,10 +1254,25 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<void> retryAttachmentJob(String id) async {
-    final retry = _attachmentRetries.remove(id);
+    final retry = _attachmentRetries[id];
     if (retry == null) return;
-    removePendingAttachmentJob(id);
-    await retry();
+    final state = attachmentJobsNotifier.value
+        .where((j) => j.progress.value.id == id)
+        .firstOrNull
+        ?.progress
+        .value;
+    if (_isLocked || state?.owner != _session.generation) return;
+    try {
+      await retry();
+      removePendingAttachmentJob(id);
+    } catch (_) {
+      _reportResult(
+        const OperationResult.failure(
+          OperationOutcome.ioFailure,
+          'The original input is unavailable. Select the file again; the note was retained.',
+        ),
+      );
+    }
   }
 
   void removePendingAttachmentJob(String id) {
@@ -1098,13 +1373,27 @@ class ContentViewModel extends BaseViewModel {
 
   Future<OperationResult<void>> addOwnedAttachment(
     String path,
-    String fileName,
-  ) => _trackOwnedJob(_runOwnedAttachment(path, fileName));
+    String fileName, {
+    String? expectedHash,
+    int? expectedModified,
+    String? recoveryAttachmentId,
+  }) => _trackOwnedJob(
+    _runOwnedAttachment(
+      path,
+      fileName,
+      expectedHash: expectedHash,
+      expectedModified: expectedModified,
+      recoveryAttachmentId: recoveryAttachmentId,
+    ),
+  );
 
   Future<OperationResult<void>> _runOwnedAttachment(
     String path,
-    String fileName,
-  ) async {
+    String fileName, {
+    String? expectedHash,
+    int? expectedModified,
+    String? recoveryAttachmentId,
+  }) async {
     if (!_usesOwnedMutations ||
         _disposed ||
         !_session.canWrite ||
@@ -1120,11 +1409,28 @@ class ContentViewModel extends BaseViewModel {
         'Save the note and finish its active operation first.',
       );
     }
+    if (recoveryAttachmentId != null) {
+      if (attachmentJobsNotifier.value.any(
+        (job) =>
+            job.progress.value.id == recoveryAttachmentId &&
+            job.progress.value.active,
+      ))
+        return const OperationResult.failure(
+          OperationOutcome.conflict,
+          'This attachment is already being retried.',
+        );
+      removePendingAttachmentJob(recoveryAttachmentId);
+      _cancelledAttachmentJobs.remove(recoveryAttachmentId);
+    }
     _attachmentAdds++;
     final owner = _session.generation;
     final credential = _session.credentialGeneration;
     final password = _currentPassword;
-    final id = const Uuid().v4();
+    final id = recoveryAttachmentId ?? const Uuid().v4();
+    if (_attachments.any((a) => a.id == id)) {
+      _attachmentAdds--;
+      return const OperationResult.success();
+    }
     final job = _newAttachmentJob(id, fileName);
     final completed = Completer<void>();
     _attachmentAddCompletions[id] = completed;
@@ -1133,12 +1439,38 @@ class ContentViewModel extends BaseViewModel {
     Directory? operation;
     OperationResult<void> result;
     try {
-      final source = StreamingFileSource(path, await File(path).length());
+      final sourceStat = await File(path).stat();
+      if (_fileService is AttachmentStagingCapacity)
+        await (_fileService as AttachmentStagingCapacity).checkStagingCapacity(
+          sourceStat.size,
+        );
+      final source = StreamingFileSource(
+        path,
+        sourceStat.size,
+        sha256Hex: expectedHash,
+        modifiedMicros: expectedModified,
+      );
+      _jobRecovery[id] = {
+        'version': 1,
+        'fileName': fileName,
+        'state': 'retryFromSource',
+        'target': reference.fileName,
+        'library': reference.binding.root,
+        'attachment': id,
+        'length': sourceStat.size,
+        'modified': sourceStat.modified.microsecondsSinceEpoch,
+        'passwordRequired': password != null,
+        if (_fileService is PickedSourceRecovery)
+          'input': (_fileService as PickedSourceRecovery).pickedSourceIdentity(
+            path,
+          ),
+      };
       if (_cancelledAttachmentJobs.contains(id) ||
           owner != _session.generation) {
         throw const FileJobCancelled();
       }
       operation = await files.createOperationDirectory(reference);
+      _jobRecovery[id]!['staging'] = p.basename(operation.path);
       final staged = p.join(operation.path, '$id.med');
       final transformed = await _transformAttachment(
         job,
@@ -1153,6 +1485,7 @@ class ContentViewModel extends BaseViewModel {
           transformed.message,
         );
       } else {
+        _jobRecovery[id]!['plaintextHash'] = transformed.value!.plaintextHash;
         result = await _mutate(() async {
           if (_disposed ||
               owner != _session.generation ||
@@ -1222,8 +1555,42 @@ class ContentViewModel extends BaseViewModel {
     );
     if (!result.isSuccess && result.outcome != OperationOutcome.cancelled) {
       _attachmentRetries[id] = () async {
-        _reportResult(await addOwnedAttachment(path, fileName));
+        final recovery = _jobRecovery[id];
+        final input = recovery?['input'];
+        if (_fileService is PickedSourceRecovery && input is Map) {
+          final source = await (_fileService as PickedSourceRecovery)
+              .reopenPickedSource(Map<String, Object?>.from(input));
+          try {
+            if (source.size != recovery!['length'])
+              throw const FormatException('Input length changed.');
+            _reportResult(
+              await addOwnedAttachment(
+                source.path!,
+                fileName,
+                expectedHash: recovery['plaintextHash'] as String?,
+                expectedModified: recovery['modified'] as int?,
+              ),
+            );
+          } finally {
+            await (_fileService as PickedSourceOwner).releasePickedSource(
+              source.path!,
+            );
+          }
+        } else {
+          _reportResult(await addOwnedAttachment(path, fileName));
+        }
       };
+    }
+    if ((result.isSuccess || result.outcome == OperationOutcome.cancelled) &&
+        _fileService is PickedSourceRecovery &&
+        _jobRecovery[id]?['input'] is Map) {
+      try {
+        await (_fileService as PickedSourceRecovery).forgetPickedSource(
+          Map<String, Object?>.from(_jobRecovery[id]!['input'] as Map),
+        );
+      } catch (_) {
+        /* A retained read grant can be revoked later. */
+      }
     }
     _attachmentAddCompletions.remove(id);
     completed.complete();
@@ -1597,46 +1964,174 @@ class ContentViewModel extends BaseViewModel {
     return _libraryTask(() => _exportAttachment(attachment), null);
   }
 
-  Future<OperationResult<void>> _exportOwnedAttachment(
-    AttachmentModel attachment,
+  Future<OperationResult<void>> exportAttachments(
+    Iterable<String> ids, {
+    required AttachmentBatchExport output,
+  }) => _trackOwnedJob(_exportOwnedAttachments(ids.toSet(), output));
+
+  Future<OperationResult<void>> _exportOwnedAttachments(
+    Set<String> ids,
+    AttachmentBatchExport output,
   ) async {
+    if (!_usesOwnedMutations || ids.isEmpty) return _cancelledResult();
     final ready = await _resolveOwnerJobs(DraftTransition.navigation);
     if (!ready.isSuccess) return ready;
-    if (_bulkAttachmentJob ||
+    if (_disposed ||
+        _isLocked ||
+        _noteReference == null ||
+        _deleting ||
+        _bulkAttachmentJob ||
+        !ids.every((id) => _attachments.any((a) => a.id == id)))
+      return _cancelledResult();
+    final owner = _session.generation;
+    final credentials = _session.credentialGeneration;
+    final path = currentContentPath;
+    final selected = _attachments.where((a) => ids.contains(a.id)).toList();
+    _bulkAttachmentJob = true;
+    final job = _newAttachmentJob(
+      const Uuid().v4(),
+      '${selected.length} attachments',
+      batch: true,
+      operation: AttachmentJobOperation.export,
+    );
+    final allocated = <String>[];
+    OperationResult<void> result = _cancelledResult();
+    bool current() =>
+        !_disposed &&
+        !_isLocked &&
+        owner == _session.generation &&
+        credentials == _session.credentialGeneration &&
+        path == currentContentPath &&
+        !_cancelledAttachmentJobs.contains(job.progress.value.id);
+    try {
+      result = const OperationResult.success();
+      for (var i = 0; i < selected.length; i++) {
+        if (!current()) {
+          result = _cancelledResult();
+          break;
+        }
+        result = await _exportOwnedAttachment(
+          selected[i],
+          batchJob: job,
+          batchOutput: output,
+          allocated: allocated,
+          batchDetail:
+              'File ${i + 1} of ${selected.length} · ${selected[i].fileName}',
+        );
+        if (!result.isSuccess) break;
+      }
+      if (result.isSuccess) {
+        if (!current() || !_tryBeginFinalization([job])) {
+          result = _cancelledResult();
+        } else {
+          final accepted = await output.publish(List.unmodifiable(allocated));
+          result = accepted
+              ? const OperationResult.success()
+              : _cancelledResult();
+        }
+      }
+    } catch (_) {
+      result = const OperationResult.failure(
+        OperationOutcome.ioFailure,
+        'Selected attachments could not be exported. The originals were retained.',
+      );
+    } finally {
+      try {
+        await output.cleanup(allocated);
+      } catch (_) {
+        result = const OperationResult.failure(
+          OperationOutcome.ioFailure,
+          'Export temporary-file cleanup needs retry. The originals were retained.',
+        );
+      }
+      _bulkAttachmentJob = false;
+      _exportReadCancellations.remove(job.progress.value.id);
+    }
+    _jobPhase(
+      job,
+      result.isSuccess
+          ? AttachmentJobPhase.completed
+          : result.outcome == OperationOutcome.cancelled
+          ? AttachmentJobPhase.cancelled
+          : AttachmentJobPhase.failed,
+      error: result.message,
+    );
+    return _reportResult(result);
+  }
+
+  Future<OperationResult<void>> _exportOwnedAttachment(
+    AttachmentModel attachment, {
+    AttachmentJobState? batchJob,
+    AttachmentBatchExport? batchOutput,
+    List<String>? allocated,
+    String? batchDetail,
+  }) async {
+    if (batchJob == null) {
+      final ready = await _resolveOwnerJobs(DraftTransition.navigation);
+      if (!ready.isSuccess) return ready;
+    }
+    if ((batchJob == null && _bulkAttachmentJob) ||
         _disposed ||
         _isLocked ||
         _noteReference == null ||
         _deleting) {
       return _cancelledResult();
     }
-    _bulkAttachmentJob = true;
-    final job = _newAttachmentJob(
-      const Uuid().v4(),
-      attachment.fileName,
-      operation: AttachmentJobOperation.export,
-    );
+    if (batchJob == null) _bulkAttachmentJob = true;
+    final job =
+        batchJob ??
+        _newAttachmentJob(
+          const Uuid().v4(),
+          attachment.fileName,
+          operation: AttachmentJobOperation.export,
+        );
     final files = _fileService as TransactionalNoteFiles;
+    final readCancellation = _exportReadCancellations.putIfAbsent(
+      job.progress.value.id,
+      FileReadCancellation.new,
+    );
+    final mobile = Platform.isAndroid || Platform.isIOS;
+    final checks = _settings.attachmentPerformance.exportChecks(mobile: mobile);
     String? candidate;
     OperationResult<void> result;
     try {
       final source = await files.attachmentSource(
         _noteReference!,
         attachment.id,
+        cancellation: readCancellation,
+        verifyContent: checks.checkSource,
+        onProgress: (phase, bytes, total) => _jobPhase(
+          job,
+          AttachmentJobPhase.preparing,
+          bytes: bytes,
+          total: total,
+          detail: batchDetail,
+        ),
       );
-      final destination = await FilePicker.platform.saveFile(
-        dialogTitle: 'Save Attachment',
-        fileName: attachment.fileName,
-      );
+      final destination = batchOutput != null
+          ? await batchOutput.destination(attachment.fileName)
+          : Platform.isAndroid || Platform.isIOS
+          ? await MobileExport.destination(attachment.fileName)
+          : await FilePicker.platform.saveFile(
+              dialogTitle: 'Save Attachment',
+              fileName: attachment.fileName,
+            );
       if (destination == null) {
         result = const OperationResult.failure(
           OperationOutcome.cancelled,
           'Export cancelled.',
         );
       } else {
+        allocated?.add(destination);
         await _verifyExportDestination(destination);
         final expected = await ExternalFileExport.review(destination);
         candidate = ExternalFileExport.candidatePath(destination);
         final id = job.progress.value.id;
+        if (_cancelledAttachmentJobs.contains(id) ||
+            readCancellation.cancelled ||
+            _disposed ||
+            _isLocked)
+          throw const FileJobCancelled();
         final transform = _attachmentWorker.submit(
           FileTransformRequest(
             source: source,
@@ -1644,6 +2139,11 @@ class ContentViewModel extends BaseViewModel {
             decryptSource: true,
             encryptDestination: false,
             sourcePassword: _currentPassword,
+            verifyOutput: checks.verifyOutput,
+            requireWholeSource: mobile,
+            expectedPlaintextBytes: mobile && attachment.size > 0
+                ? attachment.size
+                : null,
           ),
           onProgress: (phase, bytes, total) => _jobPhase(
             job,
@@ -1652,6 +2152,7 @@ class ContentViewModel extends BaseViewModel {
                 : AttachmentJobPhase.decrypting,
             bytes: bytes,
             total: total,
+            detail: batchDetail,
           ),
         );
         _attachmentTransforms[id] = transform;
@@ -1668,6 +2169,11 @@ class ContentViewModel extends BaseViewModel {
               destination: candidate,
               decryptSource: true,
               encryptDestination: false,
+              verifyOutput: checks.verifyOutput,
+              requireWholeSource: mobile,
+              expectedPlaintextBytes: mobile && attachment.size > 0
+                  ? attachment.size
+                  : null,
             ),
             onProgress: (phase, bytes, total) => _jobPhase(
               job,
@@ -1676,6 +2182,7 @@ class ContentViewModel extends BaseViewModel {
                   : AttachmentJobPhase.decrypting,
               bytes: bytes,
               total: total,
+              detail: batchDetail,
             ),
           );
           _attachmentTransforms[id] = fallback;
@@ -1689,7 +2196,7 @@ class ContentViewModel extends BaseViewModel {
           );
         } else if (_cancelledAttachmentJobs.contains(id)) {
           result = _cancelledResult();
-        } else if (!_tryBeginFinalization([job])) {
+        } else if (batchJob == null && !_tryBeginFinalization([job])) {
           result = _cancelledResult();
         } else {
           result = await ExternalFileExport.publish(
@@ -1697,13 +2204,23 @@ class ContentViewModel extends BaseViewModel {
             destination: destination,
             expected: expected,
           );
+          if (batchJob == null &&
+              result.isSuccess &&
+              (Platform.isAndroid || Platform.isIOS))
+            await MobileExport.share(destination);
         }
       }
+    } on FileJobCancelled {
+      result = _cancelledResult();
     } catch (_) {
-      result = const OperationResult.failure(
-        OperationOutcome.ioFailure,
-        'Attachment export failed; the source was retained.',
-      );
+      result =
+          readCancellation.cancelled ||
+              _cancelledAttachmentJobs.contains(job.progress.value.id)
+          ? _cancelledResult()
+          : const OperationResult.failure(
+              OperationOutcome.ioFailure,
+              'Attachment export failed; the source was retained.',
+            );
     } finally {
       if (candidate != null && await File(candidate).exists()) {
         try {
@@ -1712,17 +2229,21 @@ class ContentViewModel extends BaseViewModel {
           /* Retain owned export candidate. */
         }
       }
-      _bulkAttachmentJob = false;
+      if (batchJob == null) {
+        _bulkAttachmentJob = false;
+        _exportReadCancellations.remove(job.progress.value.id);
+      }
     }
-    _jobPhase(
-      job,
-      result.isSuccess
-          ? AttachmentJobPhase.completed
-          : result.outcome == OperationOutcome.cancelled
-          ? AttachmentJobPhase.cancelled
-          : AttachmentJobPhase.failed,
-      error: result.message,
-    );
+    if (batchJob == null)
+      _jobPhase(
+        job,
+        result.isSuccess
+            ? AttachmentJobPhase.completed
+            : result.outcome == OperationOutcome.cancelled
+            ? AttachmentJobPhase.cancelled
+            : AttachmentJobPhase.failed,
+        error: result.message,
+      );
     return result;
   }
 
@@ -1784,6 +2305,14 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<OperationResult<void>> removeAttachment(String attachmentId) {
+    return removeAttachments([attachmentId]);
+  }
+
+  Future<OperationResult<void>> removeAttachments(
+    Iterable<String> attachmentIds,
+  ) {
+    final ids = attachmentIds.toSet();
+    if (ids.isEmpty) return Future.value(_cancelledResult());
     if (_usesOwnedMutations) {
       if (_disposed ||
           !_session.canWrite ||
@@ -1799,11 +2328,13 @@ class ContentViewModel extends BaseViewModel {
               generation != _session.generation ||
               !_session.canWrite ||
               _isLocked ||
-              !_attachments.any((a) => a.id == attachmentId))
+              hasAttachmentJobs ||
+              _deleting ||
+              !ids.every((id) => _attachments.any((a) => a.id == id)))
             return _cancelledResult();
           final result = await _saveSnapshot(
             _generationSnapshot(
-              _attachments.where((a) => a.id != attachmentId).toList(),
+              _attachments.where((a) => !ids.contains(a.id)).toList(),
               _currentPassword,
               changesProtection: false,
             ),
@@ -1820,11 +2351,13 @@ class ContentViewModel extends BaseViewModel {
         _disposed ||
         !_session.canWrite ||
         _isLocked ||
-        !_attachments.any((a) => a.id == attachmentId))
+        !ids.every((id) => _attachments.any((a) => a.id == id)))
       return Future.value(_cancelledResult());
-    _attachments.removeWhere((a) => a.id == attachmentId);
+    _attachments.removeWhere((a) => ids.contains(a.id));
     attachmentsNotifier.value = List.from(_attachments);
-    _attachmentCache.remove(attachmentId);
+    for (final id in ids) {
+      _attachmentCache.remove(id);
+    }
     // notifyListeners();
     _recordEdit(DraftField.attachments);
     return Future.value(const OperationResult.success());
@@ -1838,7 +2371,7 @@ class ContentViewModel extends BaseViewModel {
     bool startBackgroundServices = true,
     int Function()? nowMilliseconds,
     DraftDecisionHandler? onDraftDecision,
-    BackgroundService? backgroundService,
+    LibraryDiscovery? backgroundService,
     RecentFileFilter? filterRecentFiles,
     Future<List<dynamic>> Function(String)? htmlToDelta,
     Future<String> Function(List<dynamic>)? deltaToHtml,
@@ -4278,6 +4811,18 @@ class ContentViewModel extends BaseViewModel {
   // endregion
 
   // region Import & Export
+  Future<void> releaseImportSelection(PlatformFile file) async {
+    if (_fileService is! PickedSourceOwner || file.path == null) return;
+    final identity = _fileService is PickedSourceRecovery
+        ? (_fileService as PickedSourceRecovery).pickedSourceIdentity(
+            file.path!,
+          )
+        : null;
+    await (_fileService as PickedSourceOwner).releasePickedSource(file.path!);
+    if (identity != null)
+      await (_fileService as PickedSourceRecovery).forgetPickedSource(identity);
+  }
+
   Future<PlatformFile?> pickImportFile() async {
     final result = await _fileService.pickFile(
       allowedExtensions: ['txt', 'enc'],
@@ -4683,12 +5228,16 @@ class ContentViewModel extends BaseViewModel {
           detail: 'Choose export destination',
         );
       }
-      destination ??= await FilePicker.platform.saveFile(
-        dialogTitle: 'Save Note Package',
-        fileName: 'note.$extension',
-        type: FileType.custom,
-        allowedExtensions: [extension],
-      );
+      final mobileDestination =
+          destination == null && (Platform.isAndroid || Platform.isIOS);
+      destination ??= mobileDestination
+          ? await MobileExport.destination('note.$extension')
+          : await FilePicker.platform.saveFile(
+              dialogTitle: 'Save Note Package',
+              fileName: 'note.$extension',
+              type: FileType.custom,
+              allowedExtensions: [extension],
+            );
       checkCancellation();
       if (destination == null) {
         result = const OperationResult.failure(
@@ -4740,6 +5289,8 @@ class ContentViewModel extends BaseViewModel {
               destination: destination,
               expected: expected,
             );
+            if (result.isSuccess && mobileDestination)
+              await MobileExport.share(destination);
           }
         }
       }
@@ -4944,7 +5495,11 @@ class ContentViewModel extends BaseViewModel {
       }
       _jobPhase(job, AttachmentJobPhase.preparing);
       FilePackResult imported;
-      final extension = p.extension(source).toLowerCase();
+      final sourceName = _fileService is PickedSourceOwner
+          ? (_fileService as PickedSourceOwner).sourceDisplayName(source) ??
+                source
+          : source;
+      final extension = p.extension(sourceName).toLowerCase();
       if (plainText || extension == '.enc') {
         if (await File(source).length() > StreamingPackService.metadataLimit) {
           throw const FormatException('Imported note metadata exceeds limit.');
@@ -4955,7 +5510,7 @@ class ContentViewModel extends BaseViewModel {
           decoded = NoteCodec.decodeMetadata(
             jsonEncode({
               'id': const Uuid().v4(),
-              'title': p.basenameWithoutExtension(source),
+              'title': p.basenameWithoutExtension(sourceName),
               'content': jsonEncode([
                 {'insert': text.endsWith('\n') ? text : '$text\n'},
               ]),
@@ -5264,6 +5819,11 @@ class ContentViewModel extends BaseViewModel {
       );
     } finally {
       _packageCancellationFiles.remove(jobId);
+      if (_fileService is PickedSourceOwner) {
+        try {
+          await (_fileService as PickedSourceOwner).releasePickedSource(source);
+        } catch (_) {}
+      }
       if (operation != null) {
         try {
           await files.removeOperationDirectory(operation);
@@ -5580,9 +6140,194 @@ class ContentViewModel extends BaseViewModel {
     notifyListeners();
   }
 
+  /// Private recovery captures are separate from Save and never create a note.
+  /// Passwords remain in memory; protected recovery bodies are password-wrapped
+  /// before entering the platform-authenticated recovery journal.
+  Future<Map<String, dynamic>?> capturePrivateRecoveryDraft() async {
+    _observeRichEdit();
+    if (_disposed || _isLocked || !_session.isDirty || !_session.canWrite)
+      return null;
+    final generation = _session.generation;
+    final revision = _session.editRevision;
+    final credential = _session.credentialGeneration;
+    var body =
+        !_session.dirtyFields.contains(DraftField.body) &&
+            _retainedPlainBody != null
+        ? _retainedPlainBody!
+        : _isHtmlMode
+        ? htmlController.text
+        : jsonEncode(quillController.document.toDelta().toJson());
+    final password = _currentPassword;
+    final value = <String, dynamic>{
+      'version': 1,
+      'id': _storedNote?.id ?? _draftNoteId,
+      'fileName': _currentFileName,
+      'title': titleController.text,
+      'timestamp':
+          _storedNote?.timestamp ?? (_draftTimestamp ??= _nowMilliseconds()),
+      'html': _isHtmlMode,
+      'protected': password != null,
+      'metadata': Map<String, dynamic>.from(_retainedMetadata),
+      'attachments': _attachments
+          .where((a) => !a.isLoading)
+          .map((a) => a.toJson())
+          .toList(),
+      'fields': _session.dirtyFields.map((e) => e.name).toList(),
+      if (_noteReference?.storageRevision case final base?)
+        'base': {
+          'length': base.length,
+          'sha256': base.sha256Hex,
+          'modified': base.modifiedMicros,
+        },
+    };
+    if (password != null)
+      body = await _encryptionService.encrypt(body, password: password);
+    if (_disposed ||
+        generation != _session.generation ||
+        revision != _session.editRevision ||
+        credential != _session.credentialGeneration ||
+        _isLocked)
+      return null;
+    value['body'] = body;
+    return value;
+  }
+
+  Future<bool> verifyPrivateRecoveryPassword(
+    Map<String, dynamic> draft,
+    String password,
+  ) async {
+    if (draft['protected'] != true) return true;
+    final decoded = await _encryptionService.decryptResult(
+      draft['body'] as String,
+      password: password,
+    );
+    if (!decoded.isSuccess) return false;
+    try {
+      _prepareDocument(decoded.value!).close();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<OperationResult<void>> recoverPrivateDraft(
+    Map<String, dynamic> draft, {
+    String? password,
+  }) async {
+    Document? prepared;
+    try {
+      if (_disposed ||
+          _session.isDirty ||
+          draft['version'] != 1 ||
+          draft['id'] is! String ||
+          (draft['id'] as String).isEmpty)
+        return _cancelledResult();
+      final fileName = draft['fileName'] as String?;
+      final base = draft['base'] as Map?;
+      if (fileName != null) {
+        final existing = await _fileService.resolveNote(fileName);
+        if (existing == null ||
+            base == null ||
+            existing.storageRevision?.sha256Hex != base['sha256'] ||
+            existing.storageRevision?.length != base['length']) {
+          return const OperationResult.failure(
+            OperationOutcome.conflict,
+            'This note changed after the recovery draft. Its current version was preserved.',
+          );
+        }
+      }
+      var body = draft['body'] as String;
+      if (draft['protected'] == true) {
+        if (password == null)
+          return const OperationResult.failure(
+            OperationOutcome.rejectedInput,
+            'Unlock the protected recovery draft first.',
+          );
+        final decoded = await _encryptionService.decryptResult(
+          body,
+          password: password,
+        );
+        if (!decoded.isSuccess)
+          return const OperationResult.failure(
+            OperationOutcome.rejectedInput,
+            'The recovery password was not accepted.',
+          );
+        body = decoded.value!;
+      }
+      prepared = _prepareDocument(body);
+      if (fileName != null) {
+        final opened = await loadNote(fileName);
+        if (!opened.isSuccess) return opened;
+        if (_isLocked && (password == null || !await unlockNote(password)))
+          return const OperationResult.failure(
+            OperationOutcome.rejectedInput,
+            'Unlock the existing note before recovery.',
+          );
+        if (_noteReference?.storageRevision?.sha256Hex != base!['sha256'] ||
+            _noteReference?.storageRevision?.length != base['length']) {
+          return const OperationResult.failure(
+            OperationOutcome.conflict,
+            'The note changed during recovery. No recovery edits were applied.',
+          );
+        }
+      } else {
+        _resetDraft();
+        _draftNoteId = draft['id'] as String;
+        _draftTimestamp = draft['timestamp'] as int;
+      }
+      if (_disposed) return _cancelledResult();
+      _cancelAutoSave();
+      _publishing = true;
+      try {
+        _retainedMetadata = Map<String, dynamic>.from(draft['metadata'] as Map);
+        _retainedPlainBody = body;
+        _currentPassword = draft['protected'] == true ? password : null;
+        _isLocked = false;
+        _isHtmlMode = draft['html'] == true;
+        _replaceDocument(prepared);
+        prepared = null;
+        htmlController.text = _isHtmlMode ? body : '';
+        titleController.text = draft['title'] as String;
+        _attachments = (draft['attachments'] as List)
+            .map(
+              (e) =>
+                  AttachmentModel.fromJson(Map<String, dynamic>.from(e as Map)),
+            )
+            .toList();
+        final fields = (draft['fields'] as List)
+            .cast<String>()
+            .map(DraftField.values.byName)
+            .toSet();
+        _session = DraftSession(
+          generation: ++_nextSessionGeneration,
+          editRevision: 1,
+          persistedRevision: fileName == null ? null : 0,
+          credentialGeneration: _session.credentialGeneration,
+          dirtyFields: fields.isEmpty ? {DraftField.body} : fields,
+        );
+        isLockedNotifier.value = false;
+        attachmentsNotifier.value = List.unmodifiable(_attachments);
+      } finally {
+        _publishing = false;
+      }
+      _publishSaveState();
+      notifyListeners();
+      _scheduleAutoSave(); // Existing first-Save guard still protects new drafts.
+      return const OperationResult.success();
+    } catch (_) {
+      return const OperationResult.failure(
+        OperationOutcome.recoveryRequired,
+        'The private draft could not be restored. Recovery material was retained.',
+      );
+    } finally {
+      prepared?.close();
+    }
+  }
+
   // region Lifecycle
   @override
   void dispose() {
+    _jobRecovery.clear();
     _settings.attachmentPerformanceNotifier.removeListener(
       _configureAttachmentPerformance,
     );

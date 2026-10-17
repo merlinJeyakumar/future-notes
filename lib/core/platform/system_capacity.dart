@@ -11,6 +11,10 @@ class SystemCapacity {
     required this.systemCpu,
     required this.processCpu,
     this.detected = true,
+    this.capacityFactor = 1,
+    this.thermalStatus = 0,
+    this.memoryPressure = 0,
+    this.workerBytes = 64 * 1024 * 1024,
   });
   final int processors;
   final int availableBytes;
@@ -19,10 +23,49 @@ class SystemCapacity {
   final double systemCpu;
   final double processCpu;
   final bool detected;
+  final double capacityFactor;
+  final int thermalStatus;
+  final int memoryPressure;
+  final int workerBytes;
 }
 
 /// Synchronous, bounded OS telemetry; no shell, benchmark files or network.
 class SystemCapacityProbe {
+  static SystemCapacity? _mobile;
+  static DateTime? _mobileAt;
+  static void reportMobile(Map<Object?, Object?> value) {
+    final thermal = value['thermal'] as int? ?? 0;
+    final pressure = value['memoryPressure'] as int? ?? 0;
+    _mobile = SystemCapacity(
+      processors: value['processors'] as int? ?? 1,
+      availableBytes: value['availableBytes'] as int? ?? 0,
+      systemCpu: (value['systemCpu'] as num?)?.toDouble() ?? 0,
+      processCpu: (value['processCpu'] as num?)?.toDouble() ?? 0,
+      detected: value['detected'] == true,
+      thermalStatus: thermal,
+      memoryPressure: pressure,
+      workerBytes: (value['workerBytes'] as int? ?? 64 * 1024 * 1024).clamp(
+        16 * 1024 * 1024,
+        64 * 1024 * 1024,
+      ),
+      capacityFactor: math.min(
+        pressure >= 2
+            ? 0.0
+            : pressure == 1
+            ? .5
+            : 1.0,
+        thermal >= 5
+            ? 0
+            : thermal >= 4
+            ? .2
+            : thermal >= 3
+            ? .5
+            : 1,
+      ),
+    );
+    _mobileAt = DateTime.now();
+  }
+
   final _clock = Stopwatch()..start();
   int _sampledAt = -1000;
   SystemCapacity? _last;
@@ -35,6 +78,10 @@ class SystemCapacityProbe {
       return _last!;
     }
     _sampledAt = _clock.elapsedMilliseconds;
+    if ((Platform.isAndroid || Platform.isIOS) &&
+        _mobile != null &&
+        DateTime.now().difference(_mobileAt!).inSeconds < 5)
+      return _last = _mobile!;
     try {
       if (Platform.isWindows) return _last = _windows();
       if (Platform.isLinux) return _last = _linux();

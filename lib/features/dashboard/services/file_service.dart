@@ -36,6 +36,31 @@ abstract interface class AttachmentMetadataReader {
   Future<DateTime?> attachmentModified(NoteReference reference, String id);
 }
 
+abstract interface class NoteMetadataReader {
+  Future<int> noteMetadataLength(NoteReference reference);
+  Future<Uint8List> noteMetadataHeader(NoteReference reference, int length);
+}
+
+abstract interface class AttachmentSourceSession {
+  Future<void> releaseAttachmentSources(NoteReference reference);
+  Future<bool> isAttachmentSourceCurrent(
+    NoteReference reference,
+    String id,
+    StreamingFileSource source,
+  );
+}
+
+abstract interface class PickedSourceOwner {
+  String? sourceDisplayName(String path);
+  Future<void> releasePickedSource(String path);
+}
+
+abstract interface class PickedSourceRecovery {
+  Map<String, Object?>? pickedSourceIdentity(String path);
+  Future<PlatformFile> reopenPickedSource(Map<String, Object?> identity);
+  Future<void> forgetPickedSource(Map<String, Object?> identity);
+}
+
 abstract interface class TransactionalNoteFiles {
   bool get usesOwnedStorage;
   Future<List<NoteReference>> pendingDeletions();
@@ -674,4 +699,20 @@ class FileService
       return '';
     }
   }
+}
+
+/// Sources were opened by the native drop grant owner; paths are live FD leases.
+abstract interface class NativeDropSourceOwner {
+  PlatformFile adoptDroppedSource(Map<Object?, Object?> source);
+}
+
+abstract interface class AttachmentStagingCapacity {
+  Future<void> checkStagingCapacity(int inputLength);
+}
+
+abstract interface class InterruptedStagingOwner {
+  Future<void> discardInterruptedStaging(
+    String directoryName,
+    String attachmentId,
+  );
 }

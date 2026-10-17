@@ -1,0 +1,477 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'dart:io' show Platform;
+import '../../../core/platform/android_native_cipher.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import '../../../core/operations/operation_result.dart';
+import '../services/settings_service.dart';
+import '../../../core/storage/attachment_performance.dart';
+import '../../../core/storage/attachment_scheduler.dart';
+
+class AppSettingsDialog extends StatefulWidget {
+  const AppSettingsDialog({
+    super.key,
+    required this.settings,
+    required this.pickLibrary,
+    required this.openLibrary,
+    this.loadVersion,
+    this.loadLibraryPath,
+    this.changeLibrary,
+  });
+  final SettingsService settings;
+  final Future<String?> Function() pickLibrary;
+  final Future<OperationResult<void>> Function(String) openLibrary;
+  final Future<String> Function()? loadVersion;
+  final Future<String> Function()? loadLibraryPath;
+  final Future<OperationResult<void>> Function()? changeLibrary;
+  @override
+  State<AppSettingsDialog> createState() => _AppSettingsDialogState();
+}
+
+class _AppSettingsDialogState extends State<AppSettingsDialog> {
+  late Future<String> _libraryPath;
+  late final Future<String> _version;
+  final _pending = <String>{};
+  String? _error;
+  double? _targetPreview;
+  Map<Object?, Object?>? _device;
+  bool _sampling = false;
+  @override
+  void initState() {
+    super.initState();
+    _libraryPath =
+        widget.loadLibraryPath?.call() ?? widget.settings.getUserDataPath();
+    _version = widget.loadVersion?.call() ?? _loadVersion();
+    _sampleDevice();
+  }
+
+  Future<void> _sampleDevice() async {
+    if (!Platform.isAndroid || _sampling) return;
+    _sampling = true;
+    try {
+      final value = await const MethodChannel(
+        'future_notes/jobs',
+      ).invokeMapMethod<Object?, Object?>('capacity');
+      if (mounted) setState(() => _device = value);
+    } catch (_) {
+      /* Live job telemetry remains available. */
+    } finally {
+      _sampling = false;
+    }
+  }
+
+  Future<String> _loadVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    return 'Future Notes ${info.version}${info.buildNumber.isEmpty ? '' : '+${info.buildNumber}'}';
+  }
+
+  Future<void> _write(String key, Future<void> Function() action) async {
+    if (!_pending.add(key)) return;
+    setState(() => _error = null);
+    try {
+      await action();
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _error =
+              'Settings could not be saved. The previous value was retained.',
+        );
+      }
+    } finally {
+      _pending.remove(key);
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _openLibrary() => _write('library', () async {
+    if (widget.changeLibrary case final change?) {
+      final result = await change();
+      if (mounted && !result.isSuccess) _error = result.message;
+      return;
+    }
+    final directory = await widget.pickLibrary();
+    if (!mounted || directory == null) return;
+    final result = await widget.openLibrary(directory);
+    if (!mounted) return;
+    // The acknowledged settings location is authoritative even when a switch
+    // reports a retained late edit or deferred old-library cleanup.
+    _libraryPath = widget.settings.getUserDataPath();
+    if (!result.isSuccess) {
+      _error = result.message ?? 'The library could not be opened.';
+    }
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = widget.settings;
+    return AlertDialog(
+      title: const Text('App settings'),
+      scrollable: true,
+      content: SizedBox(
+        width: 480,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const ListTile(
+              title: Text('Closing the app'),
+              subtitle: Text(
+                'Close asks for confirmation, then exits Future Notes.',
+              ),
+            ),
+            ListTile(
+              title: const Text('Theme'),
+              subtitle: DropdownButton<ThemeMode>(
+                value: settings.themeMode,
+                isExpanded: true,
+                items: ThemeMode.values
+                    .map(
+                      (mode) =>
+                          DropdownMenuItem(value: mode, child: Text(mode.name)),
+                    )
+                    .toList(),
+                onChanged: _pending.contains('theme')
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          _write('theme', () => settings.setThemeMode(value));
+                        }
+                      },
+              ),
+            ),
+            ListTile(
+              title: const Text('File compression'),
+              subtitle: DropdownButton<CompressionLevel>(
+                value: settings.compressionLevel,
+                isExpanded: true,
+                items: CompressionLevel.values
+                    .map(
+                      (level) => DropdownMenuItem(
+                        value: level,
+                        child: Text(level.name),
+                      ),
+                    )
+                    .toList(),
+                onChanged: _pending.contains('compression')
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          _write(
+                            'compression',
+                            () => settings.setCompressionLevel(value),
+                          );
+                        }
+                      },
+              ),
+            ),
+            if (!kIsWeb) ...[
+              const Divider(),
+              _attachmentPerformance(),
+              const Divider(),
+              const Text(
+                'Current library',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              FutureBuilder<String>(
+                future: _libraryPath,
+                builder: (context, snapshot) => SelectableText(
+                  snapshot.hasError
+                      ? 'Library location unavailable'
+                      : snapshot.data ?? 'Loading…',
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _pending.contains('library') ? null : _openLibrary,
+                icon: const Icon(Icons.folder_open),
+                label: Text(
+                  _pending.contains('library')
+                      ? 'Opening library…'
+                      : 'Open another library',
+                ),
+              ),
+            ],
+            if (_error != null)
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            const Divider(),
+            const Text('About', style: TextStyle(fontWeight: FontWeight.w600)),
+            FutureBuilder<String>(
+              future: _version,
+              builder: (context, snapshot) => Text(
+                snapshot.hasError
+                    ? 'Future Notes · version unavailable'
+                    : snapshot.data ?? 'Future Notes',
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
+
+  Widget _attachmentPerformance() {
+    final current = widget.settings.attachmentPerformance;
+    final pending = _pending.contains('performance');
+    Future<void> save(AttachmentPerformance value) => _write(
+      'performance',
+      () => widget.settings.setAttachmentPerformance(value),
+    );
+    Widget limit(
+      String label,
+      int value,
+      List<int> options,
+      String Function(int) text,
+      AttachmentPerformance Function(int) candidate,
+    ) => DropdownButtonFormField<int>(
+      key: ValueKey('$label:$value:$pending'),
+      decoration: InputDecoration(labelText: label),
+      initialValue: value,
+      items: ({0, ...options, value}.toList()..sort())
+          .map(
+            (v) => DropdownMenuItem(
+              value: v,
+              child: Text(v == 0 ? 'Automatic' : text(v)),
+            ),
+          )
+          .toList(),
+      onChanged: pending
+          ? null
+          : (v) {
+              if (v != null) save(candidate(v));
+            },
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Attachment performance',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Adapts to this device, available memory and temperature. Additional files queue while processing continues.',
+        ),
+        const SizedBox(height: 8),
+        ValueListenableBuilder<AttachmentBudget?>(
+          valueListenable: AttachmentScheduler.shared.status,
+          builder: (context, budget, _) {
+            final capacity =
+                budget != null && (budget.active > 0 || budget.queued > 0)
+                ? budget.capacity
+                : null;
+            final thermal =
+                capacity?.thermalStatus ?? (_device?['thermal'] as int? ?? 0);
+            final memory =
+                capacity?.availableBytes ??
+                (_device?['availableBytes'] as int? ?? 0);
+            final processors =
+                capacity?.processors ?? (_device?['processors'] as int? ?? 1);
+            const temperatures = [
+              'Normal',
+              'Light',
+              'Moderate',
+              'Severe',
+              'Critical',
+              'Emergency',
+              'Shutdown',
+            ];
+            return Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'This device',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Refresh device capacity',
+                          onPressed: _sampleDevice,
+                          icon: const Icon(Icons.refresh),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      '$processors logical CPUs · ${(memory / (1024 * 1024)).round()} MiB work allowance',
+                    ),
+                    Text(
+                      'Thermal status: ${temperatures[thermal.clamp(0, 6)]}',
+                    ),
+                    Text(
+                      AndroidNativeCipher.ready
+                          ? 'Native Android cipher · desktop-compatible format'
+                          : 'Compatible Dart cipher',
+                    ),
+                    if (budget != null)
+                      Text(
+                        '${budget.active} active · ${budget.queued} queued · ${budget.slots} admitted workers',
+                      ),
+                    if ((capacity?.memoryPressure ?? 0) > 0)
+                      const Text('Memory pressure is reducing work.'),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            ActionChip(
+              label: const Text('Adaptive 70%'),
+              onPressed: pending
+                  ? null
+                  : () => save(
+                      current.copyWith(
+                        targetPercent: 70,
+                        maxParallel: 0,
+                        memoryMiB: 0,
+                      ),
+                    ),
+            ),
+            ActionChip(
+              label: const Text('Battery friendly'),
+              onPressed: pending
+                  ? null
+                  : () => save(
+                      current.copyWith(
+                        targetPercent: 40,
+                        maxParallel: 1,
+                        memoryMiB: 64,
+                      ),
+                    ),
+            ),
+            ActionChip(
+              label: const Text('Higher throughput'),
+              onPressed: pending
+                  ? null
+                  : () => save(
+                      current.copyWith(
+                        targetPercent: 85,
+                        maxParallel: 2,
+                        memoryMiB: 128,
+                      ),
+                    ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Available-capacity target: ${(_targetPreview ?? current.targetPercent.toDouble()).round()}%',
+        ),
+        Slider(
+          key: const ValueKey('attachment-capacity-target'),
+          min: 10,
+          max: 90,
+          divisions: 16,
+          value: _targetPreview ?? current.targetPercent.toDouble(),
+          label:
+              '${(_targetPreview ?? current.targetPercent.toDouble()).round()}%',
+          onChanged: pending ? null : (v) => setState(() => _targetPreview = v),
+          onChangeEnd: pending
+              ? null
+              : (v) async {
+                  await save(current.copyWith(targetPercent: v.round()));
+                  if (mounted) setState(() => _targetPreview = null);
+                },
+        ),
+        const Text(
+          'Default 70%. A scheduling target, not an OS hard cap; memory is a ceiling, not an allocation goal.',
+        ),
+        ValueListenableBuilder<AttachmentBudget?>(
+          valueListenable: AttachmentScheduler.shared.status,
+          builder: (context, budget, _) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              budget == null
+                  ? 'CPU and available memory are detected when work starts.'
+                  : '${budget.capacity.processors} logical processors · ${(budget.capacity.availableBytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GiB available\n${budget.active} active · ${budget.queued} queued${budget.capacity.detected ? '' : ' · conservative monitoring fallback'}',
+            ),
+          ),
+        ),
+        ExpansionTile(
+          title: const Text('Advanced configuration'),
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          children: [
+            limit(
+              'Maximum parallel files',
+              current.maxParallel,
+              [1, 2, 4],
+              (v) => '$v files',
+              (v) => current.copyWith(maxParallel: v),
+            ),
+            const SizedBox(height: 12),
+            limit(
+              'Preparation working-memory budget',
+              current.memoryMiB,
+              [64, 128, 256, 512],
+              (v) => '$v MiB',
+              (v) => current.copyWith(memoryMiB: v),
+            ),
+            const SizedBox(height: 6),
+            SwitchListTile(
+              key: const ValueKey('check-before-open'),
+              title: const Text(
+                'Check encrypted files before opening/exporting',
+              ),
+              subtitle: const Text(
+                'Optional full source hash scan. Off by default.',
+              ),
+              value: current.checkBeforeOpen,
+              onChanged: pending
+                  ? null
+                  : (v) => save(current.copyWith(checkBeforeOpen: v)),
+            ),
+            SwitchListTile(
+              key: const ValueKey('verify-after-open'),
+              title: const Text('Verify decrypted output'),
+              subtitle: const Text(
+                'Optional output readback for opening/exporting. Off by default.',
+              ),
+              value: current.verifyAfterOpen,
+              onChanged: pending
+                  ? null
+                  : (v) => save(current.copyWith(verifyAfterOpen: v)),
+            ),
+            const Text(
+              'Attachment metadata is validated when loading/unlocking the note. Required file-safety, length and padding checks always apply.',
+            ),
+            const Text(
+              'Native workers use an estimated 16 MiB scheduling allowance and stream 1 MiB windows. The compatible Dart fallback reserves 64 MiB. Heat and memory pressure always reduce the budget.',
+            ),
+            TextButton(
+              onPressed: pending
+                  ? null
+                  : () => save(AttachmentPerformance.defaults),
+              child: const Text('Reset performance defaults'),
+            ),
+          ],
+        ),
+        const Text(
+          'These optional scans apply to viewing and attachment export. Encryption formats and required publication/revision checks are unchanged.',
+        ),
+      ],
+    );
+  }
+}

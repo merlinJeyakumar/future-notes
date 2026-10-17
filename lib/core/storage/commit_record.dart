@@ -13,6 +13,7 @@ class CommitRecord {
     required this.target,
     required this.expected,
     required this.staged,
+    this.windowsObjectPaths = false,
   }) {
     _validateIdentity(transactionId);
     _validateTarget(target);
@@ -28,10 +29,16 @@ class CommitRecord {
   final StorageRevision expected;
   final StorageRevision staged;
 
+  /// Read Windows-authored journal identities on a case-sensitive mobile host.
+  /// The target name and the encoded record remain byte-for-byte unchanged.
+  final bool windowsObjectPaths;
+
   static String objectIdentity(String target) => sha256
       .convert(utf8.encode(p.separator == '\\' ? target.toLowerCase() : target))
       .toString();
-  String get objectId => objectIdentity(target);
+  String get objectId => windowsObjectPaths
+      ? sha256.convert(utf8.encode(target.toLowerCase())).toString()
+      : objectIdentity(target);
   String get stagePath => '.future-notes-storage/staging/$transactionId.staged';
   String get previousPath =>
       '.future-notes-storage/recovery/$objectId/$transactionId.previous';
@@ -54,7 +61,7 @@ class CommitRecord {
     'staged': _revisionJson(staged),
   });
 
-  static CommitRecord decode(String source) {
+  static CommitRecord decode(String source, {bool windowsObjectPaths = false}) {
     try {
       final map = _boundedJson(source);
       if (map['version'] != 1 ||
@@ -67,6 +74,7 @@ class CommitRecord {
         target: map['target'] as String,
         expected: _readRevision(map['expected']),
         staged: _readRevision(map['staged']),
+        windowsObjectPaths: windowsObjectPaths,
       );
       // Check derived paths and exact canonical shape, including duplicate keys,
       // unknown fields and unsupported versions. Never trust recorded paths.

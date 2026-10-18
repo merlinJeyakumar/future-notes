@@ -43,6 +43,12 @@ The repository contains a Flutter/Dart notes application. The package name is cu
 
 Preserve the existing view/view-model/service boundaries. Keep persistence and encryption in services and state transitions in the view model. Dispose controllers, timers, subscriptions, and listeners owned by a component. A declared dependency does not establish that the application uses it.
 
+## Locked platform behavior
+
+Accepted platform code, features, designs and bug fixes are locked while working on another platform. Android/iOS work must not change or regress accepted desktop behavior, and desktop work must not change or regress accepted mobile behavior. Keep platform presentation and native adaptations isolated. Do not remove an existing guard, feature or fix to make another platform work.
+
+Before modifying shared code, identify every affected platform and compare the established implementation with Git. Limit changes to the user's authorized scope; if the change requires altering locked behavior on another platform, explain the concrete impact and obtain the user's decision first. Preserve the accepted artifacts and run the affected compatibility and runtime regressions before replacing them or claiming preservation. Passing tests or startup checks for the target platform alone does not validate other platforms. When an affected platform cannot be validated, report that gap and do not treat its locked behavior as verified.
+
 ## Before changes
 
 - Read applicable `AGENTS.md` files and this rulesbook, then inspect the branch, Git status, relevant source, and existing tests.
@@ -72,6 +78,7 @@ Native file services currently use a `UserData` directory under the application 
 - Perform encryption, decryption, extraction, copying, or packing in the necessary processing pass. Calculate required checksums/CRC during that pass. Avoid separate checksum scans, plaintext intermediates, repeated staging reads, and redundant copies. Keep necessary provider transfers and recovery backups; report them as actual work.
 - Preserve basic safety: valid paths and filenames, format/framing and bounds checks, capacity limits, short-read/write detection, flush/close, ownership and destination conflicts, cancellation, journals, attachment-first publication, and small note-metadata revision checks. Recovery may inspect ambiguous interrupted transactions. These protections do not authorize optional normal-job payload rescans.
 - On package import, use the note ID to detect conflicts and show Duplicate / Back up & Replace / Ignore. Do not compare incoming and existing payloads before showing the choices, or silently skip the dialog because their contents appear identical. Keep necessary incoming-package extraction and format checks.
+- Read bounded note metadata and resolve a matching UID before attachment extraction. For ZIP, decompress only the note metadata entry for this decision; for a protected archive, decrypt only its metadata. Ignore must stop without extracting or decrypting attachments. Proceeding imports retain their existing payload-format checks, progress, publication and recovery guarantees. Check source file metadata across the decision and retain the reviewed note identity; do not add full-file fingerprints or verification passes for this guard.
 - Ignore and Duplicate must not read existing attachment payloads. Back up & Replace must retain the recovery predecessor and check attachment availability without full-file predecessor hashing or a second attachment-revision scan. Keep the note-envelope revision and draft/session guards so conflicting edits do not overwrite the current note.
 - Reuse valid decrypted caches across viewers and note switches until lock, credential changes, removal, or exit revoke them. Reuse prepared exports when source and options are unchanged; invalidate them when their inputs or owning session change. Do not decrypt or repack again merely because the user reopens the same item or requests the same unchanged export.
 

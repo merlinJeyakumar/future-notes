@@ -5721,6 +5721,7 @@ class ContentViewModel extends BaseViewModel {
       }
       _jobPhase(job, AttachmentJobPhase.preparing);
       FilePackResult imported;
+      PackageImportMetadata? packageMetadata;
       final sourceName = _fileService is PickedSourceOwner
           ? (_fileService as PickedSourceOwner).sourceDisplayName(source) ??
                 source
@@ -5755,23 +5756,18 @@ class ContentViewModel extends BaseViewModel {
         }
         imported = FilePackResult(decoded, const {});
       } else {
-        imported = await StreamingPackService().importPackage(
+        _jobPhase(
+          job,
+          AttachmentJobPhase.preparing,
+          detail: 'Reading note information',
+        );
+        packageMetadata = await StreamingPackService().inspectPackage(
           source: source,
           operationDirectory: operation.path,
           password: archivePassword,
-          verifyWrites: performance.verifyLargeFileWrites,
           cancellationFile: cancellation.path,
-          onProgress: (progress) => _jobPhase(
-            job,
-            progress.phase == PackageImportPhase.decrypting
-                ? AttachmentJobPhase.decrypting
-                : AttachmentJobPhase.preparing,
-            bytes: progress.bytes,
-            total: progress.total,
-            detail:
-                '${progress.label} · File ${progress.fileIndex} of ${progress.fileCount}\n${progress.fileName}',
-          ),
         );
+        imported = FilePackResult(packageMetadata.note, const {});
       }
       if (!imported.note.note.isLocked) {
         _prepareDocument(imported.note.note.content).close();
@@ -5786,17 +5782,6 @@ class ContentViewModel extends BaseViewModel {
         final body = base64Decode(parts.last);
         if (body.isEmpty || body.length % 16 != 0) {
           throw const FormatException('Imported protected body is incomplete.');
-        }
-      }
-      // Validate ciphertext framing before duplicate decisions or publication.
-      for (final attachment in imported.note.note.attachments) {
-        final payload = imported.attachments[attachment.id];
-        if (payload == null ||
-            payload.length < 32 ||
-            (payload.length - 16) % 16 != 0) {
-          throw const FormatException(
-            'Imported attachment ciphertext is incomplete.',
-          );
         }
       }
       var noteId = imported.note.note.id;
@@ -5863,6 +5848,42 @@ class ContentViewModel extends BaseViewModel {
               verifyContent: false,
             );
           }
+        }
+      }
+      if (_disposed ||
+          owner != _session.generation ||
+          _cancelledAttachmentJobs.contains(jobId)) {
+        throw const FileJobCancelled();
+      }
+      if (packageMetadata != null) {
+        imported = await StreamingPackService().importPackage(
+          source: source,
+          operationDirectory: operation.path,
+          password: archivePassword,
+          metadata: packageMetadata,
+          verifyWrites: performance.verifyLargeFileWrites,
+          cancellationFile: cancellation.path,
+          onProgress: (progress) => _jobPhase(
+            job,
+            progress.phase == PackageImportPhase.decrypting
+                ? AttachmentJobPhase.decrypting
+                : AttachmentJobPhase.preparing,
+            bytes: progress.bytes,
+            total: progress.total,
+            detail:
+                '${progress.label} · File ${progress.fileIndex} of ${progress.fileCount}\n${progress.fileName}',
+          ),
+        );
+      }
+      // Full payload framing is checked only after the user elects to import.
+      for (final attachment in imported.note.note.attachments) {
+        final payload = imported.attachments[attachment.id];
+        if (payload == null ||
+            payload.length < 32 ||
+            (payload.length - 16) % 16 != 0) {
+          throw const FormatException(
+            'Imported attachment ciphertext is incomplete.',
+          );
         }
       }
       final replacing = existing != null && !createDuplicate;

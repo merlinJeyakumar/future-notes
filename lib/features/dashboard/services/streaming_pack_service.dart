@@ -62,6 +62,31 @@ class FilePackResult {
   final Map<String, StreamingFileSource> attachments;
 }
 
+/// Metadata-only identity review. Payload extraction remains a separate step.
+class PackageImportMetadata {
+  const PackageImportMetadata(
+    this.note,
+    this.source,
+    this.length,
+    this.modifiedMicros,
+    this.changedMicros,
+  );
+  final DecodedNote note;
+  final String source;
+  final int length, modifiedMicros, changedMicros;
+
+  Future<void> checkCurrent(String path) async {
+    final stat = await File(path).stat();
+    if (path != source ||
+        stat.type != FileSystemEntityType.file ||
+        stat.size != length ||
+        stat.modified.microsecondsSinceEpoch != modifiedMicros ||
+        stat.changed.microsecondsSinceEpoch != changedMicros) {
+      throw const FormatException('Package changed after identity review.');
+    }
+  }
+}
+
 enum PackageImportPhase { extracting, decrypting }
 
 class PackageImportProgress {
@@ -274,12 +299,63 @@ class StreamingPackService {
     }
   });
 
+  Future<PackageImportMetadata> inspectPackage({
+    required String source,
+    required String operationDirectory,
+    String? password,
+    String? cancellationFile,
+  }) async {
+    final before = await File(source).stat();
+    if (before.type != FileSystemEntityType.file) {
+      throw const FormatException('Package is unavailable.');
+    }
+    final token = Platform.isAndroid ? ServicesBinding.rootIsolateToken : null;
+    final result = await _inspectInIsolate(
+      source,
+      operationDirectory,
+      password,
+      cancellationFile,
+      token,
+    );
+    final metadata = PackageImportMetadata(
+      result.note,
+      source,
+      before.size,
+      before.modified.microsecondsSinceEpoch,
+      before.changed.microsecondsSinceEpoch,
+    );
+    await metadata.checkCurrent(source);
+    return metadata;
+  }
+
+  static Future<FilePackResult> _inspectInIsolate(
+    String source,
+    String directory,
+    String? password,
+    String? cancel,
+    RootIsolateToken? token,
+  ) => Isolate.run(() async {
+    // Bounded metadata decryption needs no bulk native worker. SAF reads still
+    // borrow their retained source capability through the background messenger.
+    AndroidNativeCipher.initialize(token, enableNative: false);
+    return _import(
+      source,
+      directory,
+      password,
+      cancel,
+      false,
+      _ImportProgress(null),
+      metadataOnly: true,
+    );
+  });
+
   Future<FilePackResult> importPackage({
     required String source,
     required String operationDirectory,
     String? password,
     String? cancellationFile,
     bool verifyWrites = false,
+    PackageImportMetadata? metadata,
     void Function(PackageImportProgress)? onProgress,
   }) async {
     final token = Platform.isAndroid ? ServicesBinding.rootIsolateToken : null;
@@ -296,6 +372,7 @@ class StreamingPackService {
       }
     });
     try {
+      await metadata?.checkCurrent(source);
       final imported = await _importInIsolate(
         source,
         operationDirectory,
@@ -306,6 +383,15 @@ class StreamingPackService {
         owner,
         port?.sendPort,
       );
+      if (metadata != null) {
+        await metadata.checkCurrent(source);
+        if (jsonEncode(imported.note.metadata) !=
+            jsonEncode(metadata.note.metadata)) {
+          throw const FormatException(
+            'Package metadata changed after identity review.',
+          );
+        }
+      }
       if (port != null) {
         await drained.future.timeout(
           const Duration(seconds: 2),
@@ -881,8 +967,10 @@ class StreamingPackService {
     String? password,
     String? cancel,
     bool verifyWrites,
-    _ImportProgress progress,
-  ) async {
+    _ImportProgress progress, {
+    bool metadataOnly = false,
+  }) async {
+    _cancel(cancel);
     final file = File(source);
     final handle = await BoundedFileReader.openPath(file.path);
     final header = await handle.read(6);
@@ -915,6 +1003,7 @@ class StreamingPackService {
         final decoded = NoteCodec.decodeMetadata(
           utf8.decode(await reader.read(jsonLength)),
         );
+        if (metadataOnly) return FilePackResult(decoded, const {});
         final count = _read32(await reader.read(4), 0, Endian.big);
         if (count > entryLimit) {
           throw const FormatException('Too many package records.');
@@ -972,6 +1061,7 @@ class StreamingPackService {
       cancel,
       verifyWrites,
       progress,
+      metadataOnly: metadataOnly,
     );
     final note = entries['note.json'];
     if (note == null) throw const FormatException('Missing package note.');
@@ -995,6 +1085,7 @@ class StreamingPackService {
     final decoded = NoteCodec.decodeMetadata(
       utf8.decode(await readMetadata(note)),
     );
+    if (metadataOnly) return FilePackResult(decoded, const {});
     final mapping = <String, String>{};
     final mappingFile = entries['metadata.json'];
     if (mappingFile != null) {
@@ -1284,8 +1375,9 @@ class StreamingPackService {
     String directory,
     String? cancel,
     bool verifyWrites,
-    _ImportProgress progress,
-  ) async {
+    _ImportProgress progress, {
+    bool metadataOnly = false,
+  }) async {
     final file = File(source);
     final before = await file.stat();
     final input = await BoundedFileReader.openPath(file.path);
@@ -1508,6 +1600,9 @@ class StreamingPackService {
             !record.name.startsWith('attachments/')) {
           throw const FormatException('Unknown package entry.');
         }
+        // Visit only bounded ZIP structure for other entries. Do not inflate,
+        // decrypt or stage attachment payloads before the UID decision.
+        if (metadataOnly && record.name != 'note.json') continue;
         final outputPath = p.join(directory, '${const Uuid().v4()}.record');
         final target = OwnedWriteTarget.forPath(outputPath);
         await target.validate(outputPath);

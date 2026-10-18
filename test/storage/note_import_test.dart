@@ -140,6 +140,83 @@ void main() {
   }
 
   for (final format in ExportFormat.values) {
+    for (final password in <String?>[null, 'synthetic-archive']) {
+      test(
+        '${format.name} UID conflict precedes payload extraction (password=${password != null})',
+        () async {
+          final metadata = note();
+          final existing = await seed(metadata);
+          final input = await payload('preflight-input');
+          metadata['attachments'] = [
+            {'id': 'incoming', 'fileName': 'new.bin', 'size': 19},
+          ];
+          final source = await package(
+            metadata,
+            format: format,
+            password: password,
+            attachments: {'incoming': input},
+          );
+          var prompts = 0;
+          final result = await editor.importNoteFile(
+            source,
+            archivePassword: password,
+            resolveConflict: (_) async {
+              prompts++;
+              final staged = await Directory(app.environment.dataRoot!)
+                  .list(recursive: true)
+                  .where(
+                    (e) =>
+                        e is File &&
+                        p
+                            .split(e.path)
+                            .any((n) => n.startsWith('attachment-operation-')),
+                  )
+                  .cast<File>()
+                  .toList();
+              // ZIP preflight may stage just its bounded note.json record. Binary
+              // preflight stages nothing. Neither has produced an attachment.
+              expect(staged.where((f) => f.path.endsWith('.med')), isEmpty);
+              expect(staged, hasLength(format == ExportFormat.zip ? 1 : 0));
+              final details = editor.attachmentJobsNotifier.value
+                  .map((s) => s.progress.value.detail ?? '')
+                  .join();
+              expect(details, isNot(contains('Extracting package')));
+              return NoteImportDecision.ignore;
+            },
+          );
+          expect(result.isSuccess, isTrue, reason: result.message);
+          expect(result.value!.disposition, NoteImportDisposition.ignored);
+          expect(prompts, 1);
+          expect((await stored(existing.fileName))['attachments'], isEmpty);
+          expect(await notes(), hasLength(1));
+        },
+      );
+    }
+  }
+
+  test(
+    'source change while UID choice is open aborts before extraction',
+    () async {
+      final metadata = note();
+      final existing = await seed(metadata);
+      final source = await package(metadata);
+      final original = await stored(existing.fileName);
+      final result = await editor.importNoteFile(
+        source,
+        resolveConflict: (_) async {
+          await File(
+            source,
+          ).writeAsBytes([0], mode: FileMode.append, flush: true);
+          return NoteImportDecision.replace;
+        },
+      );
+      expect(result.isSuccess, isFalse);
+      expect(await stored(existing.fileName), original);
+      expect(await notes(), hasLength(1));
+    },
+  );
+
+  for (final format in ExportFormat.values) {
     test(
       '${format.name} retains UID and prompts even for identical content after attachment remapping',
       () async {

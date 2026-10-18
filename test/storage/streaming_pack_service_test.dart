@@ -57,6 +57,134 @@ void main() {
   Future<Directory> operation(String name) =>
       Directory(p.join(run.path, name)).create();
   for (final format in ExportFormat.values) {
+    for (final password in <String?>[null, 'synthetic-archive']) {
+      test(
+        '${format.name} metadata inspection stages no attachments (password=${password != null})',
+        () async {
+          final fields = metadata(duplicateNames: true);
+          final input = await sources();
+          final file = p.join(run.path, 'preflight-package');
+          final write = await operation('preflight-write');
+          final read = await operation('preflight-read');
+          final service = StreamingPackService();
+          await service.exportPackage(
+            metadata: fields,
+            attachments: input,
+            format: format,
+            password: password,
+            destination: file,
+            operationDirectory: write.path,
+          );
+          final preview = await service.inspectPackage(
+            source: file,
+            password: password,
+            operationDirectory: read.path,
+          );
+          expect(preview.note.metadata, fields);
+          final staged = await read
+              .list()
+              .where((e) => e is File)
+              .cast<File>()
+              .toList();
+          expect(staged, hasLength(format == ExportFormat.zip ? 1 : 0));
+          expect(staged.where((f) => f.path.endsWith('.med')), isEmpty);
+          final restored = await service.importPackage(
+            source: file,
+            metadata: preview,
+            password: password,
+            operationDirectory: read.path,
+          );
+          expect(restored.note.metadata, fields);
+          for (final entry in input.entries) {
+            expect(
+              await File(restored.attachments[entry.key]!.path).readAsBytes(),
+              await File(entry.value.path).readAsBytes(),
+            );
+          }
+        },
+      );
+    }
+  }
+
+  test(
+    'DEFLATE metadata preview defers attachment CRC validation until import proceeds',
+    () async {
+      final fields = metadata();
+      final input = await sources();
+      final zip = Archive()
+        ..addFile(ArchiveFile.string('note.json', jsonEncode(fields)))
+        ..addFile(
+          ArchiveFile.string(
+            'metadata.json',
+            jsonEncode({'first': 'first.med', 'second': 'second.med'}),
+          ),
+        );
+      for (final entry in input.entries) {
+        zip.addFile(
+          ArchiveFile(
+            'attachments/${entry.key}.med',
+            entry.value.length,
+            await File(entry.value.path).readAsBytes(),
+          ),
+        );
+      }
+      final encoded = Uint8List.fromList(ZipEncoder().encode(zip));
+      final data = ByteData.sublistView(encoded);
+      var cursor = data.getUint32(encoded.length - 6, Endian.little);
+      var changed = false;
+      while (data.getUint32(cursor, Endian.little) == 0x02014b50) {
+        final nameLength = data.getUint16(cursor + 28, Endian.little);
+        final extraLength = data.getUint16(cursor + 30, Endian.little);
+        final commentLength = data.getUint16(cursor + 32, Endian.little);
+        final name = utf8.decode(
+          encoded.sublist(cursor + 46, cursor + 46 + nameLength),
+        );
+        if (name.startsWith('attachments/')) {
+          // Keep framing self-consistent but give the unchanged compressed
+          // payload a wrong CRC. This avoids random DEFLATE error variants.
+          final crc = data.getUint32(cursor + 16, Endian.little) ^ 1;
+          data.setUint32(cursor + 16, crc, Endian.little);
+          final local = data.getUint32(cursor + 42, Endian.little);
+          data.setUint32(local + 14, crc, Endian.little);
+          if ((data.getUint16(cursor + 8, Endian.little) & 8) != 0) {
+            var descriptor =
+                local +
+                30 +
+                data.getUint16(local + 26, Endian.little) +
+                data.getUint16(local + 28, Endian.little) +
+                data.getUint32(cursor + 20, Endian.little);
+            if (data.getUint32(descriptor, Endian.little) == 0x08074b50)
+              descriptor += 4;
+            data.setUint32(descriptor, crc, Endian.little);
+          }
+          changed = true;
+          break;
+        }
+        cursor += 46 + nameLength + extraLength + commentLength;
+      }
+      expect(changed, isTrue);
+      final file = await File(
+        p.join(run.path, 'corrupt-payload.zip'),
+      ).writeAsBytes(encoded);
+      final read = await operation('corrupt-preview');
+      final service = StreamingPackService();
+      final preview = await service.inspectPackage(
+        source: file.path,
+        operationDirectory: read.path,
+      );
+      expect(preview.note.note.id, fields['id']);
+      expect(await read.list().length, 1);
+      await expectLater(
+        service.importPackage(
+          source: file.path,
+          metadata: preview,
+          operationDirectory: read.path,
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    },
+  );
+  for (final format in ExportFormat.values) {
     test(
       '${format.name} password framing preserves metadata larger than a cipher window',
       () async {

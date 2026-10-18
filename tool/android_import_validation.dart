@@ -275,7 +275,9 @@ void main() async {
       'future-notes-validation-import-',
     );
     run = Directory(await run.resolveSymbolicLinks());
-    await _speedProbe(run, report);
+    if (!const bool.fromEnvironment('FN_IMPORT_PREFLIGHT_PROBE')) {
+      await _speedProbe(run, report);
+    }
     scope = await base.create(
       location,
       await base.root(location),
@@ -335,6 +337,77 @@ void main() async {
       destination: package,
       operationDirectory: run.path,
     );
+    if (const bool.fromEnvironment('FN_IMPORT_PREFLIGHT_PROBE')) {
+      final small = await cipher.encryptBinary(Uint8List.fromList([1, 2, 3]));
+      final smallFile = await File(
+        '${run.path}/metadata-fixture.med',
+      ).writeAsBytes(small);
+      final fields = {
+        ...metadata,
+        'attachments': [
+          {'id': 'probe', 'fileName': 'synthetic.bin', 'size': 3},
+        ],
+      };
+      var cases = 0;
+      for (final format in ExportFormat.values) {
+        for (final password in <String?>[null, 'synthetic-archive']) {
+          final fixture = '${run.path}/metadata-${cases++}.package';
+          await StreamingPackService().exportPackage(
+            metadata: fields,
+            attachments: {
+              'probe': StreamingFileSource(smallFile.path, small.length),
+            },
+            format: format,
+            password: password,
+            destination: fixture,
+            operationDirectory: run.path,
+          );
+          final doc = await docs.create(
+            location,
+            scope,
+            'package-$cases.fnote',
+          );
+          await docs.append(
+            location,
+            doc,
+            await File(fixture).readAsBytes(),
+            offset: 0,
+          );
+          await docs.flush(location, doc);
+          final grant = await docs.openSource(location, doc);
+          try {
+            final staging = await Directory(
+              '${run.path}/metadata-review-$cases',
+            ).create();
+            final service = StreamingPackService();
+            final review = await service.inspectPackage(
+              source: grant.path,
+              password: password,
+              operationDirectory: staging.path,
+            );
+            _check(review.note.note.id == id, 'metadata-uid-changed');
+            _check(
+              await staging.list().length ==
+                  (format == ExportFormat.zip ? 1 : 0),
+              'metadata-extracted-attachments',
+            );
+            final full = await service.importPackage(
+              source: grant.path,
+              metadata: review,
+              password: password,
+              operationDirectory: staging.path,
+            );
+            _check(
+              full.note.note.id == id && full.attachments.length == 1,
+              'metadata-handoff-failed',
+            );
+          } finally {
+            await docs.closeSource(location, grant.lease);
+          }
+        }
+      }
+      report['providerMetadataCases'] = cases;
+    }
     report['stage'] = 3;
     var savingProgressObserved = false;
     var finishingObserved = false;
@@ -417,6 +490,14 @@ void main() async {
         resolveConflict: (match) async {
           _check(match.identical == null, 'unexpected-content-comparison');
           _check(docs.blockedReadAttempts == 0, 'payload-read-before-choice');
+          if (const bool.fromEnvironment('FN_IMPORT_PREFLIGHT_PROBE')) {
+            final operations = Directory('${run!.path}/operations');
+            final extracted = await operations
+                .list(recursive: true)
+                .where((e) => e is File && e.path.endsWith('.med'))
+                .length;
+            _check(extracted == 0, 'attachment-extraction-before-choice');
+          }
           count++;
           if (decision == NoteImportDecision.replace) {
             // Metadata/descriptor availability is allowed after the choice;
@@ -435,6 +516,9 @@ void main() async {
       _check(result.value!.disposition == expected, 'wrong-disposition');
     }
     report['decisionCount'] = count;
+    if (const bool.fromEnvironment('FN_IMPORT_PREFLIGHT_PROBE')) {
+      report['choicesBeforeExtraction'] = count == 3;
+    }
     report['payloadReadsBeforeChoice'] = docs.blockedReadAttempts;
     report['existingPayloadReadAttempts'] = docs.blockedReadAttempts;
     report['savingProgressObserved'] = savingProgressObserved;
@@ -446,6 +530,9 @@ void main() async {
     report['savingBatchMicros'] = savingBatchMicros;
     report['noPayloadChunkWrites'] = docs.largestTransferBytes < 1024 * 1024;
     report['passed'] =
+        (!const bool.fromEnvironment('FN_IMPORT_PREFLIGHT_PROBE') ||
+            report['providerMetadataCases'] == 4 &&
+                report['choicesBeforeExtraction'] == true) &&
         count == 3 &&
         savingProgressObserved &&
         finishingObserved &&

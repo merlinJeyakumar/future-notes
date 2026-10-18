@@ -349,7 +349,12 @@ class AttachmentOpenCache {
         encryptDestination: false,
         sourcePassword: password,
         verifyOutput: policy.verifyAfterOpen,
-        ownedTarget: OwnedWriteTarget.forPath(candidate),
+        // Windows cache files already have a manifest owner and exclusive
+        // creation. They are never adopted into library publication. Preserve
+        // its existing open path, including valid short-name directory aliases.
+        ownedTarget: Platform.isWindows
+            ? null
+            : OwnedWriteTarget.forPath(candidate),
         requireWholeSource: true,
         // Legacy entries may have size=0 meaning unknown rather than empty.
         expectedPlaintextBytes: attachment.size > 0 ? attachment.size : null,
@@ -373,7 +378,9 @@ class AttachmentOpenCache {
           decryptSource: true,
           encryptDestination: false,
           verifyOutput: policy.verifyAfterOpen,
-          ownedTarget: OwnedWriteTarget.forPath(candidate),
+          ownedTarget: Platform.isWindows
+              ? null
+              : OwnedWriteTarget.forPath(candidate),
           requireWholeSource: true,
           expectedPlaintextBytes: attachment.size > 0 ? attachment.size : null,
         );

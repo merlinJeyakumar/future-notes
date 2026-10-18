@@ -187,6 +187,7 @@ class AttachmentTransformWorker {
             } else if (message == null) {
               if (!ended.isCompleted) ended.complete();
             } else if (message is List) {
+              _reportWindowsFailure('worker_exit');
               if (!result.isCompleted) {
                 result.complete(
                   const OperationResult.failure(
@@ -224,7 +225,8 @@ class AttachmentTransformWorker {
               );
             }
             resolved = await result.future;
-          } catch (_) {
+          } catch (error) {
+            _reportWindowsFailure('worker_start', error);
             resolved = const OperationResult.failure(
               OperationOutcome.ioFailure,
               'Attachment worker could not start.',
@@ -373,12 +375,14 @@ class AttachmentTransformWorker {
         OperationOutcome.cancelled,
         'Attachment preparation cancelled.',
       );
-    } on FormatException {
+    } on FormatException catch (error) {
+      _reportWindowsFailure('input', error);
       result = const OperationResult.failure(
         OperationOutcome.rejectedInput,
         'Attachment source or ciphertext is invalid.',
       );
-    } catch (_) {
+    } catch (error) {
+      _reportWindowsFailure('io', error);
       result = const OperationResult.failure(
         OperationOutcome.ioFailure,
         'Attachment preparation failed; the original was retained.',
@@ -387,6 +391,39 @@ class AttachmentTransformWorker {
     compute.close();
     cancellation.close();
     Isolate.exit(start.events, result);
+  }
+
+  // Windows-only failure codes for release diagnosis. Never log the exception,
+  // stack, source/destination, credentials or a provider's arbitrary message.
+  static void _reportWindowsFailure(String category, [Object? error]) {
+    if (!Platform.isWindows) return;
+    final reason = error is FormatException
+        ? const {
+                'Output has no exclusive owned write target.': 1,
+                'Invalid streaming source.': 2,
+                'Source is missing or truncated.': 3,
+                'Captured source revision changed.': 4,
+                'Attachment framing changed.': 5,
+                'Invalid legacy ciphertext length.': 6,
+                'Truncated IV.': 7,
+                'Short source read.': 8,
+                'Invalid legacy padding.': 9,
+                'Decrypted length differs from declared metadata.': 10,
+                'Captured source content changed.': 11,
+                'Source changed during transformation.': 12,
+                'Staged transformation mismatch.': 13,
+                'Owned output changed before acknowledgement.': 14,
+              }[error.message] ??
+              0
+        : error is StateError
+        ? 15
+        : 0;
+    final osCode = error is FileSystemException
+        ? error.osError?.errorCode ?? 0
+        : 0;
+    print(
+      'FN_ATTACHMENT_FAILURE category=$category reason=$reason os_code=$osCode',
+    );
   }
 }
 

@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ffi';
+import 'package:ffi/ffi.dart';
+import 'package:win32/win32.dart' as win;
 import 'package:crypto/crypto.dart';
 import 'package:flutter_application_1/core/storage/attachment_performance.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -65,6 +68,44 @@ void main() {
 
   AttachmentModel attachment([String id = 'synthetic']) =>
       AttachmentModel(id: id, fileName: 'sample.txt', size: 15);
+
+  test(
+    'Windows private cache opens and reuses a short-path directory alias',
+    () async {
+      final input = root.path.toNativeUtf16();
+      final output = calloc<Uint16>(32768).cast<Utf16>();
+      late String alias;
+      try {
+        final length = win.GetShortPathName(input, output, 32768);
+        if (length == 0 || length >= 32768) {
+          markTestSkipped('Filesystem does not expose a short path.');
+          return;
+        }
+        alias = output.toDartString();
+      } finally {
+        calloc.free(input);
+        calloc.free(output);
+      }
+      if (p.equals(alias, await root.resolveSymbolicLinks())) {
+        markTestSkipped('Short names are disabled for this directory.');
+        return;
+      }
+      final cache = AttachmentOpenCache(
+        rootResolver: () async => alias,
+        sourceResolver: (_, _) async => source,
+      );
+      caches.add(cache);
+      final first = await cache.prepare(note, attachment(), 0);
+      expect(first.isSuccess, isTrue, reason: first.message);
+      expect(await File(first.value!.path).readAsString(), 'synthetic bytes');
+      final second = await cache.prepare(note, attachment(), 0);
+      expect(second.value!.path, first.value!.path);
+      expect(cache.transformCount, 1);
+      await cache.invalidateNote(note);
+      expect(await File(first.value!.path).exists(), isFalse);
+    },
+    skip: !Platform.isWindows,
+  );
 
   for (final check in [false, true]) {
     for (final verify in [false, true]) {

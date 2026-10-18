@@ -5,7 +5,8 @@ import 'library_documents.dart';
 
 /// Android SAF and iOS coordinated document access share this control protocol.
 /// Payload messages are bounded; the selected provider remains authoritative.
-class MobileLibraryDocuments implements LibraryDocuments, LibraryCapacity {
+class MobileLibraryDocuments
+    implements LibraryDocuments, LibraryCapacity, LibraryOutputSinks {
   const MobileLibraryDocuments({
     required this.kind,
     MethodChannel channel = const MethodChannel('future_notes/documents'),
@@ -13,6 +14,52 @@ class MobileLibraryDocuments implements LibraryDocuments, LibraryCapacity {
 
   final LibraryLocationKind kind;
   final MethodChannel _channel;
+
+  @override
+  Future<LibraryOutputSinkLease> openOutputSink(
+    LibraryLocation library,
+    LibraryDocument parent,
+    String name,
+  ) async {
+    // The Apple adapter currently coordinates bounded transfers, not a held
+    // streaming writer. Keep the one-transfer encrypted fallback on that path.
+    if (kind != LibraryLocationKind.androidTree) {
+      throw const LibraryAccessException(
+        'unsupported_sink',
+        'A direct output sink is unavailable.',
+      );
+    }
+    validateDocumentName(name);
+    final value = (await _invoke<Map<Object?, Object?>>('openOutputSink', {
+      ..._args(library, parent),
+      'name': name,
+    }))!;
+    return LibraryOutputSinkLease(
+      library: library,
+      parent: parent,
+      document: LibraryDocument.fromJson(
+        value['document'] as Map<Object?, Object?>,
+      ),
+      lease: value['lease'] as String,
+      path: value['path'] as String,
+    );
+  }
+
+  @override
+  Future<LibraryDocument> checkOutputSink(LibraryOutputSinkLease sink) async =>
+      LibraryDocument.fromJson(
+        (await _invoke<Map<Object?, Object?>>('checkOutputSink', {
+          ..._args(sink.library, sink.document),
+          'lease': sink.lease,
+          'path': sink.path,
+        }))!,
+      );
+
+  @override
+  Future<void> closeOutputSink(LibraryOutputSinkLease sink) => _invoke<void>(
+    'closeOutputSink',
+    {..._args(sink.library, sink.document), 'lease': sink.lease},
+  );
 
   @override
   Future<int?> availableBytes(

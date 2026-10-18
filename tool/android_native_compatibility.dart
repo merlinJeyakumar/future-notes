@@ -13,6 +13,11 @@ import 'package:flutter_application_1/core/platform/worker_compute_clock.dart';
 import 'package:flutter_application_1/core/storage/preparation_pacer.dart';
 import 'package:flutter_application_1/core/storage/streaming_file_cipher.dart';
 import 'package:flutter_application_1/core/storage/attachment_transform_worker.dart';
+import 'package:flutter_application_1/core/storage/owned_write.dart';
+import 'package:flutter_application_1/core/storage/attachment_performance.dart';
+import 'package:flutter_application_1/core/storage/provider_document_io.dart';
+import 'package:flutter_application_1/core/storage/owned_note_persistence.dart'
+    show PreparedAttachmentFile;
 import 'package:flutter_application_1/core/storage/attachment_scheduler.dart';
 import 'package:flutter_application_1/core/platform/system_capacity.dart';
 import 'package:flutter_application_1/features/dashboard/services/encryption_service.dart';
@@ -27,6 +32,308 @@ import 'package:flutter_application_1/features/dashboard/models/note_model.dart'
 
 void check(bool value, String code) {
   if (!value) throw StateError(code);
+}
+
+class _ScopedDocuments extends MobileLibraryDocuments {
+  _ScopedDocuments(this.scope) : super(kind: LibraryLocationKind.androidTree);
+  final LibraryDocument scope;
+  @override
+  Future<LibraryDocument> root(LibraryLocation library) async => scope;
+}
+
+class _LocalPayload implements BoundedByteSource {
+  _LocalPayload(this.file, this.length);
+  final File file;
+  @override
+  final int length;
+  @override
+  Stream<List<int>> open() => file.openRead();
+}
+
+Future<_ScopedDocuments> isolatedDocuments(
+  LibraryLocation location,
+  Directory output,
+  String label,
+) async {
+  const base = MobileLibraryDocuments(kind: LibraryLocationKind.androidTree);
+  final scope = await base.create(
+    location,
+    await base.root(location),
+    '.future-notes-validation-${const Uuid().v4()}',
+    directory: true,
+  );
+  await File(
+    '${output.path}/scope-$label.json',
+  ).writeAsString(jsonEncode({'name': scope.name, 'token': scope.token}));
+  return _ScopedDocuments(scope);
+}
+
+/// Only new synthetic note identities; never open an existing note.
+Future<void> validateDirectProviderWrites(Directory output) async {
+  final selection = await MobileFileActions.channel.invokeMethod<String>(
+    'readLibrarySelection',
+  );
+  check(selection != null, 'direct-provider-selection');
+  final location = LibraryLocation.fromJson(
+    Map<String, Object?>.from(
+      (jsonDecode(selection!) as Map)['location'] as Map,
+    ),
+  );
+  final documents = await isolatedDocuments(location, output, 'direct');
+  final source = File('${output.path}/direct-source.bin');
+  await source.writeAsBytes(
+    List.generate(2 * 1024 * 1024 + 17, (i) => i % 251),
+  );
+  for (final verify in [false, true]) {
+    final files = ProviderNoteFiles(
+      documents: documents,
+      location: location,
+      libraryId: const Uuid().v4(),
+      privateRoot: await MobileFileActions().privateRoot(),
+    );
+    final reference = await files.newNoteReference(const Uuid().v4());
+    await File('${output.path}/synthetic-note-$verify.json').writeAsString(
+      jsonEncode({'id': reference.modelId, 'fileName': reference.fileName}),
+    );
+    final operation = await files.createOperationDirectory(reference);
+    final scheduler = AttachmentScheduler(
+      sample: () => const SystemCapacity(
+        processors: 4,
+        availableBytes: 128 * 1024 * 1024,
+        systemCpu: 0,
+        processCpu: 0,
+      ),
+    );
+    final worker = AttachmentTransformWorker(scheduler: scheduler);
+    try {
+      final id = const Uuid().v4();
+      final target = await files.createAttachmentCandidate(
+        reference,
+        id,
+        operation,
+        await source.length() + 32,
+      );
+      check(target.sink != null, 'direct-output-sink');
+      final result = await worker
+          .submit(
+            FileTransformRequest(
+              source: StreamingFileSource(source.path, await source.length()),
+              destination: target.path,
+              decryptSource: false,
+              encryptDestination: true,
+              destinationPassword: 'synthetic-direct-password',
+              verifyOutput: verify,
+              ownedTarget: target,
+            ),
+          )
+          .result;
+      check(result.isSuccess, 'direct-transform-${result.outcome.name}');
+      final receipt = result.value!.receipt!;
+      check(
+        receipt.payloadReadBytes == await source.length() &&
+            receipt.readbackBytes == (verify ? receipt.length : 0),
+        'direct-pass-count',
+      );
+      final fields = <String, dynamic>{
+        'id': reference.modelId,
+        'title': 'Synthetic only',
+        'content': '[]',
+        'timestamp': 1700000000000,
+        'isLocked': false,
+        'attachments': [
+          {
+            'id': id,
+            'fileName': 'synthetic.bin',
+            'size': await source.length(),
+            'mentionId': 'synthetic-stable-mention',
+          },
+        ],
+      };
+      final content = await EncryptionService().encryptApp(jsonEncode(fields));
+      final committed = await files.commitGeneration(reference, content, [
+        PreparedAttachmentFile(
+          id,
+          StreamingFileSource(target.path, receipt.length, receipt: receipt),
+        ),
+      ]);
+      final captured = await files.attachmentSource(
+        committed,
+        id,
+        verifyContent: false,
+      );
+      final decoded = await StreamingFileCipher.transform(
+        source: captured,
+        destination: '${output.path}/direct-$verify.bin',
+        decryptSource: true,
+        encryptDestination: false,
+        sourcePassword: 'synthetic-direct-password',
+        verifyOutput: false,
+      );
+      check(
+        decoded.plaintextHash == result.value!.plaintextHash,
+        'direct-published-payload',
+      );
+      final dartDecoded = await StreamingFileCipher.transform(
+        source: captured,
+        destination: '${output.path}/direct-dart-$verify.bin',
+        decryptSource: true,
+        encryptDestination: false,
+        sourcePassword: 'synthetic-direct-password',
+        verifyOutput: false,
+        useNative: false,
+      );
+      check(
+        dartDecoded.plaintextHash == result.value!.plaintextHash,
+        'dart-provider-readable',
+      );
+      final largeFields = {
+        ...fields,
+        'largeSyntheticMetadata': 'x' * (2 * 1024 * 1024 + 17),
+      };
+      final largeOutput = '${output.path}/large-metadata-$verify.fnote';
+      final largeOperation = await Directory(
+        '${output.path}/large-metadata-$verify',
+      ).create();
+      await StreamingPackService().exportPackage(
+        metadata: largeFields,
+        attachments: {id: captured},
+        format: ExportFormat.binary,
+        destination: largeOutput,
+        operationDirectory: largeOperation.path,
+        password: 'synthetic-archive',
+      );
+      final largeImported = await StreamingPackService().importPackage(
+        source: largeOutput,
+        operationDirectory: largeOperation.path,
+        password: 'synthetic-archive',
+      );
+      check(
+        largeImported.note.metadata['largeSyntheticMetadata'] ==
+            largeFields['largeSyntheticMetadata'],
+        'large-native-metadata',
+      );
+      // Exercise strict legacy DEFLATE parsing from an actual SAF grant in
+      // both native-enabled and Dart-only background workers.
+      final legacyCipher = EncryptionService(useNative: false);
+      final encryptedFixture = await legacyCipher.encryptBinary(
+        await source.readAsBytes(),
+        password: 'synthetic-direct-password',
+      );
+      final zip = await PackService(legacyCipher).createZipPack(
+        NoteModel.fromJson(fields),
+        {id: encryptedFixture},
+        password: 'synthetic-archive',
+        noteMetadata: fields,
+      );
+      final zipFile = File('${output.path}/granted-$verify.zip');
+      await zipFile.writeAsBytes(zip, flush: true);
+      final zipDoc = await documents.create(
+        location,
+        documents.scope,
+        'granted-$verify.zip',
+      );
+      await files.io.write(
+        zipDoc,
+        _LocalPayload(zipFile, zip.length),
+        verifyReadback: false,
+        expectedHash: sha256.convert(zip).toString(),
+      );
+      final zipSource = await documents.openSource(location, zipDoc);
+      try {
+        for (final native in [true, false]) {
+          final dir = await Directory(
+            '${output.path}/granted-$verify-$native',
+          ).create();
+          final imported = await StreamingPackService(useNative: native)
+              .importPackage(
+                source: zipSource.path,
+                operationDirectory: dir.path,
+                password: 'synthetic-archive',
+              );
+          check(
+            imported.note.metadata['id'] == fields['id'],
+            'granted-import-identity',
+          );
+          check(
+            imported.attachments[id]!.receipt!.sha256Hex ==
+                sha256.convert(encryptedFixture).toString(),
+            'granted-import-native-$native',
+          );
+        }
+      } finally {
+        await documents.closeSource(location, zipSource.lease);
+      }
+      await documents.delete(location, zipDoc);
+      await AndroidNativeCipher.configure(
+        AttachmentPerformance.defaults.copyWith(maxParallel: 2),
+      );
+      try {
+        final simultaneous = await Future.wait(
+          List.generate(
+            2,
+            (i) => StreamingFileCipher.transform(
+              source: captured,
+              destination: '${output.path}/parallel-$verify-$i.bin',
+              decryptSource: true,
+              encryptDestination: false,
+              sourcePassword: 'synthetic-direct-password',
+              verifyOutput: false,
+            ),
+          ),
+        );
+        check(
+          simultaneous.every(
+            (r) => r.plaintextHash == result.value!.plaintextHash,
+          ),
+          'independent-provider-cursors',
+        );
+      } finally {
+        await AndroidNativeCipher.configure(AttachmentPerformance.defaults);
+      }
+      await files.releaseAttachmentSources(committed);
+      final deleted = await files.deleteResolved(committed);
+      check(
+        deleted.isSuccess,
+        'direct-synthetic-cleanup-${deleted.outcome.name}',
+      );
+    } finally {
+      await worker.close();
+      await scheduler.close();
+      await files.removeOperationDirectory(operation);
+      // A failed first write can leave only our freshly-created empty folders.
+      final metadata = await files.io.resolve([
+        reference.fileName,
+        'note_content_${reference.modelId}.enc',
+      ]);
+      if (metadata != null) {
+        final synthetic = await files.resolveNote(reference.fileName);
+        if (synthetic != null) {
+          await files.releaseAttachmentSources(synthetic);
+          final cleanup = await files.deleteResolved(synthetic);
+          if (!cleanup.isSuccess)
+            await File('${output.path}/cleanup-$verify.json').writeAsString(
+              jsonEncode({
+                'outcome': cleanup.outcome.name,
+                'message': cleanup.message,
+              }),
+            );
+        }
+      }
+      if (metadata == null) {
+        final folder = await files.io.resolve([reference.fileName]);
+        if (folder != null) {
+          final attachments = await files.io.child(folder, 'attachments');
+          if (attachments != null &&
+              (await documents.children(location, attachments)).isEmpty)
+            await documents.delete(location, attachments);
+          if ((await documents.children(location, folder)).isEmpty)
+            await documents.delete(location, folder);
+        }
+      }
+      await files.close();
+    }
+  }
+  await source.delete();
 }
 
 void main() async {
@@ -49,6 +356,8 @@ void main() async {
       '${root.path}/crypto-validation/output-${DateTime.now().microsecondsSinceEpoch}',
     ).create(recursive: true);
     summary['outputName'] = output.path.split('/').last;
+    await validateDirectProviderWrites(output);
+    summary['directProviderWrites'] = true;
     await validateProviderOpen(output);
     summary['providerCacheOpenAndReopen'] = true;
     final manifest =
@@ -394,6 +703,36 @@ void main() async {
       duty: () => .7,
     );
     final encryptionMs = watch.elapsedMilliseconds;
+    final fastPath = '${output.path}/benchmark-fast.med';
+    final fastOwner = const Uuid().v4();
+    final fastToken = ServicesBinding.rootIsolateToken;
+    final largePath = large.path;
+    final largeLength = await large.length();
+    watch.reset();
+    final fast = await Isolate.run(() async {
+      AndroidNativeCipher.initialize(fastToken, owner: fastOwner);
+      return StreamingFileCipher.transform(
+        source: StreamingFileSource(largePath, largeLength),
+        destination: fastPath,
+        decryptSource: false,
+        encryptDestination: true,
+        destinationPassword: 'synthetic-benchmark',
+        verifyOutput: false,
+        ownedTarget: OwnedWriteTarget.forPath(fastPath),
+        duty: () => .7,
+      );
+    });
+    await AndroidNativeCipher.releaseOwner(fastOwner);
+    final fastEncryptionMs = watch.elapsedMilliseconds;
+    check(
+      fast.plaintextHash == encrypted.plaintextHash &&
+          fast.receipt!.readbackBytes == 0,
+      'fast-native-compat',
+    );
+    await File(fastPath).delete();
+    summary['nativeEncryptFastMs'] = fastEncryptionMs;
+    summary['nativeFastReadBytes'] = fast.receipt!.payloadReadBytes;
+    summary['nativeFastReadbackBytes'] = fast.receipt!.readbackBytes;
     watch.reset();
     final opened = await StreamingFileCipher.transform(
       source: StreamingFileSource(enc.path, await enc.length()),
@@ -503,9 +842,7 @@ Future<void> validateProviderOpen(Directory output) async {
       (jsonDecode(selection!) as Map)['location'] as Map,
     ),
   );
-  const documents = MobileLibraryDocuments(
-    kind: LibraryLocationKind.androidTree,
-  );
+  final documents = await isolatedDocuments(location, output, 'cache');
   final files = ProviderNoteFiles(
     documents: documents,
     location: location,

@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../../../core/storage/file_operation_progress.dart';
 
 enum AttachmentJobOperation { add, open, protection, export, import }
 
@@ -27,7 +28,9 @@ class AttachmentJobSnapshot {
     this.detail,
     this.batch = false,
     this.originalAttachmentId,
+    this.attachmentIds = const [],
     this.operation = AttachmentJobOperation.add,
+    this.fileProgress,
   });
   final String id;
   final int owner;
@@ -39,7 +42,11 @@ class AttachmentJobSnapshot {
   final String? detail;
   final bool batch;
   final String? originalAttachmentId;
+
+  /// Storage identities affected by a batch; never matched by filename.
+  final List<String> attachmentIds;
   final AttachmentJobOperation operation;
+  final FileOperationProgress? fileProgress;
   bool get active => ![
     AttachmentJobPhase.completed,
     AttachmentJobPhase.cancelled,
@@ -64,6 +71,7 @@ class AttachmentJobState {
     if (_disposed) return;
     if (snapshot.phase == progress.value.phase &&
         snapshot.detail == progress.value.detail &&
+        snapshot.originalAttachmentId == progress.value.originalAttachmentId &&
         snapshot.bytes != snapshot.total &&
         snapshot.active &&
         _clock.elapsedMilliseconds - _last < 200) {

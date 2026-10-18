@@ -1,7 +1,7 @@
 /// Indent HTML structure and explicit line breaks without rewriting tags,
 /// attributes, entities, inline word boundaries or whitespace-sensitive content.
 /// Incomplete/ambiguous markup is rejected, leaving the editor's source intact.
-String formatHtmlSource(String source) {
+String formatHtmlSource(String source, {bool expandTextBlocks = false}) {
   if (source.length > 32 * 1024 * 1024) {
     throw const FormatException('HTML is too large to format.');
   }
@@ -71,8 +71,12 @@ String formatHtmlSource(String source) {
   if (stack.length != 1) {
     throw const FormatException('Incomplete HTML element.');
   }
-  return _renderHtml(root, source, 0);
+  return _renderHtml(root, source, 0, expandTextBlocks);
 }
+
+/// Mobile code view expands text blocks; desktop keeps its established output.
+String formatExpandedHtmlSource(String source) =>
+    formatHtmlSource(source, expandTextBlocks: true);
 
 int _tagEnd(String source, int start) {
   int? quote;
@@ -89,7 +93,7 @@ int _tagEnd(String source, int start) {
   throw const FormatException('Incomplete HTML tag.');
 }
 
-String _renderHtml(_HtmlPart part, String source, int depth) {
+String _renderHtml(_HtmlPart part, String source, int depth, bool expandText) {
   final isRoot = part.name == '#root';
   final indent = '  ' * depth;
   final children = part.children
@@ -123,22 +127,30 @@ String _renderHtml(_HtmlPart part, String source, int depth) {
     // structure its container and split after explicit HTML line breaks.
     if (!isRoot &&
         _blockTags.contains(part.name) &&
-        part.children.any((child) => child.name != null)) {
-      return _renderMixedBlock(part, source, depth);
+        (expandText && children.isNotEmpty ||
+            part.children.any((child) => child.name != null))) {
+      return _renderMixedBlock(part, source, depth, expandText);
     }
     return isRoot ? raw : '$indent$raw';
   }
   if (isRoot) {
     return source.substring(0, children.first.start) +
-        children.map((child) => _renderHtml(child, source, 0)).join('\n') +
+        children
+            .map((child) => _renderHtml(child, source, 0, expandText))
+            .join('\n') +
         source.substring(children.last.end);
   }
   return '$indent${source.substring(part.start, part.openingEnd)}\n'
-      '${children.map((child) => _renderHtml(child, source, depth + 1)).join('\n')}\n'
+      '${children.map((child) => _renderHtml(child, source, depth + 1, expandText)).join('\n')}\n'
       '$indent${source.substring(part.closingStart, part.end)}';
 }
 
-String _renderMixedBlock(_HtmlPart part, String source, int depth) {
+String _renderMixedBlock(
+  _HtmlPart part,
+  String source,
+  int depth,
+  bool expandText,
+) {
   final content = source.substring(part.openingEnd, part.closingStart);
   final inline = _renderInline(part, source, depth + 1);
   // Literal leading/trailing text spaces remain next to the container tags.
@@ -149,7 +161,7 @@ String _renderMixedBlock(_HtmlPart part, String source, int depth) {
   final trailingTextSpace =
       content.isNotEmpty && RegExp(r'[^\n][^\S\n]+$').hasMatch(content);
   if (!inline.contains('\n') &&
-      (leadingTextSpace || part.children.first.name == null)) {
+      (leadingTextSpace || (!expandText && part.children.first.name == null))) {
     return '${'  ' * depth}${source.substring(part.start, part.end)}';
   }
   var body = inline;

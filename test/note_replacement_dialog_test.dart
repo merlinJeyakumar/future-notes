@@ -4,7 +4,7 @@ import 'package:flutter_application_1/core/storage/note_reference.dart';
 import 'package:flutter_application_1/features/dashboard/models/note_import.dart';
 import 'package:flutter_application_1/features/dashboard/widgets/note_replacement_dialog.dart';
 
-NoteImportConflict conflict(bool identical) => NoteImportConflict(
+NoteImportConflict conflict(bool? identical) => NoteImportConflict(
   NoteReference(
     binding: StorageBinding('D:/synthetic-library', 1),
     fileName: 'note_synthetic',
@@ -19,7 +19,7 @@ NoteImportConflict conflict(bool identical) => NoteImportConflict(
 );
 
 void main() {
-  for (final identical in [false, true]) {
+  for (final identical in <bool?>[null, false, true]) {
     for (final choice in NoteImportDecision.values) {
       testWidgets(
         'conflict identical=$identical returns explicit ${choice.name}',
@@ -45,11 +45,11 @@ void main() {
           await tester.pumpAndSettle();
           expect(find.text('This note already exists'), findsOneWidget);
           expect(
-            find.text(
-              identical
-                  ? 'The imported version is identical.'
-                  : 'The imported version has different content.',
-            ),
+            find.text(switch (identical) {
+              true => 'The imported version is identical.',
+              false => 'The imported version has different content.',
+              null => 'A note with the same ID is already in this library.',
+            }),
             findsOneWidget,
           );
           for (final label in ['Duplicate', 'Back up & Replace', 'Ignore']) {

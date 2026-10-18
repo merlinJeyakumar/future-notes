@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import '../../../core/storage/file_operation_progress.dart';
+import '../../../core/platform/android_native_cipher.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 // import 'dart:io'; // duplicate removed
@@ -42,12 +44,16 @@ import '../../../core/storage/note_reference.dart';
 import '../../../core/storage/owned_note_persistence.dart';
 import '../../../core/storage/attachment_transform_worker.dart';
 import '../../../core/storage/attachment_scheduler.dart';
+import '../../../core/storage/owned_write.dart';
+import '../../../core/storage/attachment_performance.dart';
 import '../../../core/storage/streaming_file_cipher.dart';
 import '../models/attachment_job.dart';
 import '../../../core/storage/library_watch.dart';
 import '../../../core/storage/attachment_open_cache.dart';
 import '../../../core/platform/windows_desktop_actions.dart';
 import '../../../core/platform/mobile_export.dart';
+import '../../../core/platform/prepared_mobile_export.dart';
+import '../../../core/platform/export_filename.dart';
 import '../../../core/platform/attachment_batch_export.dart';
 import '../../../core/storage/owned_settings_persistence.dart';
 import 'package:path/path.dart' as p;
@@ -56,6 +62,11 @@ typedef RecentFileFilter =
     Future<List<RecentFile>> Function(List<RecentFile> files, String query);
 
 class ContentViewModel extends BaseViewModel {
+  final _preparedMobileExports = PreparedMobileExportCache();
+  PreparedMobileExport? preparedExportForJob(String id) =>
+      _preparedMobileExports.forJob(id);
+  @protected
+  bool get prepareMobilePackageExport => Platform.isAndroid || Platform.isIOS;
   final IFileService _fileService;
   final IEncryptionService _encryptionService;
   final SettingsService _settings;
@@ -469,6 +480,7 @@ class ContentViewModel extends BaseViewModel {
   Future<void> _invalidateAttachmentCache(NoteReference reference) async {
     _revokingAttachmentAccess = true;
     try {
+      await _preparedMobileExports.invalidate(reference.contentPath);
       await _closeAttachmentViewers();
       for (final cached
           in _attachmentOpenCache?.filesForNote(reference) ??
@@ -496,6 +508,7 @@ class ContentViewModel extends BaseViewModel {
   }
 
   Future<void> closeAttachmentCache() async {
+    await _preparedMobileExports.close();
     if (_noteReference != null)
       await _invalidateAttachmentCache(_noteReference!);
     await _closeAttachmentViewers();
@@ -567,6 +580,15 @@ class ContentViewModel extends BaseViewModel {
       _fileService is TransactionalNoteFiles &&
       (_fileService as TransactionalNoteFiles).usesOwnedStorage;
   bool get usesOwnedStorage => _usesOwnedMutations;
+  bool get hasActiveExport => attachmentJobsNotifier.value.any(
+    (state) =>
+        state.progress.value.active &&
+        state.progress.value.operation == AttachmentJobOperation.export,
+  );
+
+  // Export scan policy follows the actual native host, not a UI theme override.
+  @protected
+  bool get mobileAttachmentExportPolicy => Platform.isAndroid || Platform.isIOS;
   bool get hasAttachmentJobs =>
       attachmentJobsNotifier.value.any((j) => j.progress.value.active);
 
@@ -1110,6 +1132,8 @@ class ContentViewModel extends BaseViewModel {
     String fileName, {
     bool batch = false,
     String? originalAttachmentId,
+    List<String> attachmentIds = const [],
+    bool captureRecoveryOwner = true,
     AttachmentJobOperation operation = AttachmentJobOperation.add,
   }) {
     final job = AttachmentJobState(
@@ -1120,12 +1144,14 @@ class ContentViewModel extends BaseViewModel {
         phase: AttachmentJobPhase.queued,
         batch: batch,
         originalAttachmentId: originalAttachmentId,
+        attachmentIds: List.unmodifiable(attachmentIds),
         operation: batch && operation == AttachmentJobOperation.add
             ? AttachmentJobOperation.protection
             : operation,
       ),
     );
-    if (_noteReference case final reference?) {
+    if (captureRecoveryOwner && _noteReference != null) {
+      final reference = _noteReference!;
       _jobRecovery[id] = {
         'version': 1,
         'target': reference.fileName,
@@ -1146,6 +1172,8 @@ class ContentViewModel extends BaseViewModel {
     int? total,
     String? error,
     String? detail,
+    String? originalAttachmentId,
+    FileOperationProgress? fileProgress,
   }) {
     if (_disposed || !_ownedJobStates.contains(job)) return;
     final previous = job.progress.value;
@@ -1171,8 +1199,11 @@ class ContentViewModel extends BaseViewModel {
         error: error,
         detail: detail,
         batch: previous.batch,
-        originalAttachmentId: previous.originalAttachmentId,
+        originalAttachmentId:
+            originalAttachmentId ?? previous.originalAttachmentId,
+        attachmentIds: previous.attachmentIds,
         operation: previous.operation,
+        fileProgress: fileProgress,
       ),
     );
     if (!job.progress.value.active && previous.active) {
@@ -1293,6 +1324,8 @@ class ContentViewModel extends BaseViewModel {
     required bool decrypt,
     String? oldPassword,
     String? newPassword,
+    bool? verifyWrites,
+    OwnedWriteTarget? ownedTarget,
   }) async {
     final id = job.progress.value.id;
     if (_cancelledAttachmentJobs.contains(id)) {
@@ -1309,6 +1342,10 @@ class ContentViewModel extends BaseViewModel {
         encryptDestination: true,
         sourcePassword: oldPassword,
         destinationPassword: newPassword,
+        verifyOutput:
+            verifyWrites ??
+            _settings.attachmentPerformance.verifyLargeFileWrites,
+        ownedTarget: ownedTarget ?? OwnedWriteTarget.forPath(destination),
       ),
       onStarted: () => _jobPhase(job, AttachmentJobPhase.preparing),
       onProgress: (phase, bytes, total) => _jobPhase(
@@ -1434,6 +1471,7 @@ class ContentViewModel extends BaseViewModel {
     final job = _newAttachmentJob(id, fileName);
     final completed = Completer<void>();
     _attachmentAddCompletions[id] = completed;
+    final performance = _settings.attachmentPerformance;
     final reference = _noteReference!;
     final files = _fileService as TransactionalNoteFiles;
     Directory? operation;
@@ -1471,12 +1509,22 @@ class ContentViewModel extends BaseViewModel {
       }
       operation = await files.createOperationDirectory(reference);
       _jobRecovery[id]!['staging'] = p.basename(operation.path);
-      final staged = p.join(operation.path, '$id.med');
+      final target = files is AttachmentCandidateOwner
+          ? await (files as AttachmentCandidateOwner).createAttachmentCandidate(
+              reference,
+              id,
+              operation,
+              source.length + 32,
+            )
+          : OwnedWriteTarget.forPath(p.join(operation.path, '$id.med'));
+      final staged = target.path;
       final transformed = await _transformAttachment(
         job,
         source,
         staged,
         decrypt: false,
+        ownedTarget: target,
+        verifyWrites: performance.verifyLargeFileWrites,
         newPassword: password,
       );
       if (!transformed.isSuccess) {
@@ -1521,7 +1569,11 @@ class ContentViewModel extends BaseViewModel {
             prepared: [
               PreparedAttachmentFile(
                 id,
-                StreamingFileSource(staged, transformed.value!.length),
+                StreamingFileSource(
+                  staged,
+                  transformed.value!.length,
+                  receipt: transformed.value!.receipt,
+                ),
               ),
             ],
           );
@@ -1632,6 +1684,7 @@ class ContentViewModel extends BaseViewModel {
       notifyListeners();
       return const OperationResult.success();
     }
+    final performance = _settings.attachmentPerformance;
     _bulkAttachmentJob = true;
     final generation = _session.generation;
     final credential = _session.credentialGeneration;
@@ -1674,13 +1727,25 @@ class ContentViewModel extends BaseViewModel {
         final source = await files.attachmentSource(
           _noteReference ?? reference,
           attachment.id,
+          verifyContent: performance.checkBeforeOpen,
         );
-        var staged = p.join(operation.path, '$id.med');
+        var target = files is AttachmentCandidateOwner
+            ? await (files as AttachmentCandidateOwner)
+                  .createAttachmentCandidate(
+                    reference,
+                    id,
+                    operation,
+                    source.length + 32,
+                  )
+            : OwnedWriteTarget.forPath(p.join(operation.path, '$id.med'));
+        var staged = target.path;
         var transform = await _transformAttachment(
           job,
           source,
           staged,
           decrypt: true,
+          ownedTarget: target,
+          verifyWrites: performance.verifyLargeFileWrites,
           oldPassword: previousPassword,
           newPassword: password,
         );
@@ -1689,12 +1754,25 @@ class ContentViewModel extends BaseViewModel {
             previousPassword != null) {
           // Legacy mixed-key attachments can use the app key. A retry owns a
           // fresh output; valid padding alone is never called authentication.
-          staged = p.join(operation.path, '$id.fallback.med');
+          target = files is AttachmentCandidateOwner
+              ? await (files as AttachmentCandidateOwner)
+                    .createAttachmentCandidate(
+                      reference,
+                      id,
+                      operation,
+                      source.length + 32,
+                    )
+              : OwnedWriteTarget.forPath(
+                  p.join(operation.path, '$id.fallback.med'),
+                );
+          staged = target.path;
           transform = await _transformAttachment(
             job,
             source,
             staged,
             decrypt: true,
+            ownedTarget: target,
+            verifyWrites: performance.verifyLargeFileWrites,
             newPassword: password,
           );
         }
@@ -1708,7 +1786,11 @@ class ContentViewModel extends BaseViewModel {
         prepared.add(
           PreparedAttachmentFile(
             id,
-            StreamingFileSource(staged, transform.value!.length),
+            StreamingFileSource(
+              staged,
+              transform.value!.length,
+              receipt: transform.value!.receipt,
+            ),
           ),
         );
         replacement.add(
@@ -1986,12 +2068,14 @@ class ContentViewModel extends BaseViewModel {
     final owner = _session.generation;
     final credentials = _session.credentialGeneration;
     final path = currentContentPath;
+    final performance = _settings.attachmentPerformance;
     final selected = _attachments.where((a) => ids.contains(a.id)).toList();
     _bulkAttachmentJob = true;
     final job = _newAttachmentJob(
       const Uuid().v4(),
       '${selected.length} attachments',
       batch: true,
+      attachmentIds: selected.map((a) => a.id).toList(),
       operation: AttachmentJobOperation.export,
     );
     final allocated = <String>[];
@@ -2013,6 +2097,7 @@ class ContentViewModel extends BaseViewModel {
         result = await _exportOwnedAttachment(
           selected[i],
           batchJob: job,
+          policy: performance,
           batchOutput: output,
           allocated: allocated,
           batchDetail:
@@ -2065,6 +2150,7 @@ class ContentViewModel extends BaseViewModel {
     AttachmentBatchExport? batchOutput,
     List<String>? allocated,
     String? batchDetail,
+    AttachmentPerformance? policy,
   }) async {
     if (batchJob == null) {
       final ready = await _resolveOwnerJobs(DraftTransition.navigation);
@@ -2083,15 +2169,23 @@ class ContentViewModel extends BaseViewModel {
         _newAttachmentJob(
           const Uuid().v4(),
           attachment.fileName,
+          originalAttachmentId: attachment.id,
           operation: AttachmentJobOperation.export,
         );
+    _jobPhase(
+      job,
+      AttachmentJobPhase.queued,
+      originalAttachmentId: attachment.id,
+      detail: batchDetail,
+    );
     final files = _fileService as TransactionalNoteFiles;
     final readCancellation = _exportReadCancellations.putIfAbsent(
       job.progress.value.id,
       FileReadCancellation.new,
     );
-    final mobile = Platform.isAndroid || Platform.isIOS;
-    final checks = _settings.attachmentPerformance.exportChecks(mobile: mobile);
+    final mobile = mobileAttachmentExportPolicy;
+    final performance = policy ?? _settings.attachmentPerformance;
+    final checks = performance.exportChecks(mobile: mobile);
     String? candidate;
     OperationResult<void> result;
     try {
@@ -2124,7 +2218,10 @@ class ContentViewModel extends BaseViewModel {
       } else {
         allocated?.add(destination);
         await _verifyExportDestination(destination);
-        final expected = await ExternalFileExport.review(destination);
+        final expected = await ExternalFileExport.reviewOwned(
+          destination,
+          verifyReadback: performance.verifyLargeFileWrites,
+        );
         candidate = ExternalFileExport.candidatePath(destination);
         final id = job.progress.value.id;
         if (_cancelledAttachmentJobs.contains(id) ||
@@ -2140,6 +2237,7 @@ class ContentViewModel extends BaseViewModel {
             encryptDestination: false,
             sourcePassword: _currentPassword,
             verifyOutput: checks.verifyOutput,
+            ownedTarget: OwnedWriteTarget.forPath(candidate),
             requireWholeSource: mobile,
             expectedPlaintextBytes: mobile && attachment.size > 0
                 ? attachment.size
@@ -2170,6 +2268,7 @@ class ContentViewModel extends BaseViewModel {
               decryptSource: true,
               encryptDestination: false,
               verifyOutput: checks.verifyOutput,
+              ownedTarget: OwnedWriteTarget.forPath(candidate),
               requireWholeSource: mobile,
               expectedPlaintextBytes: mobile && attachment.size > 0
                   ? attachment.size
@@ -2199,8 +2298,8 @@ class ContentViewModel extends BaseViewModel {
         } else if (batchJob == null && !_tryBeginFinalization([job])) {
           result = _cancelledResult();
         } else {
-          result = await ExternalFileExport.publish(
-            candidate: candidate,
+          result = await ExternalFileExport.publishOwned(
+            receipt: transformed.value!.receipt!,
             destination: destination,
             expected: expected,
           );
@@ -2677,7 +2776,9 @@ class ContentViewModel extends BaseViewModel {
     await setEditorMode(_isHtmlMode ? EditorMode.richText : EditorMode.html);
   }
 
-  Future<OperationResult<void>> formatHtml() async {
+  Future<OperationResult<void>> formatHtml({
+    bool expandTextBlocks = false,
+  }) async {
     if (_disposed ||
         !_isHtmlMode ||
         _isLocked ||
@@ -2700,7 +2801,10 @@ class ContentViewModel extends BaseViewModel {
     final selection = htmlController.selection;
     isConvertingNotifier.value = true;
     try {
-      final formatted = await compute(formatHtmlSource, source);
+      final formatted = await compute(
+        expandTextBlocks ? formatExpandedHtmlSource : formatHtmlSource,
+        source,
+      );
       if (_disposed ||
           owner != _session.generation ||
           revision != _session.editRevision ||
@@ -3898,11 +4002,20 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
-  Future<bool> unlockNote(String password) async {
-    return _libraryTask(() => _unlockNote(password), false);
+  Future<bool> unlockNote(
+    String password, {
+    bool readOnlyExport = false,
+  }) async {
+    return _libraryTask(
+      () => _unlockNote(password, readOnlyExport: readOnlyExport),
+      false,
+    );
   }
 
-  Future<bool> _unlockNote(String password) async {
+  Future<bool> _unlockNote(
+    String password, {
+    bool readOnlyExport = false,
+  }) async {
     if (_disposed || _currentFileName == null || _storedNote == null) {
       return false;
     }
@@ -3924,19 +4037,38 @@ class ContentViewModel extends BaseViewModel {
         document.close();
         return false;
       }
+      // Read-only access may reveal the same locked draft while its export
+      // retains ownership. No other active operation may cross this boundary.
+      final activeJobs = attachmentJobsNotifier.value
+          .map((state) => state.progress.value)
+          .where((job) => job.active)
+          .toList();
+      final keepExportOwner =
+          readOnlyExport &&
+          activeJobs.isNotEmpty &&
+          activeJobs.every(
+            (job) =>
+                job.owner == owner &&
+                job.operation == AttachmentJobOperation.export,
+          );
+      if (readOnlyExport && hasActiveExport && !keepExportOwner) {
+        document.close();
+        return false;
+      }
       _publishing = true;
       try {
         _currentPassword = password;
         _sessionPasswords[_currentFileName!] = password;
         _retainedPlainBody = decryptedContent.value!;
         _session = DraftSession(
-          generation: ++_nextSessionGeneration,
+          generation: keepExportOwner ? owner : ++_nextSessionGeneration,
           persistedRevision: _session.persistedRevision,
           editRevision: _session.editRevision,
           credentialGeneration: _session.credentialGeneration,
         );
         _isLocked = false;
         _replaceDocument(document);
+        if (keepExportOwner) quillController.readOnly = true;
         isLockedNotifier.value = false;
       } finally {
         _publishing = false;
@@ -5145,6 +5277,7 @@ class ContentViewModel extends BaseViewModel {
     String? destination,
     NoteExportCapture? captured,
   }) async {
+    final performance = _settings.attachmentPerformance;
     final ready = await _resolveOwnerJobs(DraftTransition.navigation);
     if (!ready.isSuccess) return ready;
     if (_bulkAttachmentJob || _librarySwitching || _disposed || _deleting) {
@@ -5162,6 +5295,7 @@ class ContentViewModel extends BaseViewModel {
       const Uuid().v4(),
       'Export package',
       operation: AttachmentJobOperation.export,
+      captureRecoveryOwner: false,
     );
     final id = job.progress.value.id;
     final readCancellation = FileReadCancellation();
@@ -5177,6 +5311,7 @@ class ContentViewModel extends BaseViewModel {
 
     Directory? operation;
     String? candidate;
+    String? privateExport;
     OperationResult<void> result;
     try {
       checkCancellation();
@@ -5190,6 +5325,13 @@ class ContentViewModel extends BaseViewModel {
       if (reference == null) {
         throw const FormatException('Save the note before exporting.');
       }
+      _jobRecovery[id] = {
+        'version': 1,
+        'target': reference.fileName,
+        'library': reference.binding.root,
+        'fileName': job.progress.value.fileName,
+      };
+      attachmentJobsNotifier.value = List.of(attachmentJobsNotifier.value);
       final content = await _fileService.readResolved(reference);
       checkCancellation();
       if (content == null) {
@@ -5199,17 +5341,25 @@ class ContentViewModel extends BaseViewModel {
       checkCancellation();
       final resolved = reference.withModelId(decoded.note.id);
       final attachments = <String, StreamingFileSource>{};
+      final checks = performance.exportChecks(
+        mobile: mobileAttachmentExportPolicy,
+      );
+      final validateBackup = performance.validateBackupExport(
+        mobile: mobileAttachmentExportPolicy,
+      );
       var attachmentIndex = 0;
       for (final attachment in decoded.note.attachments) {
         checkCancellation();
         attachmentIndex++;
-        final detail =
-            'Checking export attachments ($attachmentIndex/${decoded.note.attachments.length})';
+        final detail = checks.checkSource
+            ? 'Checking export attachments ($attachmentIndex/${decoded.note.attachments.length})'
+            : 'Preparing export files ($attachmentIndex/${decoded.note.attachments.length})';
         _jobPhase(job, AttachmentJobPhase.preparing, detail: detail);
         attachments[attachment.id] = await files.attachmentSource(
           resolved,
           attachment.id,
           cancellation: readCancellation,
+          verifyContent: checks.checkSource,
           onProgress: (_, bytes, total) => _jobPhase(
             job,
             AttachmentJobPhase.preparing,
@@ -5221,23 +5371,63 @@ class ContentViewModel extends BaseViewModel {
         checkCancellation();
       }
       final extension = format == ExportFormat.binary ? 'fnote' : 'zip';
+      final mobileDestination =
+          destination == null && prepareMobilePackageExport;
+      final cacheKey = _preparedMobileExports.key([
+        resolved.binding.root,
+        resolved.contentPath,
+        decoded.metadata,
+        format.name,
+        checks.checkSource,
+        checks.verifyOutput,
+        validateBackup,
+        performance.verifyLargeFileWrites,
+        for (final entry in attachments.entries)
+          [
+            entry.key,
+            entry.value.length,
+            entry.value.modifiedMicros,
+            entry.value.sha256Hex,
+          ],
+      ], password);
+      if (mobileDestination) {
+        final cached = await _preparedMobileExports.find(
+          resolved.contentPath,
+          cacheKey,
+        );
+        checkCancellation();
+        if (cached != null) {
+          _preparedMobileExports.reuse(id, cached);
+          _jobPhase(
+            job,
+            AttachmentJobPhase.completed,
+            bytes: cached.length,
+            total: cached.length,
+            detail: 'Using prepared export',
+          );
+          return _reportResult(const OperationResult.success());
+        }
+      }
       if (destination == null) {
         _jobPhase(
           job,
           AttachmentJobPhase.preparing,
-          detail: 'Choose export destination',
+          detail: mobileDestination
+              ? 'Preparing export file'
+              : 'Choose export destination',
         );
       }
-      final mobileDestination =
-          destination == null && (Platform.isAndroid || Platform.isIOS);
       destination ??= mobileDestination
-          ? await MobileExport.destination('note.$extension')
+          ? await MobileExport.destination(
+              noteExportFileName(decoded.note.title, extension),
+            )
           : await FilePicker.platform.saveFile(
               dialogTitle: 'Save Note Package',
               fileName: 'note.$extension',
               type: FileType.custom,
               allowedExtensions: [extension],
             );
+      if (mobileDestination) privateExport = destination;
       checkCancellation();
       if (destination == null) {
         result = const OperationResult.failure(
@@ -5246,7 +5436,10 @@ class ContentViewModel extends BaseViewModel {
         );
       } else {
         await _verifyExportDestination(destination);
-        final expected = await ExternalFileExport.review(destination);
+        final expected = await ExternalFileExport.reviewOwned(
+          destination,
+          verifyReadback: performance.verifyLargeFileWrites,
+        );
         operation = await files.createOperationDirectory(resolved);
         final cancellation = File(p.join(operation.path, 'cancel'));
         _packageCancellationFiles[id] = cancellation;
@@ -5257,7 +5450,8 @@ class ContentViewModel extends BaseViewModel {
           AttachmentJobPhase.preparing,
           detail: 'Writing export package',
         );
-        await StreamingPackService().exportPackage(
+        final receipt = await StreamingPackService().exportPackage(
+          verifyWrites: performance.verifyLargeFileWrites,
           metadata: decoded.metadata,
           attachments: attachments,
           format: format,
@@ -5265,32 +5459,56 @@ class ContentViewModel extends BaseViewModel {
           operationDirectory: operation.path,
           password: password,
           cancellationFile: cancellation.path,
+          onProgress: (progress) => _jobPhase(
+            job,
+            progress.phase == PackageExportPhase.encrypting
+                ? AttachmentJobPhase.encrypting
+                : progress.phase == PackageExportPhase.verifyingEncryption
+                ? AttachmentJobPhase.verifying
+                : AttachmentJobPhase.preparing,
+            bytes: progress.bytes,
+            total: progress.total,
+            detail: '${progress.label} · ${progress.fileName}',
+          ),
         );
         if (_disposed ||
             owner != _session.generation ||
             _cancelledAttachmentJobs.contains(id)) {
           result = _cancelledResult();
         } else {
-          _jobPhase(job, AttachmentJobPhase.verifying);
-          // Parsing checks completeness and CRC using bounded ciphertext files.
-          await StreamingPackService().importPackage(
-            source: candidate,
-            operationDirectory: operation.path,
-            password: password,
-            cancellationFile: cancellation.path,
-          );
+          if (validateBackup) {
+            _jobPhase(
+              job,
+              AttachmentJobPhase.verifying,
+              detail: 'Validating exported backup',
+            );
+            // Optional full readback; bounded writes, source revision checks,
+            // flush/close and safe destination publication always remain.
+            await StreamingPackService().importPackage(
+              source: candidate,
+              operationDirectory: operation.path,
+              password: password,
+              cancellationFile: cancellation.path,
+            );
+          }
           if (_cancelledAttachmentJobs.contains(id)) {
             result = _cancelledResult();
           } else if (!_tryBeginFinalization([job])) {
             result = _cancelledResult();
           } else {
-            result = await ExternalFileExport.publish(
-              candidate: candidate,
+            result = await ExternalFileExport.publishOwned(
+              receipt: receipt,
               destination: destination,
               expected: expected,
             );
-            if (result.isSuccess && mobileDestination)
-              await MobileExport.share(destination);
+            if (result.isSuccess && mobileDestination) {
+              await _preparedMobileExports.remember(
+                job: id,
+                note: resolved.contentPath,
+                key: cacheKey,
+                path: destination,
+              );
+            }
           }
         }
       }
@@ -5321,6 +5539,13 @@ class ContentViewModel extends BaseViewModel {
     } finally {
       _exportReadCancellations.remove(id);
       _packageCancellationFiles.remove(id);
+      if (privateExport != null && _preparedMobileExports.forJob(id) == null) {
+        try {
+          await MobileExport.discardAll([privateExport]);
+        } catch (_) {
+          /* Startup retries orphan cleanup. */
+        }
+      }
       if (candidate != null && await File(candidate).exists()) {
         try {
           await File(candidate).delete();
@@ -5451,6 +5676,7 @@ class ContentViewModel extends BaseViewModel {
     bool plainText = false,
     ResolveNoteImportConflict? resolveConflict,
   }) async {
+    final performance = _settings.attachmentPerformance;
     final ready = await _resolveOwnerJobs(DraftTransition.navigation);
     if (!ready.isSuccess) {
       return OperationResult.failure(ready.outcome, ready.message);
@@ -5533,7 +5759,18 @@ class ContentViewModel extends BaseViewModel {
           source: source,
           operationDirectory: operation.path,
           password: archivePassword,
+          verifyWrites: performance.verifyLargeFileWrites,
           cancellationFile: cancellation.path,
+          onProgress: (progress) => _jobPhase(
+            job,
+            progress.phase == PackageImportPhase.decrypting
+                ? AttachmentJobPhase.decrypting
+                : AttachmentJobPhase.preparing,
+            bytes: progress.bytes,
+            total: progress.total,
+            detail:
+                '${progress.label} · File ${progress.fileIndex} of ${progress.fileCount}\n${progress.fileName}',
+          ),
         );
       }
       if (!imported.note.note.isLocked) {
@@ -5564,28 +5801,15 @@ class ContentViewModel extends BaseViewModel {
       }
       var noteId = imported.note.note.id;
       var createDuplicate = false;
-      _jobPhase(job, AttachmentJobPhase.verifying);
+      _jobPhase(
+        job,
+        AttachmentJobPhase.preparing,
+        detail: 'Looking for a matching note',
+      );
       final importService = NoteImportService(_fileService, _encryptionService);
       final existing = await importService.find(noteId, reference.binding);
-      final existingSources = <String, StreamingFileSource>{};
       if (existing != null) {
         reference = existing.reference;
-        for (final attachment in existing.decoded.note.attachments) {
-          existingSources[attachment.id] = await files.attachmentSource(
-            reference,
-            attachment.id,
-          );
-        }
-        final incomingFingerprint = await NoteImportService.fingerprint(
-          imported.note.metadata,
-          imported.attachments,
-          cancellationFile: cancellation.path,
-        );
-        final existingFingerprint = await NoteImportService.fingerprint(
-          existing.decoded.metadata,
-          existingSources,
-          cancellationFile: cancellation.path,
-        );
         if (resolveConflict == null) {
           _jobPhase(
             job,
@@ -5597,12 +5821,16 @@ class ContentViewModel extends BaseViewModel {
             'This note already exists. Choose Duplicate, Back up & Replace, or Ignore.',
           );
         }
+        _jobPhase(
+          job,
+          AttachmentJobPhase.preparing,
+          detail: 'Choose how to import this note',
+        );
         final decision = await resolveConflict(
           NoteImportConflict(
             reference,
             existing.decoded.note.title,
             existing.decoded.note.isLocked,
-            identical: incomingFingerprint == existingFingerprint,
           ),
         );
         if (_disposed ||
@@ -5624,7 +5852,17 @@ class ContentViewModel extends BaseViewModel {
           createDuplicate = true;
           noteId = storageId;
           reference = freshReference;
-          existingSources.clear();
+        } else {
+          // Keep predecessor availability checks without reading/hashing its
+          // payloads. Publication retains the old objects and journals the
+          // predecessor envelope; imported attachments receive fresh IDs.
+          for (final attachment in existing.decoded.note.attachments) {
+            await files.attachmentSource(
+              reference,
+              attachment.id,
+              verifyContent: false,
+            );
+          }
         }
       }
       final replacing = existing != null && !createDuplicate;
@@ -5661,7 +5899,9 @@ class ContentViewModel extends BaseViewModel {
           );
         }
         final id = const Uuid().v4();
-        prepared.add(PreparedAttachmentFile(id, payload));
+        prepared.add(
+          PreparedAttachmentFile(id, payload, fileName: attachment.fileName),
+        );
         final model = AttachmentModel(
           id: id,
           fileName: attachment.fileName,
@@ -5691,6 +5931,128 @@ class ContentViewModel extends BaseViewModel {
           replacing && replacementKind == NoteEnvelopeKind.legacyJson
           ? json
           : await _encryptionService.encryptApp(json);
+      var nativeSaved = false;
+      if (!kIsWeb &&
+          Platform.isAndroid &&
+          AndroidNativeCipher.ready &&
+          _fileService is AttachmentCandidateOwner &&
+          prepared.isNotEmpty) {
+        final candidates = _fileService as AttachmentCandidateOwner;
+        final first = await candidates.createAttachmentCandidate(
+          reference,
+          prepared.first.id,
+          operation,
+          prepared.first.source.length,
+        );
+        // Unsupported direct sinks keep the existing single-transfer fallback.
+        // Never copy to another private intermediate just to copy it again.
+        if (first.sink != null) {
+          final allBytes = prepared.fold<int>(0, (n, a) => n + a.source.length);
+          var saved = 0;
+          for (var i = 0; i < prepared.length; i++) {
+            if (_cancelledAttachmentJobs.contains(jobId))
+              throw const FileJobCancelled();
+            final item = prepared[i];
+            final target = i == 0
+                ? first
+                : await candidates.createAttachmentCandidate(
+                    reference,
+                    item.id,
+                    operation,
+                    item.source.length,
+                  );
+            if (target.sink == null) {
+              throw const FormatException(
+                'The selected provider stopped supporting direct writes.',
+              );
+            }
+            void progress(String phase, int bytes, int total) {
+              final current = bytes.clamp(0, item.source.length);
+              final state = FileOperationProgress(
+                stage: phase == 'Verifying'
+                    ? 'Verifying saved file'
+                    : 'Saving encrypted files',
+                fileName: item.fileName ?? item.id,
+                fileIndex: i + 1,
+                fileCount: prepared.length,
+                bytes: current,
+                total: item.source.length,
+                overallBytes: saved + current,
+                overallTotal: allBytes,
+              );
+              _jobPhase(
+                job,
+                AttachmentJobPhase.preparing,
+                bytes: state.overallBytes,
+                total: state.overallTotal,
+                detail:
+                    '${state.stage} · File ${state.fileIndex} of ${state.fileCount}\n${state.fileName}',
+                fileProgress: state,
+              );
+            }
+
+            progress('Saving encrypted files', 0, item.source.length);
+            final transfer = _attachmentWorker.submit(
+              FileTransformRequest(
+                source: StreamingFileSource(
+                  item.source.path,
+                  item.source.length,
+                  offset: item.source.offset,
+                  sha256Hex:
+                      item.source.receipt?.sha256Hex ?? item.source.sha256Hex,
+                  modifiedMicros:
+                      item.source.receipt?.modifiedMicros ??
+                      item.source.modifiedMicros,
+                ),
+                destination: target.path,
+                decryptSource: false,
+                encryptDestination: false,
+                verifyOutput: performance.verifyLargeFileWrites,
+                maxPlaintextBytes: StreamingFileCipher.maxAttachmentBytes + 32,
+                expectedPlaintextBytes: item.source.length,
+                requireWholeSource: true,
+                ownedTarget: target,
+              ),
+              onProgress: progress,
+            );
+            _attachmentTransforms[jobId] = transfer;
+            OperationResult<CipherFileResult> transferred;
+            try {
+              transferred = await transfer.result;
+            } finally {
+              _attachmentTransforms.remove(jobId);
+            }
+            if (!transferred.isSuccess) {
+              if (transferred.outcome == OperationOutcome.cancelled)
+                throw const FileJobCancelled();
+              throw const FormatException(
+                'The encrypted attachment could not be saved.',
+              );
+            }
+            final receipt = transferred.value!.receipt;
+            if (receipt == null)
+              throw const FormatException(
+                'The saved attachment has no write receipt.',
+              );
+            prepared[i] = PreparedAttachmentFile(
+              item.id,
+              StreamingFileSource(
+                target.path,
+                transferred.value!.length,
+                receipt: receipt,
+              ),
+              fileName: item.fileName,
+            );
+            progress(
+              'Saving encrypted files',
+              item.source.length,
+              item.source.length,
+            );
+            saved += item.source.length;
+          }
+          nativeSaved = true;
+        }
+      }
       result = await _mutate(() async {
         if (_disposed ||
             owner != _session.generation ||
@@ -5720,16 +6082,6 @@ class ContentViewModel extends BaseViewModel {
             'The library changed during confirmation. Import again.',
           );
         }
-        for (final entry in existingSources.entries) {
-          final latest = await files.attachmentSource(reference, entry.key);
-          if (latest.sha256Hex != entry.value.sha256Hex ||
-              latest.length != entry.value.length) {
-            return const OperationResult<NoteImportResult>.failure(
-              OperationOutcome.conflict,
-              'An existing attachment changed. Import again.',
-            );
-          }
-        }
         // No await between the final draft check and making the selected editor
         // read-only. Autosaves cannot recreate the replaced generation.
         _observeRichEdit();
@@ -5755,10 +6107,54 @@ class ContentViewModel extends BaseViewModel {
           quillController.readOnly = true;
           notifyListeners();
         }
+        var hasFileProgress = false;
         final committed = await files.commitGeneration(
           reference,
           encoded,
           prepared,
+          onFileProgress: (progress) {
+            hasFileProgress = true;
+            if (nativeSaved) {
+              _jobPhase(
+                job,
+                AttachmentJobPhase.finalizing,
+                detail:
+                    'Finishing import\nSaving note details and recovery information',
+                fileProgress: FileOperationProgress(
+                  stage: 'Finishing import',
+                  fileName: 'Note details',
+                  fileIndex: prepared.length,
+                  fileCount: prepared.length,
+                  bytes: 0,
+                  total: 0,
+                  overallBytes: 0,
+                  overallTotal: 0,
+                ),
+              );
+              return;
+            }
+            _jobPhase(
+              job,
+              AttachmentJobPhase.finalizing,
+              bytes: progress.total == 0 ? 0 : progress.overallBytes,
+              total: progress.total == 0 ? null : progress.overallTotal,
+              detail: progress.total == 0
+                  ? 'Finishing import\nSaving note details and recovery information'
+                  : '${progress.stage} · File ${progress.fileIndex} of ${progress.fileCount}\n${progress.fileName}',
+              fileProgress: progress,
+            );
+          },
+          onProgress: (phase, bytes, total) {
+            if (!hasFileProgress) {
+              _jobPhase(
+                job,
+                AttachmentJobPhase.finalizing,
+                bytes: bytes,
+                total: total,
+                detail: phase,
+              );
+            }
+          },
         );
         acknowledged = committed.withModelId(noteId);
         _markCommittedRefresh(committed.binding);

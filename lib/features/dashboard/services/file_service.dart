@@ -15,6 +15,8 @@ import '../../../core/storage/storage_owner_worker.dart';
 import '../../../core/storage/library_watch.dart';
 import '../../../core/storage/streaming_file_cipher.dart';
 import '../../../core/storage/attachment_transform_worker.dart';
+import '../../../core/storage/owned_write.dart';
+import '../../../core/storage/file_operation_progress.dart';
 import '../../../core/operations/operation_result.dart';
 
 abstract interface class LibraryFileService {
@@ -76,12 +78,22 @@ abstract interface class TransactionalNoteFiles {
     String content,
     List<PreparedAttachmentFile> attachments, {
     FileByteProgress? onProgress,
+    void Function(FileOperationProgress)? onFileProgress,
   });
   Future<OperationResult<DeletionReport>> deleteResolved(
     NoteReference reference,
   );
   Future<Directory> createOperationDirectory(NoteReference reference);
   Future<void> removeOperationDirectory(Directory directory);
+}
+
+abstract interface class AttachmentCandidateOwner {
+  Future<OwnedWriteTarget> createAttachmentCandidate(
+    NoteReference reference,
+    String attachmentId,
+    Directory operation,
+    int expectedBytes,
+  );
 }
 
 abstract class IFileService {
@@ -185,6 +197,7 @@ class FileService
     String content,
     List<PreparedAttachmentFile> attachments, {
     FileByteProgress? onProgress,
+    void Function(FileOperationProgress)? onFileProgress,
   }) async {
     await _verifyReference(reference);
     if (_ownedNotes == null) {
@@ -195,6 +208,7 @@ class FileService
       content,
       attachments: attachments,
       onProgress: onProgress,
+      onFileProgress: onFileProgress,
     );
   }
 

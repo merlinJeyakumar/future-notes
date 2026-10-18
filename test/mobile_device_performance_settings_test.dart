@@ -80,8 +80,12 @@ void main() {
       await tester.pumpAndSettle();
       final check = find.byKey(const ValueKey('check-before-open'));
       final verify = find.byKey(const ValueKey('verify-after-open'));
+      final backup = find.byKey(const ValueKey('validate-exported-backup'));
+      final writes = find.byKey(const ValueKey('verify-large-file-writes'));
+      expect(tester.widget<SwitchListTile>(writes).value, isFalse);
       expect(tester.widget<SwitchListTile>(check).value, isFalse);
       expect(tester.widget<SwitchListTile>(verify).value, isFalse);
+      expect(tester.widget<SwitchListTile>(backup).value, isFalse);
       expect(
         find.text('Check encrypted files before opening/exporting'),
         findsOneWidget,
@@ -100,6 +104,30 @@ void main() {
         checkSource: true,
         verifyOutput: true,
       ));
+      await tester.ensureVisible(backup);
+      settings.write = Completer<void>();
+      await tester.tap(backup);
+      await tester.pumpAndSettle();
+      expect(settings.attachmentPerformance.validateExportedBackup, isFalse);
+      settings.write!.complete();
+      await tester.pumpAndSettle();
+      settings.write = null;
+      expect(settings.attachmentPerformance.validateExportedBackup, isTrue);
+      expect(settings.attachmentPerformance.checkBeforeOpen, isTrue);
+      expect(settings.attachmentPerformance.verifyAfterOpen, isTrue);
+      await tester.tap(backup);
+      await tester.pumpAndSettle();
+      expect(settings.attachmentPerformance.validateExportedBackup, isFalse);
+      await tester.ensureVisible(writes);
+      await tester.tap(writes);
+      await tester.pumpAndSettle();
+      expect(settings.attachmentPerformance.verifyLargeFileWrites, isTrue);
+      expect(settings.attachmentPerformance.checkBeforeOpen, isTrue);
+      final reset = find.text('Reset performance defaults');
+      await tester.ensureVisible(reset);
+      await tester.tap(reset);
+      await tester.pumpAndSettle();
+      expect(settings.attachmentPerformance, AttachmentPerformance.defaults);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       settings.attachmentPerformanceNotifier.dispose();

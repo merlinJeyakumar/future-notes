@@ -46,6 +46,42 @@ void main() {
     ),
   );
 
+  for (final encrypted in [false, true]) {
+    for (final valid in [false, true]) {
+      test(
+        'sequential package checksum stays enforced encrypted=$encrypted valid=$valid',
+        () async {
+          final plain = Uint8List.fromList(
+            List.generate(1024 * 1024 + 31, (i) => i % 239),
+          );
+          final stored = encrypted ? encrypt(plain, 'synthetic') : plain;
+          final input = await File(path('record')).writeAsBytes(stored);
+          final reader = await LegacyFileReader.open(
+            StreamingFileSource(
+              input.path,
+              stored.length,
+              sha256Hex: valid ? sha256.convert(stored).toString() : '0' * 64,
+            ),
+            encrypted: encrypted,
+            password: encrypted ? 'synthetic' : null,
+          );
+          expect(await reader.read(7), plain.sublist(0, 7));
+          final receipt = await reader.copyTo(path('copied'), plain.length - 7);
+          expect(
+            receipt.sha256Hex,
+            sha256.convert(plain.sublist(7)).toString(),
+          );
+          expect(await File(path('copied')).readAsBytes(), plain.sublist(7));
+          if (valid) {
+            await reader.close();
+          } else {
+            await expectLater(reader.close(), throwsFormatException);
+          }
+        },
+      );
+    }
+  }
+
   for (final length in [0, 1, 15, 16, 17, 1024 * 1024 - 1, 1024 * 1024 + 17]) {
     test('legacy reader accepts streaming output of $length bytes', () async {
       final bytes = Uint8List.fromList(List.generate(length, (i) => i % 251));

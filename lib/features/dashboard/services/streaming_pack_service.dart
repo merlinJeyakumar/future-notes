@@ -1,24 +1,149 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
+import 'dart:ui' show RootIsolateToken;
 
 import 'package:path/path.dart' as p;
+import 'package:crypto/crypto.dart' show sha256, Digest;
 import 'package:archive/archive.dart' as archive;
 import 'package:uuid/uuid.dart';
 import 'package:flutter/services.dart';
 import '../../../core/platform/android_native_cipher.dart';
 
 import '../../../core/storage/streaming_file_cipher.dart';
+import '../../../core/storage/owned_write.dart';
+import '../../../core/storage/bounded_file_reader.dart';
+import '../../../core/storage/owned_stream_writer.dart';
+import '../../../core/storage/processing_diagnostics.dart';
 import '../models/note_envelope.dart';
 import 'note_codec.dart';
 import 'pack_service.dart' show ExportFormat;
+
+class _PackageProgress {
+  _PackageProgress(this.port);
+  final SendPort? port;
+  final _clock = Stopwatch()..start();
+  PackageExportPhase? _phase;
+  String? _file;
+  int _last = -200;
+  void report(PackageExportPhase phase, String name, int bytes, int total) {
+    if (port == null) return;
+    if (_phase == phase &&
+        _file == name &&
+        bytes != 0 &&
+        bytes != total &&
+        _clock.elapsedMilliseconds - _last < 200)
+      return;
+    _phase = phase;
+    _file = name;
+    _last = _clock.elapsedMilliseconds;
+    port!.send(PackageExportProgress(phase, name, bytes, total));
+  }
+
+  void Function(int, int) file(PackageExportPhase phase, String name) =>
+      (bytes, total) => report(phase, name, bytes, total);
+  FileByteProgress cipher(String name) =>
+      (phase, bytes, total) => report(
+        phase == 'Verifying'
+            ? PackageExportPhase.verifyingEncryption
+            : PackageExportPhase.encrypting,
+        name,
+        bytes,
+        total,
+      );
+}
 
 class FilePackResult {
   const FilePackResult(this.note, this.attachments);
   final DecodedNote note;
   final Map<String, StreamingFileSource> attachments;
+}
+
+enum PackageImportPhase { extracting, decrypting }
+
+class PackageImportProgress {
+  const PackageImportProgress(
+    this.phase,
+    this.fileName,
+    this.bytes,
+    this.total,
+    this.fileIndex,
+    this.fileCount,
+  );
+  final PackageImportPhase phase;
+  final String fileName;
+  final int bytes;
+  final int total;
+  final int fileIndex;
+  final int fileCount;
+  String get label => phase == PackageImportPhase.decrypting
+      ? 'Decrypting package'
+      : 'Extracting package';
+}
+
+class _ImportProgress {
+  _ImportProgress(this.port);
+  final SendPort? port;
+  final clock = Stopwatch()..start();
+  int last = -200;
+  String? previous;
+  void report(
+    PackageImportPhase phase,
+    String name,
+    int bytes,
+    int total,
+    int index,
+    int count,
+  ) {
+    final key = '${phase.index}:$index:$name';
+    if (key == previous &&
+        bytes != 0 &&
+        bytes != total &&
+        clock.elapsedMilliseconds - last < 200)
+      return;
+    last = clock.elapsedMilliseconds;
+    previous = key;
+    port?.send(PackageImportProgress(phase, name, bytes, total, index, count));
+  }
+
+  void Function(int, int) file(
+    PackageImportPhase phase,
+    String name,
+    int index,
+    int count,
+  ) =>
+      (bytes, total) => report(phase, name, bytes, total, index, count);
+}
+
+enum PackageExportPhase {
+  packing,
+  encrypting,
+  verifyingEncryption,
+  checksum,
+  writing,
+}
+
+class PackageExportProgress {
+  const PackageExportProgress(
+    this.phase,
+    this.fileName,
+    this.bytes,
+    this.total,
+  );
+  final PackageExportPhase phase;
+  final String fileName;
+  final int bytes;
+  final int total;
+  String get label => switch (phase) {
+    PackageExportPhase.packing => 'Assembling package',
+    PackageExportPhase.encrypting => 'Encrypting package',
+    PackageExportPhase.verifyingEncryption => 'Verifying encrypted output',
+    PackageExportPhase.checksum => 'Calculating ZIP checksum',
+    PackageExportPhase.writing => 'Writing package',
+  };
 }
 
 /// Native package jobs transfer descriptors only. Stored ZIP64 export and
@@ -32,7 +157,7 @@ class StreamingPackService {
   static const nameLimit = 4096;
   static const _maxCipherLength = StreamingFileCipher.maxAttachmentBytes + 32;
 
-  Future<void> exportPackage({
+  Future<OwnedWriteReceipt> exportPackage({
     required Map<String, dynamic> metadata,
     required Map<String, StreamingFileSource> attachments,
     required ExportFormat format,
@@ -40,48 +165,189 @@ class StreamingPackService {
     required String operationDirectory,
     String? password,
     String? cancellationFile,
+    bool verifyWrites = false,
+    void Function(PackageExportProgress)? onProgress,
   }) async {
-    final token = useNative && AndroidNativeCipher.ready
-        ? ServicesBinding.rootIsolateToken
+    final token = Platform.isAndroid ? ServicesBinding.rootIsolateToken : null;
+    final owner = useNative && AndroidNativeCipher.ready && token != null
+        ? const Uuid().v4()
         : null;
-    final owner = token == null ? null : const Uuid().v4();
+    final port = onProgress == null ? null : ReceivePort();
+    final drained = Completer<void>();
+    final subscription = port?.listen((event) {
+      if (event == null) {
+        if (!drained.isCompleted) drained.complete();
+      } else if (event is PackageExportProgress) {
+        onProgress?.call(event);
+      }
+    });
     try {
-      await Isolate.run(() {
-        AndroidNativeCipher.initialize(token, owner: owner);
-        return _export(
+      final elapsed = Stopwatch()..start();
+      final receipt = await _exportInIsolate(
+        metadata,
+        attachments,
+        format,
+        destination,
+        operationDirectory,
+        password,
+        cancellationFile,
+        token,
+        owner,
+        port?.sendPort,
+        verifyWrites,
+      );
+      // Drain the worker's final status before the caller begins finalization.
+      if (port != null)
+        await drained.future.timeout(
+          const Duration(seconds: 2),
+          onTimeout: () {},
+        );
+      ProcessingDiagnostics.completed(
+        operation: 4,
+        elapsedMicros: elapsed.elapsedMicroseconds,
+        readBytes: receipt.payloadReadBytes,
+        writtenBytes: receipt.length + receipt.intermediateWriteBytes,
+        readbackBytes: receipt.readbackBytes,
+      );
+      return receipt;
+    } finally {
+      await subscription?.cancel();
+      port?.close();
+      await AndroidNativeCipher.releaseOwner(owner);
+    }
+  }
+
+  // Keep UI callbacks and ReceivePort objects out of the isolate closure context.
+  static Future<OwnedWriteReceipt> _exportInIsolate(
+    Map<String, dynamic> metadata,
+    Map<String, StreamingFileSource> attachments,
+    ExportFormat format,
+    String destination,
+    String directory,
+    String? password,
+    String? cancel,
+    RootIsolateToken? token,
+    String? owner,
+    SendPort? progress,
+    bool verifyWrites,
+  ) => Isolate.run(() async {
+    try {
+      AndroidNativeCipher.initialize(
+        token,
+        owner: owner,
+        enableNative: owner != null,
+      );
+      if (!verifyWrites)
+        return await _exportStream(
           metadata,
           attachments,
           format,
           destination,
-          operationDirectory,
           password,
-          cancellationFile,
+          cancel,
+          progress,
         );
-      });
+      final target = OwnedWriteTarget.forPath(destination);
+      await target.validate(destination);
+      final ioCounts = await _export(
+        metadata,
+        attachments,
+        format,
+        destination,
+        directory,
+        password,
+        cancel,
+        progress,
+      );
+      final digest = await sha256.bind(File(destination).openRead()).first;
+      return OwnedWriteReceipt.closed(
+        target: target,
+        length: await File(destination).length(),
+        sha256Hex: digest.toString(),
+        verifyReadback: true,
+        payloadReadBytes: ioCounts.$1,
+        readbackBytes: ioCounts.$2 + await File(destination).length(),
+        intermediateWriteBytes: ioCounts.$3,
+      );
     } finally {
-      await AndroidNativeCipher.releaseOwner(owner);
+      progress?.send(null);
     }
-  }
+  });
 
   Future<FilePackResult> importPackage({
     required String source,
     required String operationDirectory,
     String? password,
     String? cancellationFile,
+    bool verifyWrites = false,
+    void Function(PackageImportProgress)? onProgress,
   }) async {
-    final token = useNative && AndroidNativeCipher.ready
-        ? ServicesBinding.rootIsolateToken
+    final token = Platform.isAndroid ? ServicesBinding.rootIsolateToken : null;
+    final owner = useNative && AndroidNativeCipher.ready && token != null
+        ? const Uuid().v4()
         : null;
-    final owner = token == null ? null : const Uuid().v4();
+    final port = onProgress == null ? null : ReceivePort();
+    final drained = Completer<void>();
+    final subscription = port?.listen((event) {
+      if (event == null) {
+        if (!drained.isCompleted) drained.complete();
+      } else if (event is PackageImportProgress) {
+        onProgress?.call(event);
+      }
+    });
     try {
-      return await Isolate.run(() {
-        AndroidNativeCipher.initialize(token, owner: owner);
-        return _import(source, operationDirectory, password, cancellationFile);
-      });
+      final imported = await _importInIsolate(
+        source,
+        operationDirectory,
+        password,
+        cancellationFile,
+        verifyWrites,
+        token,
+        owner,
+        port?.sendPort,
+      );
+      if (port != null) {
+        await drained.future.timeout(
+          const Duration(seconds: 2),
+          onTimeout: () {},
+        );
+      }
+      return imported;
     } finally {
+      await subscription?.cancel();
+      port?.close();
       await AndroidNativeCipher.releaseOwner(owner);
     }
   }
+
+  static Future<FilePackResult> _importInIsolate(
+    String source,
+    String directory,
+    String? password,
+    String? cancel,
+    bool verifyWrites,
+    RootIsolateToken? token,
+    String? owner,
+    SendPort? progress,
+  ) => Isolate.run(() async {
+    try {
+      AndroidNativeCipher.initialize(
+        token,
+        owner: owner,
+        enableNative: owner != null,
+      );
+      return await _import(
+        source,
+        directory,
+        password,
+        cancel,
+        verifyWrites,
+        _ImportProgress(progress),
+      );
+    } finally {
+      progress?.send(null);
+    }
+  });
 
   static void _cancel(String? path) {
     if (path != null && File(path).existsSync()) throw const FileJobCancelled();
@@ -115,9 +381,12 @@ class StreamingPackService {
     RandomAccessFile sink, {
     String? cancellationFile,
     int? expectedCrc,
+    void Function(int bytes, int total)? onProgress,
   }) async {
     final reader = await LegacyFileReader.open(source);
     var crc = 0;
+    var copied = 0;
+    onProgress?.call(0, source.length);
     try {
       while (reader.remaining > 0) {
         _cancel(cancellationFile);
@@ -126,6 +395,8 @@ class StreamingPackService {
         );
         if (expectedCrc != null) crc = _crc(bytes, crc);
         await sink.writeFrom(bytes);
+        copied += bytes.length;
+        onProgress?.call(copied, source.length);
       }
       if (expectedCrc != null && expectedCrc != crc) {
         throw const FormatException('Package source changed between passes.');
@@ -135,7 +406,302 @@ class StreamingPackService {
     }
   }
 
-  static Future<void> _export(
+  static Future<OwnedWriteReceipt> _exportStream(
+    Map<String, dynamic> metadata,
+    Map<String, StreamingFileSource> attachments,
+    ExportFormat format,
+    String destination,
+    String? password,
+    String? cancel,
+    SendPort? port,
+  ) async {
+    final progress = _PackageProgress(port);
+    final decoded = NoteCodec.decodeMetadata(jsonEncode(metadata));
+    final declared = decoded.note.attachments.map((a) => a.id).toSet();
+    if (attachments.length != declared.length ||
+        !declared.containsAll(attachments.keys) ||
+        attachments.length + 2 > entryLimit)
+      throw const FormatException('Incomplete package.');
+    final json = Uint8List.fromList(utf8.encode(jsonEncode(metadata)));
+    if (json.length > metadataLimit)
+      throw const FormatException('Package metadata exceeds limit.');
+    for (final e in attachments.entries) {
+      _name(e.key);
+      if (e.value.length < 0 ||
+          e.value.length > _maxCipherLength ||
+          (format == ExportFormat.binary && e.value.length > 0xffffffff)) {
+        throw const FormatException(
+          'Package attachment exceeds format allowance.',
+        );
+      }
+    }
+    _cancel(cancel);
+    final output = await OwnedStreamWriter.open(
+      destination,
+      cancelled: () => cancel != null && File(cancel).existsSync(),
+    );
+    final encrypted = password != null && password.isNotEmpty;
+    Future<void> copy(
+      StreamingFileSource source,
+      Future<void> Function(Uint8List) sink,
+      String name,
+    ) async {
+      final reader = await LegacyFileReader.open(source);
+      var consumed = 0;
+      progress.report(
+        encrypted ? PackageExportPhase.encrypting : PackageExportPhase.packing,
+        name,
+        0,
+        source.length,
+      );
+      try {
+        while (reader.remaining > 0) {
+          _cancel(cancel);
+          final bytes = await reader.read(
+            min(StreamingFileCipher.window, reader.remaining),
+          );
+          await sink(bytes);
+          consumed += bytes.length;
+          output.payloadReadBytes += bytes.length;
+          progress.report(
+            encrypted
+                ? PackageExportPhase.encrypting
+                : PackageExportPhase.packing,
+            name,
+            consumed,
+            source.length,
+          );
+        }
+      } finally {
+        await reader.close();
+      }
+    }
+
+    try {
+      if (format == ExportFormat.binary) {
+        await output.add([0x4e, 0x4f, 0x54, 0x45, 1, encrypted ? 1 : 0]);
+        final encoder = encrypted
+            ? await FileCipherEncoder.open(
+                password,
+                cancelled: () => cancel != null && File(cancel).existsSync(),
+              )
+            : null;
+        Future<void> emit(Uint8List bytes) async {
+          for (
+            var offset = 0;
+            offset < bytes.length;
+            offset += StreamingFileCipher.window
+          ) {
+            _cancel(cancel);
+            final chunk = Uint8List.sublistView(
+              bytes,
+              offset,
+              min(bytes.length, offset + StreamingFileCipher.window),
+            );
+            await output.add(
+              encoder == null ? chunk : await encoder.add(chunk),
+            );
+          }
+        }
+
+        try {
+          if (encoder != null) await output.add(encoder.iv);
+          await emit(_u32(json.length));
+          await emit(json);
+          await emit(_u32(attachments.length));
+          for (final e in attachments.entries) {
+            final id = Uint8List.fromList(utf8.encode(e.key));
+            await emit(_u32(id.length));
+            await emit(id);
+            await emit(_u32(e.value.length));
+            await copy(
+              e.value,
+              emit,
+              decoded.note.attachments
+                  .firstWhere((a) => a.id == e.key)
+                  .fileName,
+            );
+          }
+          if (encoder != null) await output.add(await encoder.finish());
+        } finally {
+          await encoder?.close();
+        }
+      } else {
+        final mapping = <String, String>{};
+        for (final attachment in decoded.note.attachments) {
+          var name = attachment.fileName.replaceAll(
+            RegExp(r'[\\/:<>|?*\x00-\x1f]'),
+            '_',
+          );
+          if (name.isEmpty || name == '.' || name == '..') name = 'attachment';
+          mapping[attachment.id] = '${attachment.id}/$name';
+        }
+        final entries = <String, Object>{
+          'note.json': json,
+          for (final e in attachments.entries)
+            'attachments/${mapping[e.key]}': e.value,
+          'metadata.json': Uint8List.fromList(utf8.encode(jsonEncode(mapping))),
+        };
+        final records = <_ZipEntry>[];
+        for (final e in entries.entries) {
+          _cancel(cancel);
+          _name(e.key);
+          final offset = output.length;
+          final name = utf8.encode(e.key);
+          final plainLength = e.value is StreamingFileSource
+              ? (e.value as StreamingFileSource).length
+              : (e.value as Uint8List).length;
+          final length = encrypted
+              ? 16 + ((plainLength ~/ 16) + 1) * 16
+              : plainLength;
+          await output.number(0x04034b50, 4);
+          await output.number(45, 2);
+          await output.number(0x808, 2);
+          await output.number(0, 2);
+          await output.number(0, 2);
+          await output.number(33, 2);
+          await output.number(0, 4);
+          await output.number(0xffffffff, 4);
+          await output.number(0xffffffff, 4);
+          await output.number(name.length, 2);
+          await output.number(20, 2);
+          await output.add(name);
+          await output.number(1, 2);
+          await output.number(16, 2);
+          await output.number(length, 8);
+          await output.number(length, 8);
+          var crc = 0;
+          var written = 0;
+          await output.resetCrc();
+          Future<void> raw(Uint8List bytes) async {
+            if (!output.nativeChecksums) crc = _crc(bytes, crc);
+            written += bytes.length;
+            await output.add(bytes, trackCrc: output.nativeChecksums);
+            if (output.nativeChecksums) crc = output.crc;
+          }
+
+          final encoder = encrypted
+              ? await FileCipherEncoder.open(
+                  password,
+                  cancelled: () => cancel != null && File(cancel).existsSync(),
+                )
+              : null;
+          Future<void> emit(Uint8List bytes) async {
+            for (
+              var offset = 0;
+              offset < bytes.length;
+              offset += StreamingFileCipher.window
+            ) {
+              _cancel(cancel);
+              final chunk = Uint8List.sublistView(
+                bytes,
+                offset,
+                min(bytes.length, offset + StreamingFileCipher.window),
+              );
+              await raw(encoder == null ? chunk : await encoder.add(chunk));
+            }
+          }
+
+          try {
+            if (encoder != null) await raw(encoder.iv);
+            if (e.value is StreamingFileSource) {
+              await copy(
+                e.value as StreamingFileSource,
+                emit,
+                p.basename(e.key),
+              );
+            } else {
+              await emit(e.value as Uint8List);
+            }
+            if (encoder != null) await raw(await encoder.finish());
+          } finally {
+            await encoder?.close();
+          }
+          if (written != length)
+            throw const FormatException('ZIP output length changed.');
+          await output.number(0x08074b50, 4);
+          await output.number(crc, 4);
+          await output.number(length, length >= 0xffffffff ? 8 : 4);
+          await output.number(length, length >= 0xffffffff ? 8 : 4);
+          records.add(_ZipEntry(e.key, 0x808, 0, crc, length, length, offset));
+        }
+        final start = output.length;
+        for (final record in records) {
+          final name = utf8.encode(record.name);
+          for (final pair in <(int, int)>[
+            (0x02014b50, 4),
+            (45, 2),
+            (45, 2),
+            (0x808, 2),
+            (0, 2),
+            (0, 2),
+            (33, 2),
+            (record.crc, 4),
+            (0xffffffff, 4),
+            (0xffffffff, 4),
+            (name.length, 2),
+            (28, 2),
+            (0, 2),
+            (0, 2),
+            (0, 2),
+            (0, 4),
+            (0xffffffff, 4),
+          ]) {
+            await output.number(pair.$1, pair.$2);
+          }
+          await output.add(name);
+          await output.number(1, 2);
+          await output.number(24, 2);
+          await output.number(record.size, 8);
+          await output.number(record.compressed, 8);
+          await output.number(record.offset, 8);
+        }
+        final end = output.length;
+        if (end - start > directoryLimit)
+          throw const FormatException('ZIP directory exceeds limit.');
+        for (final pair in <(int, int)>[
+          (0x06064b50, 4),
+          (44, 8),
+          (45, 2),
+          (45, 2),
+          (0, 4),
+          (0, 4),
+          (records.length, 8),
+          (records.length, 8),
+          (end - start, 8),
+          (start, 8),
+          (0x07064b50, 4),
+          (0, 4),
+          (end, 8),
+          (1, 4),
+          (0x06054b50, 4),
+          (0, 2),
+          (0, 2),
+          (0xffff, 2),
+          (0xffff, 2),
+          (0xffffffff, 4),
+          (0xffffffff, 4),
+          (0, 2),
+        ]) {
+          await output.number(pair.$1, pair.$2);
+        }
+      }
+      _cancel(cancel);
+      final receipt = await output.close();
+      progress.report(
+        PackageExportPhase.writing,
+        'Note package',
+        receipt.length,
+        receipt.length,
+      );
+      return receipt;
+    } catch (_) {
+      await output.abort();
+      rethrow;
+    }
+  }
+
+  static Future<(int, int, int)> _export(
     Map<String, dynamic> metadata,
     Map<String, StreamingFileSource> attachments,
     ExportFormat format,
@@ -143,9 +709,15 @@ class StreamingPackService {
     String directory,
     String? password,
     String? cancel,
+    SendPort? port,
   ) async {
+    final progress = _PackageProgress(port);
+    var readBytes = 0;
+    var verifiedBytes = 0;
+    var intermediateWrites = 0;
     final decoded = NoteCodec.decodeMetadata(jsonEncode(metadata));
     final declared = decoded.note.attachments.map((a) => a.id).toSet();
+    final names = {for (final a in decoded.note.attachments) a.id: a.fileName};
     if (attachments.length != declared.length ||
         !declared.containsAll(attachments.keys)) {
       throw const FormatException('Package attachments are incomplete.');
@@ -178,11 +750,20 @@ class StreamingPackService {
         await output.writeFrom(json);
         await output.writeFrom(_u32(attachments.length));
         for (final entry in attachments.entries) {
+          readBytes += entry.value.length;
           final id = utf8.encode(entry.key);
           await output.writeFrom(_u32(id.length));
           await output.writeFrom(id);
           await output.writeFrom(_u32(entry.value.length));
-          await _copy(entry.value, output, cancellationFile: cancel);
+          await _copy(
+            entry.value,
+            output,
+            cancellationFile: cancel,
+            onProgress: progress.file(
+              PackageExportPhase.packing,
+              names[entry.key]!,
+            ),
+          );
         }
         await output.flush();
       } finally {
@@ -192,7 +773,9 @@ class StreamingPackService {
         payload.path,
         await payload.length(),
       );
+      intermediateWrites += framedSource.length;
       if (password != null && password.isNotEmpty) {
+        readBytes += framedSource.length;
         final encrypted = p.join(directory, 'binary-archive.enc');
         final transformed = await StreamingFileCipher.transform(
           source: framedSource,
@@ -202,7 +785,10 @@ class StreamingPackService {
           destinationPassword: password,
           cancelled: () => cancel != null && File(cancel).existsSync(),
           maxPlaintextBytes: 1 << 62,
+          progress: progress.cipher('Note package'),
         );
+        verifiedBytes += transformed.length;
+        intermediateWrites += transformed.length;
         framedSource = StreamingFileSource(encrypted, transformed.length);
       }
       final file = File(destination);
@@ -217,7 +803,13 @@ class StreamingPackService {
           1,
           password == null || password.isEmpty ? 0 : 1,
         ]);
-        await _copy(framedSource, sink, cancellationFile: cancel);
+        readBytes += framedSource.length;
+        await _copy(
+          framedSource,
+          sink,
+          cancellationFile: cancel,
+          onProgress: progress.file(PackageExportPhase.writing, 'Note package'),
+        );
         await sink.flush();
       } finally {
         await sink.close();
@@ -253,6 +845,7 @@ class StreamingPackService {
       for (final entry in entries.entries) {
         _cancel(cancel);
         if (password != null && password.isNotEmpty) {
+          readBytes += entry.value.length;
           final encrypted = p.join(
             directory,
             '${const Uuid().v4()}.archive.enc',
@@ -265,15 +858,21 @@ class StreamingPackService {
             destinationPassword: password,
             cancelled: () => cancel != null && File(cancel).existsSync(),
             maxPlaintextBytes: _maxCipherLength,
+            progress: progress.cipher(p.basename(entry.key)),
           );
+          verifiedBytes += result.length;
+          intermediateWrites += result.length;
           stored[entry.key] = StreamingFileSource(encrypted, result.length);
         } else {
           stored[entry.key] = entry.value;
         }
       }
-      await _writeZip64(destination, stored, cancel);
+      readBytes += stored.values.fold<int>(0, (n, s) => n + 2 * s.length);
+      intermediateWrites += json.length + mapBytes.length;
+      await _writeZip64(destination, stored, cancel, progress);
     }
     _cancel(cancel);
+    return (readBytes, verifiedBytes, intermediateWrites);
   }
 
   static Future<FilePackResult> _import(
@@ -281,9 +880,11 @@ class StreamingPackService {
     String directory,
     String? password,
     String? cancel,
+    bool verifyWrites,
+    _ImportProgress progress,
   ) async {
     final file = File(source);
-    final handle = await file.open();
+    final handle = await BoundedFileReader.openPath(file.path);
     final header = await handle.read(6);
     await handle.close();
     if (header.length < 6) {
@@ -304,6 +905,7 @@ class StreamingPackService {
         StreamingFileSource(source, await file.length() - 6, offset: 6),
         encrypted: encrypted,
         password: password,
+        cancelled: () => cancel != null && File(cancel).existsSync(),
       );
       try {
         final jsonLength = _read32(await reader.read(4), 0, Endian.big);
@@ -331,12 +933,29 @@ class StreamingPackService {
           }
           final length = _read32(await reader.read(4), 0, Endian.big);
           final output = p.join(directory, '${const Uuid().v4()}.med');
-          await reader.copyTo(
+          final receipt = await reader.copyTo(
             output,
             length,
             cancelled: () => cancel != null && File(cancel).existsSync(),
+            verifyWrites: verifyWrites,
+            onProgress: progress.file(
+              encrypted
+                  ? PackageImportPhase.decrypting
+                  : PackageImportPhase.extracting,
+              decoded.note.attachments
+                      .where((a) => a.id == id)
+                      .map((a) => a.fileName)
+                      .firstOrNull ??
+                  id,
+              i + 1,
+              count,
+            ),
           );
-          attachments[id] = StreamingFileSource(output, length);
+          attachments[id] = StreamingFileSource(
+            output,
+            length,
+            receipt: receipt,
+          );
         }
         if (reader.remaining != 0) {
           throw const FormatException('Trailing binary package bytes.');
@@ -347,7 +966,13 @@ class StreamingPackService {
         await reader.close();
       }
     }
-    final entries = await _readZip(source, directory, cancel);
+    final entries = await _readZip(
+      source,
+      directory,
+      cancel,
+      verifyWrites,
+      progress,
+    );
     final note = entries['note.json'];
     if (note == null) throw const FormatException('Missing package note.');
     Future<Uint8List> readMetadata(StreamingFileSource source) async {
@@ -355,6 +980,7 @@ class StreamingPackService {
         source,
         encrypted: password != null && password.isNotEmpty,
         password: password,
+        cancelled: () => cancel != null && File(cancel).existsSync(),
       );
       try {
         if (reader.remaining > metadataLimit) {
@@ -381,7 +1007,9 @@ class StreamingPackService {
     }
     final payloads = <String, StreamingFileSource>{};
     final used = <String>{};
+    var attachmentIndex = 0;
     for (final attachment in decoded.note.attachments) {
+      attachmentIndex++;
       final relative = mappingFile == null
           ? attachment.fileName
           : mapping[attachment.id];
@@ -400,18 +1028,30 @@ class StreamingPackService {
           entry,
           encrypted: true,
           password: password,
+          cancelled: () => cancel != null && File(cancel).existsSync(),
         );
         try {
           if (reader.remaining > _maxCipherLength) {
             throw const FormatException('Oversized attachment.');
           }
           final length = reader.remaining;
-          await reader.copyTo(
+          final receipt = await reader.copyTo(
             output,
             length,
             cancelled: () => cancel != null && File(cancel).existsSync(),
+            verifyWrites: verifyWrites,
+            onProgress: progress.file(
+              PackageImportPhase.decrypting,
+              attachment.fileName,
+              attachmentIndex,
+              decoded.note.attachments.length,
+            ),
           );
-          payloads[attachment.id] = StreamingFileSource(output, length);
+          payloads[attachment.id] = StreamingFileSource(
+            output,
+            length,
+            receipt: receipt,
+          );
         } finally {
           await reader.close();
         }
@@ -448,6 +1088,7 @@ class StreamingPackService {
     String destination,
     Map<String, StreamingFileSource> entries,
     String? cancel,
+    _PackageProgress progress,
   ) async {
     final file = File(destination);
     await file.create(exclusive: true);
@@ -466,7 +1107,14 @@ class StreamingPackService {
       for (final entry in entries.entries) {
         _cancel(cancel);
         _name(entry.key);
-        final crc = await _fileCrc(entry.value, cancel);
+        final crc = await _fileCrc(
+          entry.value,
+          cancel,
+          onProgress: progress.file(
+            PackageExportPhase.checksum,
+            p.basename(entry.key),
+          ),
+        );
         final offset = await output.position();
         final bytes = utf8.encode(entry.key);
         await number(0x04034b50, 4);
@@ -490,6 +1138,10 @@ class StreamingPackService {
           output,
           cancellationFile: cancel,
           expectedCrc: crc,
+          onProgress: progress.file(
+            PackageExportPhase.writing,
+            p.basename(entry.key),
+          ),
         );
         records.add(
           _ZipEntry(
@@ -564,10 +1216,12 @@ class StreamingPackService {
 
   static Future<int> _fileCrc(
     StreamingFileSource source,
-    String? cancel,
-  ) async {
+    String? cancel, {
+    void Function(int bytes, int total)? onProgress,
+  }) async {
     final reader = await LegacyFileReader.open(source);
     var crc = 0;
+    onProgress?.call(0, source.length);
     try {
       while (reader.remaining > 0) {
         _cancel(cancel);
@@ -575,6 +1229,7 @@ class StreamingPackService {
           await reader.read(min(reader.remaining, StreamingFileCipher.window)),
           crc,
         );
+        onProgress?.call(source.length - reader.remaining, source.length);
       }
     } finally {
       await reader.close();
@@ -597,29 +1252,30 @@ class StreamingPackService {
     return crc ^ 0xffffffff;
   }
 
-  static void _verifyDeflateConsumption(
+  static Future<void> _extractDeflate(
     String source,
     int start,
     _ZipEntry record,
     String? cancel,
-  ) {
-    final file = archive.InputFileStream(
-      source,
-      bufferSize: StreamingFileCipher.window,
+    _ExpandedSink output,
+  ) async {
+    final granted = await BoundedFileReader.openPath(source);
+    final file = archive.InputFileStream.withFileBuffer(
+      archive.FileBuffer(granted, bufferSize: StreamingFileCipher.window),
     );
     try {
       final input = _DeflateInput(file, start, record.compressed, cancel);
-      final sink = _DeflateHistory(record.size, cancel);
+      final sink = _DeflateHistory(record.size, cancel, output);
       archive.Inflate.stream(input, output: sink);
-      if (input.position != record.compressed ||
-          sink.length != record.size ||
-          sink.crc != record.crc) {
+      sink.flush();
+      if (input.position != record.compressed || sink.length != record.size) {
         throw const FormatException(
           'DEFLATE framing is incomplete or contains unconsumed bytes.',
         );
       }
     } finally {
       file.closeSync();
+      await granted.close();
     }
   }
 
@@ -627,10 +1283,12 @@ class StreamingPackService {
     String source,
     String directory,
     String? cancel,
+    bool verifyWrites,
+    _ImportProgress progress,
   ) async {
     final file = File(source);
     final before = await file.stat();
-    final input = await file.open();
+    final input = await BoundedFileReader.openPath(file.path);
     Future<Uint8List> at(int offset, int count) async {
       if (offset < 0 ||
           count < 0 ||
@@ -790,7 +1448,9 @@ class StreamingPackService {
       records.sort((a, b) => a.offset.compareTo(b.offset));
       var consumed = 0;
       final result = <String, StreamingFileSource>{};
+      var recordIndex = 0;
       for (final record in records) {
+        recordIndex++;
         _cancel(cancel);
         if (record.offset != consumed) {
           throw const FormatException(
@@ -849,46 +1509,66 @@ class StreamingPackService {
           throw const FormatException('Unknown package entry.');
         }
         final outputPath = p.join(directory, '${const Uuid().v4()}.record');
-        if (record.method == 8) {
-          _verifyDeflateConsumption(source, start, record, cancel);
-        }
+        final target = OwnedWriteTarget.forPath(outputPath);
+        await target.validate(outputPath);
         final outputFile = File(outputPath);
         await outputFile.create(exclusive: true);
         final output = outputFile.openSync(mode: FileMode.writeOnly);
-        final sink = _ExpandedSink(output, record.size, record.crc);
-        final Sink<List<int>>? inflater = record.method == 8
-            ? ZLibDecoder(raw: true).startChunkedConversion(sink)
-            : null;
+        final update = progress.file(
+          PackageImportPhase.extracting,
+          record.name,
+          recordIndex,
+          records.length,
+        );
+        update(0, record.size);
+        final sink = _ExpandedSink(
+          output,
+          record.size,
+          record.crc,
+          onProgress: update,
+        );
         try {
-          await input.setPosition(start);
-          var left = record.compressed;
-          while (left > 0) {
-            _cancel(cancel);
-            // 1 KiB compressed input bounds a worst-case DEFLATE expansion
-            // window; outputs are written immediately instead of collected.
-            final bytes = await input.read(
-              min(left, record.method == 8 ? 1024 : StreamingFileCipher.window),
-            );
-            if (bytes.isEmpty) {
-              throw const FormatException('Truncated ZIP payload.');
-            }
-            left -= bytes.length;
-            if (inflater != null) {
-              inflater.add(bytes);
-            } else {
+          if (record.method == 8) {
+            // The strict bounded decoder both validates grammar and emits bytes.
+            await _extractDeflate(source, start, record, cancel, sink);
+          } else {
+            await input.setPosition(start);
+            var left = record.compressed;
+            while (left > 0) {
+              _cancel(cancel);
+              final bytes = await input.read(
+                min(left, StreamingFileCipher.window),
+              );
+              if (bytes.isEmpty)
+                throw const FormatException('Truncated ZIP payload.');
+              left -= bytes.length;
               sink.add(bytes);
             }
           }
-          if (inflater != null) {
-            inflater.close();
-          } else {
-            sink.close();
-          }
+          sink.close();
           output.flushSync();
         } finally {
           output.closeSync();
         }
-        result[record.name] = StreamingFileSource(outputPath, record.size);
+        if (verifyWrites) {
+          final hash = await sha256.bind(outputFile.openRead()).first;
+          if (hash.toString() != sink.digest.value.toString()) {
+            throw const FormatException('Extracted output readback mismatch.');
+          }
+        }
+        final receipt = await OwnedWriteReceipt.closed(
+          target: target,
+          length: record.size,
+          sha256Hex: sink.digest.value.toString(),
+          verifyReadback: verifyWrites,
+          payloadReadBytes: record.compressed,
+          readbackBytes: verifyWrites ? record.size : 0,
+        );
+        result[record.name] = StreamingFileSource(
+          outputPath,
+          record.size,
+          receipt: receipt,
+        );
       }
       if (consumed != offset) {
         throw const FormatException('Unconsumed ZIP local data.');
@@ -940,30 +1620,29 @@ class _DeflateInput extends archive.InputFileStream {
   }
 }
 
-/// Immediate grammar-verification sink. Retain only DEFLATE's 32 KiB history,
-/// never the expanded entry. The native decoder separately checks validity and
-/// writes the entry through its bounded file sink.
+/// Strict extraction sink: 32 KiB history and a bounded output window.
+/// Grammar, CRC, size and output hashing share the extraction pass.
 class _DeflateHistory extends archive.OutputStream {
-  _DeflateHistory(this.expected, this.cancel)
+  _DeflateHistory(this.expected, this.cancel, this.output)
     : super(byteOrder: archive.ByteOrder.littleEndian);
   final int expected;
   final String? cancel;
+  final _ExpandedSink output;
+  final _pending = Uint8List(65536);
+  int _pendingCount = 0;
   final _history = Uint8List(32768);
   int _count = 0;
-  int _crcState = 0xffffffff;
   @override
   int get length => _count;
-  int get crc => _crcState ^ 0xffffffff;
   @override
   void writeByte(int value) {
     if ((_count & 32767) == 0) StreamingPackService._cancel(cancel);
     if (_count >= expected)
       throw const FormatException('DEFLATE expanded size exceeds declaration.');
     _history[_count & 32767] = value;
-    _crcState =
-        StreamingPackService._crcTable[(_crcState ^ value) & 255] ^
-        (_crcState >> 8);
+    _pending[_pendingCount++] = value;
     _count++;
+    if (_pendingCount == _pending.length) flush();
   }
 
   @override
@@ -997,20 +1676,34 @@ class _DeflateHistory extends archive.OutputStream {
   }
 
   @override
-  void flush() {}
+  void flush() {
+    if (_pendingCount != 0) {
+      output.add(Uint8List.sublistView(_pending, 0, _pendingCount));
+      _pendingCount = 0;
+    }
+  }
+
   @override
   void clear() => throw UnsupportedError(
-    'A history verifier cannot discard earlier output.',
+    'An extraction sink cannot discard earlier output.',
   );
 }
 
 class _ExpandedSink implements Sink<List<int>> {
-  _ExpandedSink(this.output, this.expected, this.expectedCrc);
+  _ExpandedSink(
+    this.output,
+    this.expected,
+    this.expectedCrc, {
+    this.onProgress,
+  });
+  final void Function(int, int)? onProgress;
   final RandomAccessFile output;
   final int expected;
   final int expectedCrc;
   int length = 0;
   int crc = 0;
+  final digest = _OutputDigest();
+  late final hash = sha256.startChunkedConversion(digest);
   @override
   void add(List<int> bytes) {
     length += bytes.length;
@@ -1019,6 +1712,8 @@ class _ExpandedSink implements Sink<List<int>> {
     }
     crc = StreamingPackService._crc(bytes, crc);
     output.writeFromSync(bytes);
+    hash.add(bytes);
+    onProgress?.call(length, expected);
   }
 
   @override
@@ -1026,5 +1721,14 @@ class _ExpandedSink implements Sink<List<int>> {
     if (length != expected || crc != expectedCrc) {
       throw const FormatException('ZIP size or CRC mismatch.');
     }
+    hash.close();
   }
+}
+
+class _OutputDigest implements Sink<Digest> {
+  Digest? value;
+  @override
+  void add(Digest data) => value = data;
+  @override
+  void close() {}
 }

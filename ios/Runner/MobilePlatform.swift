@@ -15,6 +15,7 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
   private var channels: [FlutterMethodChannel] = []
   private var picker: FlutterResult?
   private var pickingFolder = false
+  private var exportingFile = false
   private var roots: [String: URL] = [:]
   private var entries: [String: (String, URL)] = [:]
   private var entryKeys: [String: String] = [:]
@@ -143,9 +144,13 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
     }
     queue.async { self.reply(result) { try self.documentWork(call) } }
   }
-  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { let result = picker; picker = nil; result?(nil) }
+  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    let result = picker; let exporting = exportingFile
+    picker = nil; exportingFile = false; result?(exporting ? false : nil)
+  }
   func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
     guard let result = picker else { return }; picker = nil
+    if exportingFile { exportingFile = false; result(!urls.isEmpty); return }
     let folder = pickingFolder
     queue.async {
       self.reply(result) {
@@ -223,6 +228,31 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
 
   private func fileCall(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
     let args = call.arguments as? [String: Any] ?? [:]
+    if call.method == "saveExport" || call.method == "shareExport" {
+      do {
+        guard picker == nil, let host = host, let path = args["path"] as? String else { throw failure("Finish the current picker first.") }
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        let cache = try fm.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true).resolvingSymlinksInPath().appendingPathComponent("prepared-exports", isDirectory: true)
+        guard url == url.resolvingSymlinksInPath(), url.deletingLastPathComponent().deletingLastPathComponent() == cache,
+              url.deletingLastPathComponent().lastPathComponent.hasPrefix("future-notes-export-"), fm.fileExists(atPath: url.path) else { throw failure("Unowned export.") }
+        if call.method == "shareExport" {
+          let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+          controller.popoverPresentationController?.sourceView = host.view
+          controller.popoverPresentationController?.sourceRect = CGRect(x: host.view.bounds.midX, y: host.view.bounds.midY, width: 1, height: 1)
+          controller.completionWithItemsHandler = { _, completed, _, error in
+            if error != nil { result(FlutterError(code: "export_share_failed", message: "Sharing failed. The prepared export is retained.", details: nil)) }
+            else { result(completed) }
+          }
+          host.present(controller, animated: true); return
+        }
+        picker = result; exportingFile = true
+        let controller: UIDocumentPickerViewController
+        if #available(iOS 14.0, *) { controller = UIDocumentPickerViewController(forExporting: [url], asCopy: true) }
+        else { controller = UIDocumentPickerViewController(url: url, in: .exportToService) }
+        controller.delegate = self; host.present(controller, animated: true)
+      } catch { result(FlutterError(code: "export_save_failed", message: "The file could not be saved. The prepared export is still available.", details: nil)) }
+      return
+    }
     if call.method == "openFile" {
       do {
         guard let path = args["path"] as? String, let host = host else { throw failure("Attachment unavailable.") }
@@ -291,7 +321,22 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
         guard bytes.count <= 2 * 1024 * 1024 else { throw failure("Job recovery exceeds its limit.") }
         try atomic(bytes, interruptedLedger); result(String(data: bytes, encoding: .utf8)); return
       }
-      if call.method == "acknowledgeInterrupted" { if fm.fileExists(atPath: interruptedLedger.path) { try fm.removeItem(at: interruptedLedger) }; result(nil); return }
+      if call.method == "acknowledgeInterrupted" || call.method == "dismissInterruptedNotification" {
+        guard let args = call.arguments as? [String: Any], let ids = args["ids"] as? [String], ids.count <= 10000,
+          ids.allSatisfy({ !$0.isEmpty && $0.count <= 128 }) else { throw failure("Invalid task identity.") }
+        for url in [interruptedLedger, ledger] {
+          if let bytes = try readPrivate(url, limit: 2 * 1024 * 1024), let values = try JSONSerialization.jsonObject(with: bytes) as? [[String: Any]] {
+            let retained = values.compactMap { value -> [String: Any]? in
+              guard let id = value["id"] as? String else { return value }
+              if !ids.contains(id) { return value }
+              if call.method == "acknowledgeInterrupted" { return nil }
+              var hidden = value; hidden["notificationDismissed"] = true; return hidden
+            }
+            try atomic(JSONSerialization.data(withJSONObject: retained), url)
+          }
+        }
+        result(nil); return
+      }
       guard call.method == "update", let args = call.arguments as? [String: Any], let values = args["jobs"] as? [[String: Any]], values.count <= 10000 else { throw failure("Invalid job update.") }
       // No passwords or plaintext are persisted. Expiration requests the same
       // safe cancellation used by the foreground UI; no new writer is created.

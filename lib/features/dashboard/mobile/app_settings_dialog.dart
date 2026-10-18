@@ -436,7 +436,7 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
                 'Check encrypted files before opening/exporting',
               ),
               subtitle: const Text(
-                'Optional full source hash scan. Off by default.',
+                'Optional full source hash scan for previews, saved attachments and note exports. Off by default.',
               ),
               value: current.checkBeforeOpen,
               onChanged: pending
@@ -447,15 +447,37 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
               key: const ValueKey('verify-after-open'),
               title: const Text('Verify decrypted output'),
               subtitle: const Text(
-                'Optional output readback for opening/exporting. Off by default.',
+                'Optional plaintext readback for previews and Share / Save attachments. Off by default.',
               ),
               value: current.verifyAfterOpen,
               onChanged: pending
                   ? null
                   : (v) => save(current.copyWith(verifyAfterOpen: v)),
             ),
+            SwitchListTile(
+              key: const ValueKey('verify-large-file-writes'),
+              title: const Text('Extra verification after large writes'),
+              subtitle: const Text(
+                'Optional encryption and publication read-back. Off by default.',
+              ),
+              value: current.verifyLargeFileWrites,
+              onChanged: pending
+                  ? null
+                  : (v) => save(current.copyWith(verifyLargeFileWrites: v)),
+            ),
             const Text(
-              'Attachment metadata is validated when loading/unlocking the note. Required file-safety, length and padding checks always apply.',
+              'Attachment metadata is validated when loading/unlocking the note. Basic format, file-safety, length, padding and recovery checks always apply. Extra payload scans are optional.',
+            ),
+            SwitchListTile(
+              key: const ValueKey('validate-exported-backup'),
+              title: const Text('Validate exported backups'),
+              subtitle: const Text(
+                'Optional full-package read-back before sharing. Off by default. Basic write and format checks still apply.',
+              ),
+              value: current.validateExportedBackup,
+              onChanged: pending
+                  ? null
+                  : (v) => save(current.copyWith(validateExportedBackup: v)),
             ),
             const Text(
               'Native workers use an estimated 16 MiB scheduling allowance and stream 1 MiB windows. The compatible Dart fallback reserves 64 MiB. Heat and memory pressure always reduce the budget.',
@@ -469,7 +491,7 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
           ],
         ),
         const Text(
-          'These optional scans apply to viewing and attachment export. Encryption formats and required publication/revision checks are unchanged.',
+          'Optional payload scans apply to opening, large writes and exports. Encryption formats and basic recovery safeguards are unchanged.',
         ),
       ],
     );

@@ -11,6 +11,7 @@ import 'native_storage_primitives.dart';
 import 'permanent_deletion.dart';
 import 'storage_environment.dart';
 import 'windows_file_actions.dart';
+import 'owned_write.dart';
 
 /// Fault points run after the named operation, before its next acknowledgement.
 enum CommitBoundary {
@@ -46,9 +47,10 @@ typedef CommitByteProgress = void Function(String phase, int bytes, int total);
 
 /// Reopenable, file-backed input. Its length is checked before and after copying.
 class CommitFileSource {
-  const CommitFileSource(this.path, this.length);
+  const CommitFileSource(this.path, this.length, {this.receipt});
   final String path;
   final int length;
+  final OwnedWriteReceipt? receipt;
 }
 
 class RecoveryReport {
@@ -362,36 +364,69 @@ class RecoverableStore {
       if (cancelled?.call() == true) {
         throw const _Cancelled();
       }
-      final before = await _captureProgress(
-        source.path,
-        progress,
-        'Checking prepared file',
-      );
+      final proof = source.receipt;
+      final fast = proof != null && !proof.verifyReadback;
+      if (fast &&
+          (!p.equals(proof.path, source.path) ||
+              proof.length != source.length ||
+              !p.isWithin(
+                p.join(root, '.future-notes-storage', 'sources'),
+                source.path,
+              ) ||
+              !await proof.isCurrent())) {
+        throw const FormatException('Invalid or stale owned candidate.');
+      }
+      Future<StorageRevision> ownedRevision(String path) async {
+        await environment.verifyLocation(path);
+        if (!await proof!.isCurrent(path)) throw const _Changed();
+        final stat = await File(path).stat();
+        return StorageRevision.present(
+          stat.size,
+          proof.sha256Hex,
+          stat.modified.microsecondsSinceEpoch,
+        );
+      }
+
+      final before = fast
+          ? await ownedRevision(source.path)
+          : await _captureProgress(
+              source.path,
+              progress,
+              'Checking prepared file',
+            );
       if (!before.exists ||
           before.length != source.length ||
           p.equals(source.path, destination)) {
         throw const FormatException('Invalid or changed source.');
       }
       final stagedPath = await _location(validation.stagePath);
-      await _copy(
-        source.path,
-        stagedPath,
-        before,
-        id,
-        created: CommitBoundary.stageCreated,
-        written: CommitBoundary.stageWritten,
-        flushed: CommitBoundary.stageFlushed,
-        cancelled: cancelled,
-        onProgress: progress,
-      );
-      final staged = await _captureProgress(
-        stagedPath,
-        progress,
-        'Confirming staged file',
-      );
-      if (!_sameContent(staged, before)) {
-        throw const _Changed();
+      if (fast) {
+        await _parent(stagedPath);
+        await _move(source.path, stagedPath);
+        await _point(CommitBoundary.stageCreated, id);
+        await _point(CommitBoundary.stageWritten, id);
+        await _point(CommitBoundary.stageFlushed, id);
+      } else {
+        await _copy(
+          source.path,
+          stagedPath,
+          before,
+          id,
+          created: CommitBoundary.stageCreated,
+          written: CommitBoundary.stageWritten,
+          flushed: CommitBoundary.stageFlushed,
+          cancelled: cancelled,
+          onProgress: progress,
+        );
       }
+      final staged = fast
+          ? await ownedRevision(stagedPath)
+          : await _captureProgress(
+              stagedPath,
+              progress,
+              'Confirming staged file',
+            );
+      if (!_sameContent(staged, before)) throw const _Changed();
       final record = CommitRecord(
         transactionId: id,
         target: target,
@@ -443,11 +478,13 @@ class RecoverableStore {
       await _parent(destination);
       await _move(stagedPath, destination);
       await _point(CommitBoundary.published, id);
-      final published = await _captureProgress(
-        destination,
-        progress,
-        'Verifying published file',
-      );
+      final published = fast
+          ? await ownedRevision(destination)
+          : await _captureProgress(
+              destination,
+              progress,
+              'Verifying published file',
+            );
       if (!published.matches(staged)) {
         throw const _Changed();
       }
@@ -464,11 +501,14 @@ class RecoverableStore {
         record,
       );
       // Detect an observed replacement even after writing the receipt.
-      if (!(await _captureProgress(
-        destination,
-        progress,
-        'Confirming commit',
-      )).matches(published)) {
+      if (!(fast
+              ? await ownedRevision(destination)
+              : await _captureProgress(
+                  destination,
+                  progress,
+                  'Confirming commit',
+                ))
+          .matches(published)) {
         throw const _Changed();
       }
       await _point(CommitBoundary.receiptVerified, id);

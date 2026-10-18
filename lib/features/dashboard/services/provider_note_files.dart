@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import '../../../core/storage/file_operation_progress.dart';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import '../../../core/operations/operation_result.dart';
 import '../../../core/platform/library_documents.dart';
+import '../../../core/platform/android_native_cipher.dart';
 import '../../../core/platform/mobile_library_documents.dart';
 import '../../../core/platform/mobile_library_events.dart';
 import '../../../core/storage/native_storage_primitives.dart';
@@ -19,6 +21,8 @@ import '../../../core/storage/provider_generation_store.dart';
 import '../../../core/storage/attachment_transform_worker.dart';
 import '../../../core/storage/streaming_file_cipher.dart';
 import '../../../core/storage/storage_owner_worker.dart';
+import '../../../core/storage/owned_write.dart';
+import 'package:uuid/uuid.dart';
 import 'file_service.dart';
 
 /// Live provider-backed notes. Private files are operation staging only; note
@@ -35,7 +39,8 @@ class ProviderNoteFiles
         PickedSourceRecovery,
         NativeDropSourceOwner,
         AttachmentStagingCapacity,
-        InterruptedStagingOwner {
+        InterruptedStagingOwner,
+        AttachmentCandidateOwner {
   ProviderNoteFiles({
     required this.documents,
     required this.location,
@@ -66,6 +71,61 @@ class ProviderNoteFiles
   final _changes = StreamController<void>.broadcast();
   final _leases = <String, _SourceLease>{};
   final _operations = <String>{};
+  final _outputs = <String, (LibraryOutputSinkLease, String)>{};
+
+  @override
+  Future<OwnedWriteTarget> createAttachmentCandidate(
+    NoteReference reference,
+    String attachmentId,
+    Directory operation,
+    int expectedBytes,
+  ) async {
+    final ref = _reference(reference);
+    if (!_operations.contains(operation.path))
+      throw StateError('Unowned attachment operation.');
+    validateDocumentName('$attachmentId.med');
+    final parent = await io.directory(_attachmentPath(ref));
+    try {
+      if (Platform.isAndroid && !AndroidNativeCipher.ready) {
+        throw const LibraryAccessException(
+          'unsupported_sink',
+          'Use one encrypted transfer with the Dart fallback.',
+        );
+      }
+      final sink = await documents.openOutputSink(
+        location,
+        parent,
+        '.future-notes-owned-${const Uuid().v4()}.pending',
+      );
+      final available = await documents.availableBytes(location, sink.document);
+      if (available != null && available < expectedBytes + 16 * 1024 * 1024) {
+        await documents.closeOutputSink(sink);
+        await documents.delete(location, sink.document);
+        throw const LibraryAccessException(
+          'capacity_exceeded',
+          'The selected filesystem does not have enough free space for this attachment.',
+        );
+      }
+      _outputs[sink.lease] = (sink, operation.path);
+      return OwnedWriteTarget.forSink(sink);
+    } on LibraryAccessException catch (error) {
+      if (error.code != 'unsupported_sink') rethrow;
+      if (Platform.isAndroid) {
+        final free = await const MethodChannel(
+          'future_notes/files',
+        ).invokeMethod<int>('privateAvailableBytes');
+        if (free != null && free < expectedBytes + 16 * 1024 * 1024)
+          throw const LibraryAccessException(
+            'capacity_exceeded',
+            'Private attachment staging space is unavailable.',
+          );
+      }
+      return OwnedWriteTarget.forPath(
+        p.join(operation.path, '${const Uuid().v4()}.med'),
+      );
+    }
+  }
+
   final _picked = <String, Map<Object?, Object?>>{};
   Future<void> Function()? _stopWatch;
   bool _closed = false;
@@ -106,7 +166,7 @@ class ProviderNoteFiles
     final available = (await const MethodChannel(
       'future_notes/files',
     ).invokeMethod<int>('privateAvailableBytes'))!;
-    if (available < inputLength + inputLength ~/ 1024 + 16 * 1024 * 1024) {
+    if (available < 16 * 1024 * 1024) {
       throw const LibraryAccessException(
         'capacity_exceeded',
         'The device does not have enough private staging space for this attachment.',
@@ -148,6 +208,84 @@ class ProviderNoteFiles
       revision == null || !revision.exists
       ? null
       : ProviderRevision(revision.length!, revision.sha256Hex!);
+
+  /// Discovery inspects metadata and at most 256 bytes before admitting a file.
+  /// Legacy filenames are unrestricted; exports and other payloads are never
+  /// resolved (and therefore never hashed) as note metadata.
+  Future<List<LibraryDocument>> discoveryCandidates() async => [
+    for (final doc in await documents.children(
+      location,
+      await documents.root(location),
+    ))
+      if (!doc.name.startsWith('.') &&
+          doc.name != 'settings.json' &&
+          (!doc.isDirectory || doc.name.startsWith('note_')))
+        doc,
+  ];
+
+  Future<({NoteReference reference, LibraryDocument metadata})?>
+  inspectDiscoveryCandidate(LibraryDocument entry) async {
+    validateDocumentName(entry.name);
+    final content = entry.isDirectory
+        ? await io.child(entry, 'note_content_${entry.name.substring(5)}.enc')
+        : entry;
+    if (content == null) {
+      // Older libraries keep attachment-only note_<id> folders alongside a
+      // separate legacy note file. Absence of a canonical envelope does not
+      // make that attachment directory an independent note identity.
+      return null;
+    }
+    if (content.isDirectory) {
+      throw const FormatException('Note metadata is not a file.');
+    }
+    final length = content.length;
+    if (length == null || length < 0 || length > 32 * 1024 * 1024) {
+      if (!entry.isDirectory &&
+          !entry.name.startsWith('note_') &&
+          !entry.name.endsWith('.enc')) {
+        return null;
+      }
+      throw const LibraryAccessException(
+        'metadata_limit',
+        'Note metadata exceeds the supported limit.',
+      );
+    }
+    if (length == 0) {
+      if (entry.isDirectory ||
+          entry.name.startsWith('note_') ||
+          entry.name.endsWith('.enc')) {
+        throw const FormatException('Note metadata is empty.');
+      }
+      return null;
+    }
+    final header = await documents.read(
+      location,
+      content,
+      offset: 0,
+      length: length.clamp(0, 256),
+    );
+    // Plain JSON or the legacy app-encrypted base64 envelope. A bounded
+    // prefix only admits a candidate; NoteCodec still validates the full note.
+    final prefix = String.fromCharCodes(header).trimLeft();
+    final candidate =
+        length > 0 &&
+        (prefix.isEmpty ||
+            prefix.startsWith('{') ||
+            RegExp(r'^[A-Za-z0-9+/=_%-]+$').hasMatch(prefix));
+    if (!candidate) {
+      if (entry.isDirectory ||
+          entry.name.startsWith('note_') ||
+          entry.name.endsWith('.enc')) {
+        throw const FormatException('Unrecognized note metadata.');
+      }
+      return null;
+    }
+    final reference = await resolveNote(entry.name);
+    if (reference == null) {
+      throw const FormatException('Note metadata disappeared.');
+    }
+    return (reference: reference, metadata: content);
+  }
 
   @override
   Future<NoteReference?> resolveNote(String fileName) async {
@@ -237,6 +375,7 @@ class ProviderNoteFiles
     String content,
     List<PreparedAttachmentFile> attachments, {
     FileByteProgress? onProgress,
+    void Function(FileOperationProgress)? onFileProgress,
   }) async {
     final ref = _reference(reference);
     final mutations = <ProviderMutation>[];
@@ -247,12 +386,24 @@ class ProviderNoteFiles
         throw const FormatException('Duplicate attachment storage identity.');
       final path = [..._attachmentPath(ref), '${attachment.id}.med'];
       final existing = await io.resolve(path);
+      final proof = attachment.source.receipt;
+      if (proof?.target.sink != null &&
+          (!_outputs.containsKey(proof!.target.lease) ||
+              attachment.source.path != proof.path ||
+              !await proof.isCurrent())) {
+        throw const FormatException('Attachment output ownership changed.');
+      }
       mutations.add(
         ProviderMutation(
           path: path,
           source: _FileSource(attachment.source),
           expected: existing == null ? null : await io.revision(existing),
           envelope: false,
+          displayName: attachment.fileName,
+          verifyReadback: attachment.source.receipt?.verifyReadback ?? true,
+          expectedSourceHash: attachment.source.receipt?.sha256Hex,
+          ownedCandidate: proof?.target.sink == null ? null : proof,
+          sourceReceipt: proof?.target.sink == null ? proof : null,
         ),
       );
     }
@@ -264,7 +415,11 @@ class ProviderNoteFiles
         envelope: true,
       ),
     );
-    final result = await store.commit(mutations, onProgress: onProgress);
+    final result = await store.commit(
+      mutations,
+      onProgress: onProgress,
+      onFileProgress: onFileProgress,
+    );
     if (!result.isSuccess)
       throw LibraryAccessException(result.outcome.name, result.message!);
     final acknowledged = await resolveNote(ref.fileName);
@@ -395,6 +550,23 @@ class ProviderNoteFiles
     if (!_operations.contains(directory.path) ||
         !p.isWithin(p.join(privateRoot, 'operations'), directory.path))
       throw StateError('Unowned operation directory.');
+    for (final entry
+        in _outputs.entries
+            .where((e) => e.value.$2 == directory.path)
+            .toList()) {
+      final sink = entry.value.$1;
+      try {
+        // Only an unadopted, exact owned pending identity can be discarded.
+        // Transaction candidates and ambiguous renamed objects stay recoverable.
+        final current = await io.child(sink.parent, sink.document.name);
+        if (current?.token == sink.document.token)
+          await documents.delete(location, current!);
+      } catch (_) {
+        /* Retain ambiguous provider objects. */
+      }
+      await documents.closeOutputSink(sink);
+      _outputs.remove(entry.key);
+    }
     if (await directory.exists()) {
       await for (final child in directory.list(followLinks: false)) {
         if (child is! File)
@@ -568,6 +740,14 @@ class ProviderNoteFiles
       await documents.closeSource(location, lease.source.lease);
     }
     _leases.clear();
+    for (final output in _outputs.values) {
+      try {
+        await documents.closeOutputSink(output.$1);
+      } catch (_) {
+        /* Native process death also closes handles. */
+      }
+    }
+    _outputs.clear();
     for (final path in _picked.keys.toList()) {
       await releasePickedSource(path);
     }
@@ -659,8 +839,23 @@ class _FileSource implements BoundedByteSource {
   @override
   int get length => source.length;
   @override
-  Stream<List<int>> open() =>
-      File(source.path).openRead(source.offset, source.offset + source.length);
+  Stream<List<int>> open() async* {
+    final before = await File(source.path).stat();
+    if (source.receipt != null && !await source.receipt!.isCurrent()) {
+      throw const FormatException('Prepared attachment changed.');
+    }
+    yield* File(
+      source.path,
+    ).openRead(source.offset, source.offset + source.length);
+    final after = await File(source.path).stat();
+    if (before.size != after.size ||
+        before.modified != after.modified ||
+        before.changed != after.changed) {
+      throw const FormatException(
+        'Prepared attachment changed during transfer.',
+      );
+    }
+  }
 }
 
 class _MemorySource implements BoundedByteSource {

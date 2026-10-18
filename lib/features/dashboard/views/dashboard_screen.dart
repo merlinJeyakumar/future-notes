@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/content_area.dart';
+import '../widgets/background_tasks_dialog.dart';
 import '../widgets/desktop_attachment_drop_zone.dart';
 import '../widgets/note_opening_overlay.dart';
 import '../viewmodels/content_viewmodel.dart';
@@ -69,6 +70,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _drawerSearchFocus = FocusNode();
   final _sidebarToggleFocus = FocusNode(debugLabel: 'sidebar-toggle');
   int _navigationRequest = 0;
+  bool _backgroundTasksOpen = false;
+
+  Future<void> _showBackgroundTasks() async {
+    if (_backgroundTasksOpen || !mounted) return;
+    _backgroundTasksOpen = true;
+    try {
+      await showAppDialog<void>(
+        context: context,
+        builder: (_) =>
+            BackgroundTasksDialog(model: _viewModel, selectExportJobs: false),
+      );
+    } finally {
+      _backgroundTasksOpen = false;
+    }
+  }
 
   void _queryChanged() => _viewModel.setSearchQuery(_searchController.text);
 
@@ -152,6 +168,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           onNewNote: () => unawaited(_handleNewNote(closeDrawer: drawer)),
           onImportNote: _handleImport,
           onSettings: () => _showMasterSettings(context),
+          onBackgroundTasks: _showBackgroundTasks,
           onRefresh: _viewModel.loadRecentFiles,
           onExportPack: _handleExportPack,
         ),
@@ -914,7 +931,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     child: _buildSidebar(drawer: false),
                                   ),
                                 Expanded(
-                                  child: ContentArea(viewModel: _viewModel),
+                                  child: ContentArea(
+                                    viewModel: _viewModel,
+                                    onBackgroundTasks: _showBackgroundTasks,
+                                  ),
                                 ),
                               ],
                             ),

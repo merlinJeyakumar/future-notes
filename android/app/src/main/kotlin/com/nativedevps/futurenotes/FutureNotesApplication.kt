@@ -30,7 +30,7 @@ class FutureNotesApplication : Application() {
         val engine = FlutterEngine(this)
         MobileDiagnostics.bind(engine.dartExecutor.binaryMessenger)
         documents = LocalDocuments(this, engine.dartExecutor.binaryMessenger)
-        cipher = AndroidCipher(this, engine.dartExecutor.binaryMessenger, documents::acquireCipherSource)
+        cipher = AndroidCipher(this, engine.dartExecutor.binaryMessenger, documents::acquireCipherSource, documents::acquireCipherOutput)
         libraryEvents = LibraryEvents(this, engine.dartExecutor.binaryMessenger)
         attachmentDrop = AttachmentDrop(engine.dartExecutor.binaryMessenger, documents)
         files = AttachmentFiles(this, engine.dartExecutor.binaryMessenger)

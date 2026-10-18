@@ -15,12 +15,14 @@ class NoteImportConflict {
     this.reference,
     this.title,
     this.isLocked, {
-    required this.identical,
+    this.identical,
   });
   final NoteReference reference;
   final String title;
   final bool isLocked;
-  final bool identical;
+
+  /// Null means the conflict was found by identity without comparing payloads.
+  final bool? identical;
 }
 
 typedef ResolveNoteImportConflict =

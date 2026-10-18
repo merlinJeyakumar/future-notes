@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:isolate';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
@@ -9,6 +10,8 @@ import 'streaming_file_cipher.dart';
 import 'attachment_scheduler.dart';
 import 'native_storage_primitives.dart';
 import 'storage_environment.dart';
+import 'owned_write.dart';
+import 'processing_diagnostics.dart';
 import '../platform/worker_compute_clock.dart';
 import 'preparation_pacer.dart';
 
@@ -23,6 +26,8 @@ class FileTransformRequest {
     this.verifyOutput = true,
     this.expectedPlaintextBytes,
     this.requireWholeSource = false,
+    this.ownedTarget,
+    this.maxPlaintextBytes = StreamingFileCipher.maxAttachmentBytes,
   });
   final StreamingFileSource source;
   final String destination;
@@ -33,6 +38,8 @@ class FileTransformRequest {
   final bool verifyOutput;
   final int? expectedPlaintextBytes;
   final bool requireWholeSource;
+  final OwnedWriteTarget? ownedTarget;
+  final int maxPlaintextBytes;
 }
 
 class FileRevisionRequest {
@@ -197,10 +204,9 @@ class AttachmentTransformWorker {
                 events.sendPort,
                 request,
                 job._duty,
-                AndroidNativeCipher.ready
-                    ? ServicesBinding.rootIsolateToken
-                    : null,
+                Platform.isAndroid ? ServicesBinding.rootIsolateToken : null,
                 nativeOwner,
+                AndroidNativeCipher.ready,
               ),
               onError: events.sendPort,
               onExit: events.sendPort,
@@ -267,7 +273,11 @@ class AttachmentTransformWorker {
   }
 
   static void _entry(_Start start) async {
-    AndroidNativeCipher.initialize(start.nativeToken, owner: start.nativeOwner);
+    AndroidNativeCipher.initialize(
+      start.nativeToken,
+      owner: start.nativeOwner,
+      enableNative: start.nativeEnabled,
+    );
     final cancellation = ReceivePort();
     var cancelled = false;
     var duty = start.duty;
@@ -321,26 +331,40 @@ class AttachmentTransformWorker {
         if (cancelled) throw const FileJobCancelled();
         result = OperationResult<StorageRevision>.success(revision);
       } else if (request is FileTransformRequest) {
-        result = OperationResult.success(
-          await StreamingFileCipher.transform(
-            source: request.source,
-            destination: request.destination,
-            decryptSource: request.decryptSource,
-            encryptDestination: request.encryptDestination,
-            sourcePassword: request.sourcePassword,
-            destinationPassword: request.destinationPassword,
-            verifyOutput: request.verifyOutput,
-            expectedPlaintextBytes: request.expectedPlaintextBytes,
-            requireWholeSource: request.requireWholeSource,
-            duty: () => duty,
-            cancelled: () => cancelled,
-            cooperate: pacer.cooperate,
-            beginCompute: compute.begin,
-            endCompute: compute.end,
-            progress: (phase, bytes, total) =>
-                start.events.send(_Progress(phase, bytes, total)),
-          ),
+        final elapsed = Stopwatch()..start();
+        final transformed = await StreamingFileCipher.transform(
+          source: request.source,
+          destination: request.destination,
+          decryptSource: request.decryptSource,
+          encryptDestination: request.encryptDestination,
+          sourcePassword: request.sourcePassword,
+          destinationPassword: request.destinationPassword,
+          verifyOutput: request.verifyOutput,
+          ownedTarget: request.ownedTarget,
+          expectedPlaintextBytes: request.expectedPlaintextBytes,
+          requireWholeSource: request.requireWholeSource,
+          maxPlaintextBytes: request.maxPlaintextBytes,
+          duty: () => duty,
+          cancelled: () => cancelled,
+          cooperate: pacer.cooperate,
+          beginCompute: compute.begin,
+          endCompute: compute.end,
+          progress: (phase, bytes, total) =>
+              start.events.send(_Progress(phase, bytes, total)),
         );
+        ProcessingDiagnostics.completed(
+          operation: request.encryptDestination
+              ? (request.decryptSource ? 3 : 1)
+              : 2,
+          elapsedMicros: elapsed.elapsedMicroseconds,
+          readBytes:
+              transformed.receipt?.payloadReadBytes ?? request.source.length,
+          writtenBytes: transformed.length,
+          readbackBytes:
+              transformed.receipt?.readbackBytes ??
+              (request.verifyOutput ? transformed.length : 0),
+        );
+        result = OperationResult.success(transformed);
       } else {
         throw const FormatException('Unknown worker request.');
       }
@@ -405,12 +429,14 @@ class _Start {
     this.duty,
     this.nativeToken,
     this.nativeOwner,
+    this.nativeEnabled,
   );
   final SendPort events;
   final Object request;
   final double duty;
   final RootIsolateToken? nativeToken;
   final String? nativeOwner;
+  final bool nativeEnabled;
 }
 
 class _Progress {

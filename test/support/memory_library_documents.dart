@@ -9,6 +9,7 @@ class MemoryLibraryDocuments implements LibraryDocuments {
   String? fault;
   int next = 0;
   int largestWrite = 0;
+  final readBytesByName = <String, int>{};
   final renames = <String>[];
   _Node _node(LibraryDocument doc) =>
       nodes[doc.token] ??
@@ -80,6 +81,11 @@ class MemoryLibraryDocuments implements LibraryDocuments {
       );
     }
     final bytes = _node(document).bytes;
+    readBytesByName.update(
+      document.name,
+      (n) => n + (bytes.length - offset).clamp(0, length),
+      ifAbsent: () => (bytes.length - offset).clamp(0, length),
+    );
     return offset >= bytes.length
         ? Uint8List(0)
         : Uint8List.fromList(

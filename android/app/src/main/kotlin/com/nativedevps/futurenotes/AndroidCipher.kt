@@ -17,6 +17,7 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.UUID
+import java.util.zip.CRC32
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
@@ -30,7 +31,8 @@ import kotlin.math.min
 /** Android provider implementation of the EXISTING SIC/PKCS7 layout. No new
  * algorithm, key derivation, envelope, library writer or persistence owner. */
 class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
-                    private val acquireDocumentSource: (String) -> FileInputStream) {
+                    private val acquireDocumentSource: (String) -> FileInputStream,
+                    private val acquireDocumentOutput: (String, String) -> FileOutputStream) {
     private val channel = MethodChannel(messenger, "future_notes/cipher")
     private val main = Handler(Looper.getMainLooper())
     private val pool = ThreadPoolExecutor(1, 1, 30, TimeUnit.SECONDS, LinkedBlockingQueue<Runnable>(64)).apply { allowCoreThreadTimeOut(true) }
@@ -47,13 +49,13 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
     @Volatile private var sampledAt = 0L
     private val roots = listOfNotNull(File(context.applicationInfo.dataDir), context.getExternalFilesDir(null), context.externalCacheDir).map { it.canonicalFile }
     private val jobs = ConcurrentHashMap<String, Work>()
-    private class Session(val cipher: Cipher, val owner: String?)
+    private class Session(val cipher: Cipher?, val owner: String?, val digest: MessageDigest? = null, val crc: CRC32? = null)
     private val sessions = ConcurrentHashMap<String, Session>()
     init {
         channel.setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
-                    "capabilities" -> { cipher(ByteArray(32), ByteArray(16)); available = true; result.success(mapOf("version" to 1, "native" to true)) }
+                    "capabilities" -> { cipher(ByteArray(32), ByteArray(16)); available = true; result.success(mapOf("version" to 1, "native" to true, "streamChecksums" to true)) }
                     "configure" -> {
                         val percent = call.argument<Int>("target") ?: 70
                         require(percent in 10..90)
@@ -108,7 +110,19 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
                         sessions[id] = Session(instance, call.argument<String>("owner"))
                         result.success(id)
                     }
-                    "buffer", "sessionProcess", "sessionClose" -> {
+                    "digestOpen" -> {
+                        require(sessions.size < 64)
+                        val owner = call.argument<String>("owner") ?: error("owner")
+                        require(owner.isNotEmpty() && owner.length <= 64)
+                        val id = UUID.randomUUID().toString()
+                        sessions[id] = Session(null, owner, MessageDigest.getInstance("SHA-256"), CRC32())
+                        result.success(id)
+                    }
+                    "sessionBudget" -> {
+                        require(sessions.containsKey(call.argument<String>("id")))
+                        result.success(sessionDuty())
+                    }
+                    "buffer", "sessionProcess", "sessionProcessMeasured", "sessionClose", "digestProcess", "digestResetCrc", "digestFinish" -> {
                         val args = call.arguments as Map<*, *>
                         codecPool.execute {
                             try {
@@ -120,11 +134,36 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
                                         try { buffer(data, key, args["iv"] as ByteArray, args["encrypt"] == true, args["padding"] != false) }
                                         finally { key.fill(0) }
                                     }
-                                    "sessionProcess" -> {
+                                    "sessionProcess", "sessionProcessMeasured" -> {
                                         val instance = sessions[args["id"]]?.cipher ?: error("missing")
                                         val data = args["data"] as ByteArray
                                         require(data.size <= WINDOW)
-                                        synchronized(instance) { instance.update(data).also { require(it.size == data.size) } }
+                                        val started = Debug.threadCpuTimeNanos()
+                                        val transformed = synchronized(instance) { instance.update(data).also { require(it.size == data.size) } }
+                                        if (call.method == "sessionProcessMeasured") mapOf("data" to transformed,
+                                            "cpuMicros" to ((Debug.threadCpuTimeNanos() - started).coerceAtLeast(0) / 1000), "duty" to sessionDuty())
+                                        else transformed
+                                    }
+                                    "digestProcess" -> {
+                                        val session = sessions[args["id"]] ?: error("missing")
+                                        val data = args["data"] as ByteArray
+                                        require(data.size <= WINDOW && session.digest != null && session.crc != null)
+                                        val started = Debug.threadCpuTimeNanos()
+                                        synchronized(session) {
+                                            session.digest.update(data)
+                                            if (args["crc"] == true) session.crc.update(data)
+                                        }
+                                        mapOf("crc" to session.crc.value,
+                                            "cpuMicros" to ((Debug.threadCpuTimeNanos() - started).coerceAtLeast(0) / 1000), "duty" to sessionDuty())
+                                    }
+                                    "digestResetCrc" -> {
+                                        val session = sessions[args["id"]] ?: error("missing")
+                                        synchronized(session) { (session.crc ?: error("missing")).reset() }
+                                        null
+                                    }
+                                    "digestFinish" -> {
+                                        val session = sessions.remove(args["id"]) ?: error("missing")
+                                        synchronized(session) { (session.digest ?: error("missing")).digest().hex() }
                                     }
                                     else -> { sessions.remove(args["id"]); null }
                                 }
@@ -167,6 +206,11 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
         return budget
     }
 
+    private fun sessionDuty(): Double {
+        val current = sampleBudget()
+        return if (current.slots <= 0) 0.0 else minOf(current.duty, current.duty * current.slots / (active.size + 1).coerceAtLeast(1))
+    }
+
     private fun effectiveDuty(work: Work): Double {
         val current = sampleBudget()
         val admitted = active.filter { !it.finished }.sortedBy { it.ordinal }.take(current.slots)
@@ -188,7 +232,9 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
     private fun owned(path: String): File {
         require(File(path).isAbsolute)
         val file = File(path).canonicalFile
-        require(roots.any { file.toPath().startsWith(it.toPath()) && file != it })
+        // Canonical, separator-bounded containment also works on API 24/25;
+        // java.nio.file.Path is only available from API 26.
+        require(roots.any { file.path.startsWith(it.path + File.separator) && file != it })
         return file
     }
 
@@ -204,11 +250,14 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
         var sourceKey: ByteArray? = null
         var destinationKey: ByteArray? = null
         var stage = 0
+        val startedAt = SystemClock.elapsedRealtime()
         try {
             val sourcePath = args["source"] as String
             val documentSource = Regex("^/proc/self/fd/[0-9]+$").matches(sourcePath)
             val source = if (documentSource) File(sourcePath) else owned(sourcePath)
-            val destinationFile = owned(args["destination"] as String)
+            val outputLease = args["outputSink"] as? String
+            val destinationPath = args["destination"] as String
+            val destinationFile = if (outputLease == null) owned(destinationPath) else File(destinationPath)
             output = destinationFile
             require(source != destinationFile && source.isFile)
             val offset = (args["offset"] as Number).toLong()
@@ -220,7 +269,8 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
             val expected = (args["expected"] as? Number)?.toLong()
             require(offset >= 0 && length >= 0 && offset <= source.length() - length && maxPlain >= 0)
             require(!decrypt || (length >= 32 && (length - 16) % 16 == 0L))
-            require(verify || (decrypt && !encrypt))
+            require(verify || (decrypt && !encrypt) ||
+                (args["writeLease"] is String && work.owner != null))
             require(args["whole"] != true || (offset == 0L && length == source.length()))
             val sourceBytes = derive(args["sourcePassword"] as String?)
             val destinationBytes = derive(args["destinationPassword"] as String?)
@@ -228,6 +278,7 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
             destinationKey = destinationBytes
             val sourceHash = (args["sourceHash"] as String?)?.let { MessageDigest.getInstance("SHA-256") }
             val plainHash = MessageDigest.getInstance("SHA-256")
+            val outputHash = if (encrypt) MessageDigest.getInstance("SHA-256") else null
             var plainBytes = 0L
             var written = 0L
             stage = 1
@@ -236,16 +287,22 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
             inputStream.use { input ->
                 val before = Os.fstat(input.fd)
                 require(offset <= before.st_size - length)
-                input.channel.position(offset)
+                var sourcePosition = offset
+                fun readSource(count: Int): ByteArray {
+                    val bytes = read(input, count, sourcePosition)
+                    sourcePosition += count
+                    return bytes
+                }
                 work.check()
                 stage = 2
-                val outputFd = Os.open(destinationFile.path, OsConstants.O_WRONLY or OsConstants.O_CREAT or OsConstants.O_EXCL or OsConstants.O_NOFOLLOW, 384)
-                created = true
-                FileOutputStream(outputFd).use { sink ->
-                    val decoder = if (decrypt) cipher(sourceBytes, read(input, 16).also { sourceHash?.update(it) }) else null
+                val outputStream = if (outputLease != null) acquireDocumentOutput(destinationPath, outputLease)
+                    else FileOutputStream(Os.open(destinationFile.path, OsConstants.O_WRONLY or OsConstants.O_CREAT or OsConstants.O_EXCL or OsConstants.O_NOFOLLOW, 384))
+                created = outputLease == null
+                outputStream.use { sink ->
+                    val decoder = if (decrypt) cipher(sourceBytes, readSource(16).also { sourceHash?.update(it) }) else null
                     val encoder = if (encrypt) {
                         val iv = ByteArray(16).also { SecureRandom().nextBytes(it) }
-                        sink.write(iv); written += 16
+                        sink.write(iv); outputHash?.update(iv); written += 16
                         cipher(destinationBytes, iv)
                     } else null
                     fun emit(bytes: ByteArray) {
@@ -253,7 +310,7 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
                         require(plainBytes <= maxPlain)
                         plainHash.update(bytes)
                         val encoded = encoder?.update(bytes) ?: bytes
-                        sink.write(encoded); written += encoded.size
+                        sink.write(encoded); outputHash?.update(encoded); written += encoded.size
                     }
                     var remaining = length - if (decrypt) 16 else 0
                     work.phase = if (decrypt) "Decrypting" else "Encrypting"
@@ -265,7 +322,7 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
                     stage = 3
                     while (bodyRemaining > 0) {
                         work.cooperate()
-                        val bytes = read(input, min(WINDOW.toLong(), bodyRemaining).toInt())
+                        val bytes = readSource(min(WINDOW.toLong(), bodyRemaining).toInt())
                         val cpu = Debug.threadCpuTimeNanos()
                         sourceHash?.update(bytes)
                         emit(decoder?.update(bytes) ?: bytes)
@@ -276,7 +333,7 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
                     if (decrypt) {
                         stage = 4
                         work.cooperate()
-                        val tail = read(input, 16)
+                        val tail = readSource(16)
                         val cpu = Debug.threadCpuTimeNanos()
                         sourceHash?.update(tail)
                         emit(unpad(decoder!!.update(tail)))
@@ -286,8 +343,9 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
                     if (encoder != null) {
                         val padding = 16 - (plainBytes % 16).toInt()
                         val tail = encoder.update(ByteArray(padding) { padding.toByte() })
-                        sink.write(tail); written += tail.size
-                        sink.write(encoder.doFinal())
+                        sink.write(tail); outputHash?.update(tail); written += tail.size
+                        val end = encoder.doFinal()
+                        sink.write(end); outputHash?.update(end); written += end.size
                     }
                     stage = 5
                     require(expected == null || expected == plainBytes)
@@ -302,13 +360,21 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
                     if (verify) {
                         stage = 6
                         work.phase = "Verifying"; work.bytes = 0
-                        require(hashOutput(destinationFile, written, encrypt, destinationBytes, work) == digest)
+                        require(hashOutput(destinationFile, written, encrypt, destinationBytes, work,
+                            if (outputLease != null) sink.fd else null) == digest)
                     }
                     work.check()
                     // Completion is published only after use{} closes all handles.
-                    work.result = mapOf("length" to written, "hash" to digest)
+                    require(Os.fstat(sink.fd).st_size == written)
+                    work.result = mapOf("length" to written, "hash" to digest,
+                        "outputHash" to (outputHash?.digest()?.hex() ?: digest))
                 }
             }
+            MobileDiagnostics.record(MobileDiagnostics.Event.CIPHER_IO,
+                "elapsed_ms" to (SystemClock.elapsedRealtime() - startedAt),
+                "read_bytes" to (args["length"] as Number), "write_bytes" to (work.result["length"] as Number),
+                "readback_bytes" to (if (args["verify"] != false) work.result["length"] as Number else 0),
+                "encrypt" to (if (args["encrypt"] == true) 1 else 0), "decrypt" to (if (args["decrypt"] == true) 1 else 0))
             work.finished = true
         } catch (error: Exception) {
             if (created) output?.delete()
@@ -319,9 +385,11 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
         } finally { sourceKey?.fill(0); destinationKey?.fill(0); active.remove(work) }
     }
 
-    private fun hashOutput(file: File, length: Long, encrypted: Boolean, key: ByteArray, work: Work): String {
+    private fun hashOutput(file: File, length: Long, encrypted: Boolean, key: ByteArray, work: Work,
+                           granted: java.io.FileDescriptor? = null): String {
         val hash = MessageDigest.getInstance("SHA-256")
-        FileInputStream(file).use { input ->
+        (if (granted == null) FileInputStream(file) else FileInputStream(Os.dup(granted))).use { input ->
+            input.channel.position(0)
             val decoder = if (encrypted) cipher(key, read(input, 16)) else null
             var remaining = length - if (encrypted) 32 else 0
             while (remaining > 0) {
@@ -390,10 +458,14 @@ class AndroidCipher(private val context: Context, messenger: BinaryMessenger,
             val bytes = cipher(key, iv).doFinal(input)
             return if (padding && !encrypt) unpad(bytes) else bytes
         }
-        fun read(input: FileInputStream, length: Int): ByteArray {
+        fun read(input: FileInputStream, length: Int, position: Long? = null): ByteArray {
             val bytes = ByteArray(length)
             var offset = 0
-            while (offset < length) { val count = input.read(bytes, offset, length-offset); require(count > 0); offset += count }
+            while (offset < length) {
+                val count = if (position == null) input.read(bytes, offset, length-offset)
+                    else input.channel.read(java.nio.ByteBuffer.wrap(bytes, offset, length-offset), position + offset)
+                require(count > 0); offset += count
+            }
             return bytes
         }
         fun ByteArray.hex(): String = joinToString("") { "%02x".format(it.toInt() and 255) }

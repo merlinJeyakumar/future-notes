@@ -55,6 +55,10 @@ void main() {
       final verify = find.byKey(const ValueKey('verify-after-open'));
       expect(tester.widget<SwitchListTile>(check).value, isFalse);
       expect(tester.widget<SwitchListTile>(verify).value, isFalse);
+      final backup = find.byKey(const ValueKey('validate-exported-backup'));
+      final writes = find.byKey(const ValueKey('verify-large-file-writes'));
+      expect(tester.widget<SwitchListTile>(backup).value, isFalse);
+      expect(tester.widget<SwitchListTile>(writes).value, isFalse);
       await tester.ensureVisible(check);
       await tester.tap(check);
       await tester.pumpAndSettle();
@@ -84,6 +88,18 @@ void main() {
       await tester.tap(find.text('2 files').last);
       await tester.pumpAndSettle();
       expect(settings.attachmentPerformance.maxParallel, 2);
+      for (final option in [backup, writes]) {
+        await tester.ensureVisible(option);
+        await tester.tap(option);
+        await tester.pumpAndSettle();
+      }
+      expect(settings.attachmentPerformance.validateExportedBackup, isTrue);
+      expect(settings.attachmentPerformance.verifyLargeFileWrites, isTrue);
+      final reset = find.text('Reset performance defaults');
+      await tester.ensureVisible(reset);
+      await tester.tap(reset);
+      await tester.pumpAndSettle();
+      expect(settings.attachmentPerformance, AttachmentPerformance.defaults);
       await tester.pumpWidget(const SizedBox.shrink());
       settings.attachmentPerformanceNotifier.dispose();
       settings.themeModeNotifier.dispose();

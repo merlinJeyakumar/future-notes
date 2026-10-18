@@ -17,7 +17,7 @@ object MobileDiagnostics {
         DART_LIFECYCLE, DART_METRICS, DART_MEMORY_PRESSURE,
         DRAFT_READ_FAILED, DRAFT_WRITE_FAILED, DRAFT_RECOVERED,
         JOB_RECORD_FAILED, JOB_CHANNEL_FAILED, DART_JOB_PHASE, VIEWER_FAILED,
-        CIPHER_FAILED
+        CIPHER_IO, CIPHER_FAILED, DISCOVERY_FAILED
     }
     fun record(event: Event, vararg fields: Pair<String, Number>) {
         val value = JSONObject().put("event", event.name).put("uptime_ms", SystemClock.elapsedRealtime())
@@ -32,7 +32,7 @@ object MobileDiagnostics {
             // Dart can emit only its fixed event set and numeric measurements.
             val allowed = setOf("DART_STARTED", "DART_STARTUP_FAILED", "DART_FRAMEWORK_ERROR", "DART_ASYNC_ERROR",
                 "DART_LIFECYCLE", "DART_METRICS", "DART_MEMORY_PRESSURE", "DRAFT_READ_FAILED", "DRAFT_WRITE_FAILED",
-                "DRAFT_RECOVERED", "JOB_RECORD_FAILED", "JOB_CHANNEL_FAILED", "DART_JOB_PHASE", "VIEWER_FAILED")
+                "DRAFT_RECOVERED", "JOB_RECORD_FAILED", "JOB_CHANNEL_FAILED", "DART_JOB_PHASE", "VIEWER_FAILED", "DISCOVERY_FAILED")
             if (call.method != "record" || event !in allowed) { result.notImplemented(); return@setMethodCallHandler }
             val fields = call.argument<Map<String, Any?>>("metrics") ?: emptyMap()
             record(Event.valueOf(event!!), *fields.entries.take(12).mapNotNull { (key, value) ->

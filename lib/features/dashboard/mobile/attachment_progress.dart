@@ -41,7 +41,8 @@ class _MobileAttachmentProgressState extends State<MobileAttachmentProgress> {
                   return job.owner == widget.model.draftSession.generation &&
                       job.active &&
                       (job.operation == AttachmentJobOperation.add ||
-                          job.operation == AttachmentJobOperation.open);
+                          job.operation == AttachmentJobOperation.open ||
+                          job.operation == AttachmentJobOperation.export);
                 }).toList();
                 if (jobs.isEmpty) return const SizedBox.shrink();
                 final available =

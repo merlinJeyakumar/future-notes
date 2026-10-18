@@ -8,6 +8,7 @@ import '../../../core/operations/operation_result.dart';
 import '../models/attachment_job.dart';
 import '../models/note_import.dart';
 import 'note_replacement_dialog.dart';
+import 'attachment_presentation.dart' show formatAttachmentBytes;
 
 typedef StartNoteImport =
     Future<OperationResult<NoteImportResult>> Function(
@@ -23,11 +24,15 @@ class NoteImportDialog extends StatefulWidget {
     required this.jobs,
     required this.startImport,
     required this.cancelJob,
+    this.detailedProgress = false,
   });
   final String fileName;
   final ValueListenable<List<AttachmentJobState>> jobs;
   final StartNoteImport startImport;
   final Future<void> Function(String id) cancelJob;
+
+  /// Mobile opts in; preserve the accepted desktop presentation.
+  final bool detailedProgress;
 
   @override
   State<NoteImportDialog> createState() => _NoteImportDialogState();
@@ -195,6 +200,8 @@ class _NoteImportDialogState extends State<NoteImportDialog> {
     final detail = result == null
         ? _cancelRequested
               ? 'Cancelling import…'
+              : widget.detailedProgress && state?.detail != null
+              ? state!.detail!
               : finishing
               ? 'Finishing import…'
               : state?.phase == AttachmentJobPhase.verifying
@@ -213,11 +220,18 @@ class _NoteImportDialogState extends State<NoteImportDialog> {
         : result.message ?? 'Import did not complete.';
     final total = state?.total;
     final bytes = state?.bytes ?? 0;
+    final fileProgress = widget.detailedProgress ? state?.fileProgress : null;
     final fraction =
-        !finishing && !_cancelRequested && total != null && total > 0
+        (!finishing || widget.detailedProgress) &&
+            !_cancelRequested &&
+            total != null &&
+            total > 0
         ? (bytes / total).clamp(0.0, 1.0)
         : null;
     return Dialog(
+      insetPadding: widget.detailedProgress
+          ? const EdgeInsets.symmetric(horizontal: 16, vertical: 24)
+          : null,
       child: SizedBox(
         width: 440,
         child: SingleChildScrollView(
@@ -253,12 +267,61 @@ class _NoteImportDialogState extends State<NoteImportDialog> {
               ),
               const SizedBox(height: 24),
               Text(detail),
-              if (result == null) ...[
+              if (result == null && fileProgress != null) ...[
+                const SizedBox(height: 8),
+                if (fileProgress.total > 0) ...[
+                  Text(
+                    'To your selected library folder',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Current file', style: theme.textTheme.labelMedium),
+                  const SizedBox(height: 6),
+                  LinearProgressIndicator(
+                    value: (fileProgress.bytes / fileProgress.total).clamp(
+                      0.0,
+                      1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _bytes(fileProgress.bytes, fileProgress.total),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Overall saving', style: theme.textTheme.labelMedium),
+                  const SizedBox(height: 6),
+                  LinearProgressIndicator(
+                    value: fileProgress.overallTotal > 0
+                        ? (fileProgress.overallBytes /
+                                  fileProgress.overallTotal)
+                              .clamp(0.0, 1.0)
+                        : null,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _bytes(
+                      fileProgress.overallBytes,
+                      fileProgress.overallTotal,
+                    ),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ] else ...[
+                  const SizedBox(height: 8),
+                  const LinearProgressIndicator(),
+                ],
+              ] else if (result == null) ...[
                 const SizedBox(height: 16),
                 LinearProgressIndicator(value: fraction),
                 const SizedBox(height: 8),
                 Text(
-                  finishing
+                  widget.detailedProgress
+                      ? total != null && total > 0
+                            ? '${formatAttachmentBytes(bytes)} / ${formatAttachmentBytes(total)} · ${((bytes / total).clamp(0.0, 1.0) * 100).round()}%'
+                            : finishing
+                            ? 'Finishing publication…'
+                            : 'Preparing import…'
+                      : finishing
                       ? 'Publication must finish before closing.'
                       : 'Preparing · Verifying · Finalizing',
                   style: theme.textTheme.bodySmall,
@@ -292,4 +355,8 @@ class _NoteImportDialogState extends State<NoteImportDialog> {
       ),
     );
   }
+
+  String _bytes(int bytes, int total) => total > 0
+      ? '${formatAttachmentBytes(bytes)} / ${formatAttachmentBytes(total)} · ${((bytes / total).clamp(0.0, 1.0) * 100).round()}%'
+      : 'Preparing import…';
 }

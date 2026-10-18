@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Future Notes - Mobile Completed-Export Dialog &amp; Transfer States</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            surface: {
+              DEFAULT: '#0B0F17',
+              container: '#131A26',
+              'container-low': '#0F141E',
+              'container-high': '#1C2536',
+              'container-highest': '#242F45',
+            },
+            primary: {
+              DEFAULT: '#4299E1',
+              container: '#1E3A5F',
+              'on-container': '#BFDBFE',
+            },
+            secondary: {
+              DEFAULT: '#64748B',
+              container: '#1E293B',
+              'on-secondary-container': '#E2E8F0',
+            },
+            outline: {
+              DEFAULT: '#334155',
+              variant: '#1E293B',
+            },
+            'on-surface': '#F1F5F9',
+            'on-surface-variant': '#94A3B8',
+            emerald: {
+              500: '#10B981',
+              400: '#34D399',
+              900: '#064E3B',
+            }
+          },
+          borderRadius: {
+            DEFAULT: "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "2xl": "1rem",
+            "full": "9999px"
+          },
+          fontFamily: {
+            headline: ["Public Sans", "sans-serif"],
+            display: ["Public Sans", "sans-serif"],
+            body: ["Public Sans", "sans-serif"],
+            label: ["Public Sans", "sans-serif"]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-family: 'Material Symbols Outlined';
+      font-weight: normal;
+      font-style: normal;
+      font-size: 20px;
+      line-height: 1;
+      letter-spacing: normal;
+      text-transform: none;
+      display: inline-block;
+      white-space: nowrap;
+      word-wrap: normal;
+      direction: ltr;
+      -webkit-font-feature-settings: 'liga';
+      -webkit-font-smoothing: antialiased;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body class="bg-[#0B0F17] text-on-surface font-body antialiased min-h-screen p-4 sm:p-6 lg:p-10 select-none">
+<!-- Top Status Banner -->
+<header class="max-w-[1360px] mx-auto mb-8 border border-outline-variant/50 bg-surface-container/70 backdrop-blur-md rounded-xl p-4 sm:px-6 sm:py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-lg bg-primary-container flex items-center justify-center border border-primary/30">
+<span class="material-symbols-outlined text-primary text-xl" data-icon="lock_reset">lock_reset</span>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<span class="font-display font-bold text-base tracking-tight text-on-surface">Future Notes</span>
+<span class="text-xs text-on-surface-variant font-label">·</span>
+<span class="text-xs text-on-surface-variant font-medium">Mobile Completed-Export Dialog</span>
+</div>
+<p class="text-xs text-on-surface-variant/80 font-label">Lifecycle, Cached Invalidation &amp; Android SAF System Interaction Specification</p>
+</div>
+</div>
+<div class="flex flex-wrap items-center gap-2">
+<span class="px-2.5 py-1 rounded bg-surface-container-high border border-outline/40 text-[11px] font-label font-medium text-on-surface-variant tracking-wider uppercase">
+        ANDROID 390X844DP SPEC BOARD
+      </span>
+<span class="px-2.5 py-1 rounded bg-emerald-950/70 border border-emerald-500/30 text-emerald-400 text-[11px] font-label font-semibold tracking-wider">
+        v1.4.1+8 COMPLIANT
+      </span>
+<div class="flex items-center gap-1.5 pl-2 text-xs text-on-surface-variant">
+<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+<span class="font-label">SAF Intent Isolated</span>
+</div>
+</div>
+</header>
+<!-- Interactive 3-Up Spec Board Canvas -->
+<main class="max-w-[1360px] mx-auto">
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8 justify-items-center">
+<!-- ================= FRAME 1: Export Ready (Cached Prepared Export) ================= -->
+<div class="flex flex-col items-center w-full max-w-[390px]">
+<div class="w-full flex items-center justify-between mb-3 px-1 text-xs font-label">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span class="font-semibold text-on-surface tracking-wide uppercase text-[11px]">Frame 01</span>
+</div>
+<span class="text-on-surface-variant">State: CACHED_PREPARED</span>
+</div>
+<!-- Phone Shell 390x844 -->
+<div class="w-[390px] h-[844px] rounded-[44px] border-[3px] border-outline/50 bg-[#0F141E] overflow-hidden relative shadow-2xl flex flex-col shrink-0">
+<!-- System Status Bar -->
+<div class="w-full h-10 px-7 pt-2 flex items-center justify-between text-xs text-on-surface select-none z-30">
+<span class="font-semibold text-[13px] tracking-tight">09:41</span>
+<div class="flex items-center gap-1.5 text-on-surface-variant">
+<span class="material-symbols-outlined text-[16px]" data-icon="signal_cellular_alt">signal_cellular_alt</span>
+<span class="material-symbols-outlined text-[16px]" data-icon="wifi">wifi</span>
+<span class="material-symbols-outlined text-[18px]" data-icon="battery_full">battery_full</span>
+</div>
+</div>
+<!-- Phone Content: Dimmed Editor Canvas -->
+<div class="relative flex-1 flex flex-col overflow-hidden">
+<!-- Mock Editor Header -->
+<div class="px-4 py-2 flex items-center justify-between border-b border-outline-variant/30 bg-surface-container opacity-40">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-on-surface" data-icon="arrow_back">arrow_back</span>
+<span class="font-display font-semibold text-sm">Project notes</span>
+</div>
+<div class="flex items-center gap-2 text-on-surface-variant">
+<span class="text-[11px] font-label px-1.5 py-0.5 rounded bg-surface-container-high border border-outline/20">Read-only</span>
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</div>
+</div>
+<!-- Dimmed Editor Body -->
+<div class="p-4 space-y-3 opacity-30 text-xs text-on-surface-variant font-mono">
+<div class="h-4 bg-outline-variant rounded w-3/4"></div>
+<div class="h-3 bg-outline-variant rounded w-full"></div>
+<div class="h-3 bg-outline-variant rounded w-5/6"></div>
+<div class="h-20 bg-surface-container rounded-lg p-2 border border-outline-variant">
+<div class="flex items-center gap-2 text-primary text-[11px]">
+<span class="material-symbols-outlined text-sm" data-icon="attach_file">attach_file</span>
+<span>spec_payload_v4.enc (14.2 MB)</span>
+</div>
+</div>
+<div class="h-3 bg-outline-variant rounded w-2/3"></div>
+<div class="h-3 bg-outline-variant rounded w-4/5"></div>
+</div>
+<!-- Modal Backdrop -->
+<div class="absolute inset-0 bg-black/75 backdrop-blur-[2px] z-10 flex items-center justify-center p-4">
+<!-- Export Ready Modal -->
+<div class="w-full bg-[#1A202C] border border-outline-variant/60 rounded-2xl p-5 shadow-2xl flex flex-col gap-4">
+<!-- Header with Completed Check Badge -->
+<div class="flex items-start gap-3.5">
+<div class="w-10 h-10 rounded-full bg-emerald-950/80 border border-emerald-500/40 flex items-center justify-center shrink-0 text-emerald-400">
+<span class="material-symbols-outlined text-2xl font-bold" data-icon="check" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<div class="flex-1">
+<h2 class="text-xl font-headline font-semibold text-on-surface tracking-tight leading-snug">Export ready</h2>
+<p class="text-xs text-on-surface-variant mt-0.5">Choose where to save or share this file.</p>
+</div>
+</div>
+<!-- Cached Prepared Export Pill -->
+<div class="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-container-high/90 border border-primary/30 text-xs">
+<span class="material-symbols-outlined text-primary text-base" data-icon="bolt">bolt</span>
+<div class="flex flex-col">
+<span class="font-medium text-primary text-[11px] leading-tight">Using prepared export</span>
+<span class="text-[10px] text-on-surface-variant leading-tight">Unchanged note reused cache. Zero repacking.</span>
+</div>
+</div>
+<!-- Synthetic File Card -->
+<div class="flex items-center justify-between p-3 rounded-xl bg-surface-container border border-outline-variant/40">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-lg bg-surface-container-highest flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-xl" data-icon="folder_zip">folder_zip</span>
+</div>
+<div>
+<div class="font-display font-medium text-xs text-on-surface tracking-tight">Project notes.fnote</div>
+<div class="text-[11px] font-mono text-on-surface-variant mt-0.5">24.8 MB · Encrypted Container</div>
+</div>
+</div>
+<span class="text-[10px] font-label px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant border border-outline-variant/30">
+                    ZIP+AEAD
+                  </span>
+</div>
+<!-- Action Buttons: Save, Share, Close -->
+<div class="flex flex-col gap-2 pt-1">
+<button class="w-full h-11 rounded-xl bg-primary hover:bg-primary/90 text-surface font-semibold text-xs flex items-center justify-center gap-2 transition active:scale-[0.99] shadow-md shadow-primary/20">
+<span class="material-symbols-outlined text-base" data-icon="download">download</span>
+<span>Save to files / device</span>
+</button>
+<div class="grid grid-cols-2 gap-2">
+<button class="h-10 rounded-xl bg-surface-container-high border border-outline-variant/50 hover:bg-surface-container-highest text-on-surface text-xs font-medium flex items-center justify-center gap-1.5 transition">
+<span class="material-symbols-outlined text-sm" data-icon="share">share</span>
+<span>Share</span>
+</button>
+<button class="h-10 rounded-xl bg-transparent border border-outline-variant/40 hover:bg-surface-container/60 text-on-surface-variant text-xs font-medium flex items-center justify-center transition">
+<span>Close</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Gesture Pill -->
+<div class="w-full h-5 flex justify-center items-center z-30 pb-1">
+<div class="w-32 h-1 bg-on-surface-variant/40 rounded-full"></div>
+</div>
+</div>
+<div class="mt-3 text-center">
+<p class="text-xs font-medium text-on-surface">Cached Prepared Dialog</p>
+<p class="text-[11px] text-on-surface-variant">Instant display without CPU repack cycle</p>
+</div>
+</div>
+<!-- ================= FRAME 2: Native Chooser Overlay & Persistent Dialog ================= -->
+<div class="flex flex-col items-center w-full max-w-[390px]">
+<div class="w-full flex items-center justify-between mb-3 px-1 text-xs font-label">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+<span class="font-semibold text-on-surface tracking-wide uppercase text-[11px]">Frame 02</span>
+</div>
+<span class="text-on-surface-variant">State: CHOOSER_ACTIVE</span>
+</div>
+<!-- Phone Shell 390x844 -->
+<div class="w-[390px] h-[844px] rounded-[44px] border-[3px] border-outline/50 bg-[#0F141E] overflow-hidden relative shadow-2xl flex flex-col shrink-0">
+<!-- System Status Bar -->
+<div class="w-full h-10 px-7 pt-2 flex items-center justify-between text-xs text-on-surface select-none z-30">
+<span class="font-semibold text-[13px] tracking-tight">09:41</span>
+<div class="flex items-center gap-1.5 text-on-surface-variant">
+<span class="material-symbols-outlined text-[16px]" data-icon="signal_cellular_alt">signal_cellular_alt</span>
+<span class="material-symbols-outlined text-[16px]" data-icon="wifi">wifi</span>
+<span class="material-symbols-outlined text-[18px]" data-icon="battery_full">battery_full</span>
+</div>
+</div>
+<!-- Phone Content: Dimmed Editor & Persistent Dialog underneath -->
+<div class="relative flex-1 flex flex-col overflow-hidden">
+<!-- Dimmed Background Modal (Frame 1 retained underneath) -->
+<div class="absolute inset-0 bg-black/85 flex flex-col items-center justify-center p-4 z-10 filter blur-[0.6px] pointer-events-none">
+<div class="w-full bg-[#1A202C]/90 border border-outline-variant/40 rounded-2xl p-5 flex flex-col gap-3">
+<div class="flex items-start gap-3">
+<div class="w-8 h-8 rounded-full bg-emerald-950 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+<span class="material-symbols-outlined text-lg" data-icon="check">check</span>
+</div>
+<div>
+<div class="text-base font-semibold text-on-surface">Export ready</div>
+<div class="text-[11px] text-on-surface-variant">Project notes.fnote (24.8 MB)</div>
+</div>
+</div>
+<div class="h-9 rounded-lg bg-surface-container-high/60 flex items-center px-3 text-[11px] text-on-surface-variant">
+                  Actions waiting for system selector response...
+                </div>
+</div>
+</div>
+<!-- Engineering Architecture Pill -->
+<div class="absolute top-12 left-4 right-4 z-20 flex justify-center">
+<div class="px-3 py-1.5 rounded-full bg-emerald-950/90 border border-emerald-400/50 shadow-lg flex items-center gap-2 text-[11px] text-emerald-300 font-label">
+<span class="material-symbols-outlined text-xs" data-icon="shield">shield</span>
+<span class="font-medium">Persistent Underneath · Zero Repacking on Cancel</span>
+</div>
+</div>
+<!-- Native Android System Storage Access Framework (SAF) / Files Picker Sheet -->
+<div class="absolute bottom-0 inset-x-0 z-30 bg-[#1E2430] border-t border-outline/70 rounded-t-3xl shadow-2xl flex flex-col pt-3 pb-6 animate-in slide-in-from-bottom duration-200">
+<!-- Drag Handle -->
+<div class="w-12 h-1 bg-outline-variant/80 rounded-full mx-auto mb-3"></div>
+<!-- SAF Picker Title Header -->
+<div class="px-5 pb-3 border-b border-outline-variant/40 flex items-center justify-between">
+<div>
+<span class="text-[11px] uppercase font-bold tracking-wider text-primary">Android System SAF</span>
+<h3 class="text-sm font-semibold text-on-surface">Save file to...</h3>
+</div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-on-surface-variant text-lg" data-icon="create_new_folder">create_new_folder</span>
+<span class="material-symbols-outlined text-on-surface-variant text-lg" data-icon="search">search</span>
+</div>
+</div>
+<!-- Location Breadcrumb -->
+<div class="px-5 py-2.5 bg-surface-container-low/80 flex items-center gap-2 text-xs text-on-surface-variant border-b border-outline-variant/30">
+<span class="material-symbols-outlined text-sm" data-icon="folder">folder</span>
+<span class="text-on-surface font-medium">Documents</span>
+<span>/</span>
+<span>FutureNotes-Vault</span>
+</div>
+<!-- Folder Directory Contents List -->
+<div class="px-5 py-2 space-y-2 max-h-48 overflow-y-auto custom-scrollbar text-xs">
+<div class="flex items-center justify-between py-1.5 text-on-surface-variant">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-base text-primary/80" data-icon="description">description</span>
+<span>Quarterly_Review_2024.fnote</span>
+</div>
+<span class="text-[10px] font-mono">11.4 MB</span>
+</div>
+<div class="flex items-center justify-between py-1.5 text-on-surface-variant">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-base text-primary/80" data-icon="description">description</span>
+<span>Personal_Keys.fnote</span>
+</div>
+<span class="text-[10px] font-mono">2.1 MB</span>
+</div>
+</div>
+<!-- Save Target File Name & Execution Footer -->
+<div class="p-4 mx-4 mt-2 bg-surface-container-high/60 rounded-xl border border-outline-variant/60 flex flex-col gap-2.5">
+<div class="flex items-center justify-between">
+<span class="text-[11px] text-on-surface-variant font-medium">Filename</span>
+<span class="text-[11px] font-mono text-on-surface font-semibold">Project notes.fnote</span>
+</div>
+<div class="flex items-center justify-end gap-2 pt-1">
+<button class="px-3.5 py-1.5 rounded-lg border border-outline-variant text-xs text-on-surface-variant hover:text-on-surface">
+                    Cancel
+                  </button>
+<button class="px-4 py-1.5 rounded-lg bg-primary text-surface font-semibold text-xs flex items-center gap-1.5 shadow-sm">
+<span class="material-symbols-outlined text-sm" data-icon="save">save</span>
+<span>Save here</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Gesture Pill -->
+<div class="w-full h-5 flex justify-center items-center z-30 pb-1">
+<div class="w-32 h-1 bg-on-surface-variant/40 rounded-full"></div>
+</div>
+</div>
+<div class="mt-3 text-center">
+<p class="text-xs font-medium text-on-surface">SAF Overlay State</p>
+<p class="text-[11px] text-on-surface-variant">Dismissing returns directly to dialog</p>
+</div>
+</div>
+<!-- ================= FRAME 3: In-Flight Save Transfer State ================= -->
+<div class="flex flex-col items-center w-full max-w-[390px]">
+<div class="w-full flex items-center justify-between mb-3 px-1 text-xs font-label">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary animate-ping"></span>
+<span class="font-semibold text-on-surface tracking-wide uppercase text-[11px]">Frame 03</span>
+</div>
+<span class="text-on-surface-variant">State: IN_FLIGHT_TRANSFER</span>
+</div>
+<!-- Phone Shell 390x844 -->
+<div class="w-[390px] h-[844px] rounded-[44px] border-[3px] border-outline/50 bg-[#0F141E] overflow-hidden relative shadow-2xl flex flex-col shrink-0">
+<!-- System Status Bar -->
+<div class="w-full h-10 px-7 pt-2 flex items-center justify-between text-xs text-on-surface select-none z-30">
+<span class="font-semibold text-[13px] tracking-tight">09:41</span>
+<div class="flex items-center gap-1.5 text-on-surface-variant">
+<span class="material-symbols-outlined text-[16px]" data-icon="signal_cellular_alt">signal_cellular_alt</span>
+<span class="material-symbols-outlined text-[16px]" data-icon="wifi">wifi</span>
+<span class="material-symbols-outlined text-[18px]" data-icon="battery_full">battery_full</span>
+</div>
+</div>
+<!-- Phone Content: In-Flight Transfer Modal -->
+<div class="relative flex-1 flex flex-col overflow-hidden">
+<!-- Dimmed Editor Backing -->
+<div class="p-4 space-y-3 opacity-20 text-xs font-mono">
+<div class="h-4 bg-outline-variant rounded w-3/4"></div>
+<div class="h-3 bg-outline-variant rounded w-full"></div>
+<div class="h-24 bg-surface-container rounded-lg p-2"></div>
+</div>
+<!-- Modal Backdrop -->
+<div class="absolute inset-0 bg-black/75 backdrop-blur-[2px] z-10 flex items-center justify-center p-4">
+<!-- Active Transfer Dialog -->
+<div class="w-full bg-[#1A202C] border border-outline-variant/80 rounded-2xl p-5 shadow-2xl flex flex-col gap-4">
+<!-- Active Transfer Header -->
+<div class="flex items-start gap-3.5">
+<div class="w-10 h-10 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center shrink-0 text-primary">
+<span class="material-symbols-outlined text-2xl animate-spin" data-icon="sync">sync</span>
+</div>
+<div class="flex-1">
+<div class="flex items-center gap-2">
+<h2 class="text-xl font-headline font-semibold text-on-surface tracking-tight">Saving file</h2>
+<span class="px-2 py-0.5 rounded-full bg-primary/20 text-primary text-[10px] font-mono font-medium">STREAMING</span>
+</div>
+<p class="text-xs text-on-surface-variant mt-0.5">Streaming package payload to device storage</p>
+</div>
+</div>
+<!-- Synthetic File Card with Active Progress -->
+<div class="p-3.5 rounded-xl bg-surface-container border border-outline-variant/60 flex flex-col gap-2.5">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-primary text-xl" data-icon="description">description</span>
+<span class="font-display font-medium text-xs text-on-surface">Project notes.fnote</span>
+</div>
+<span class="text-xs font-mono font-semibold text-primary">57%</span>
+</div>
+<!-- Determinate Thin Progress Bar -->
+<div class="w-full bg-surface-container-highest h-2 rounded-full overflow-hidden p-0.5">
+<div class="bg-primary h-full rounded-full transition-all duration-300 w-[57%]"></div>
+</div>
+<!-- Real Byte Progress Readout -->
+<div class="flex items-center justify-between text-[11px] font-mono text-on-surface-variant pt-0.5">
+<span>14.2 MB / 24.8 MB</span>
+<span class="text-emerald-400 font-sans text-[10px] flex items-center gap-1">
+<span class="material-symbols-outlined text-xs" data-icon="verified">verified</span>
+<span>CRC32 verified</span>
+</span>
+</div>
+</div>
+<!-- Anti-Concurrency Guard Banner -->
+<div class="px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant/40 flex items-start gap-2 text-[11px] text-on-surface-variant">
+<span class="material-symbols-outlined text-amber-400 text-sm mt-0.5" data-icon="lock">lock</span>
+<span>Duplicate action prevention active. Save &amp; Share triggers locked during write.</span>
+</div>
+<!-- Actions: Disabled & Cancel Guard -->
+<div class="flex flex-col gap-2 pt-1">
+<!-- Disabled Save Action -->
+<button class="w-full h-11 rounded-xl bg-primary/40 text-surface/60 font-semibold text-xs flex items-center justify-center gap-2 cursor-not-allowed border border-primary/20" disabled="">
+<span class="material-symbols-outlined text-base" data-icon="download">download</span>
+<span>Saving in progress...</span>
+</button>
+<div class="grid grid-cols-2 gap-2">
+<!-- Disabled Share Action -->
+<button class="h-10 rounded-xl bg-surface-container-high/40 border border-outline-variant/20 text-on-surface-variant/40 text-xs font-medium flex items-center justify-center gap-1.5 cursor-not-allowed" disabled="">
+<span class="material-symbols-outlined text-sm" data-icon="share">share</span>
+<span>Share</span>
+</button>
+<!-- Safe Cancel Action -->
+<button class="h-10 rounded-xl bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant/50 text-rose-300 hover:text-rose-200 text-xs font-medium flex items-center justify-center gap-1 transition">
+<span class="material-symbols-outlined text-sm" data-icon="close">close</span>
+<span>Cancel write</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Gesture Pill -->
+<div class="w-full h-5 flex justify-center items-center z-30 pb-1">
+<div class="w-32 h-1 bg-on-surface-variant/40 rounded-full"></div>
+</div>
+</div>
+<div class="mt-3 text-center">
+<p class="text-xs font-medium text-on-surface">Active Transfer &amp; Guard</p>
+<p class="text-[11px] text-on-surface-variant">Real byte progress with concurrent action lock</p>
+</div>
+</div>
+</div>
+<!-- ================= FOOTER ARCHITECTURE SPECIFICATION CARDS ================= -->
+<section class="mt-12 pt-8 border-t border-outline-variant/40 grid grid-cols-1 md:grid-cols-3 gap-5">
+<!-- Card 1 -->
+<div class="p-5 rounded-2xl bg-surface-container/60 border border-outline-variant/50 flex flex-col justify-between hover:border-outline/80 transition-colors">
+<div class="space-y-2.5">
+<div class="flex items-center gap-2 text-primary">
+<div class="p-1.5 rounded-lg bg-primary/10 border border-primary/20">
+<span class="material-symbols-outlined text-base" data-icon="bolt">bolt</span>
+</div>
+<h3 class="font-headline font-semibold text-sm text-on-surface">Zero-Repack Cached Replay</h3>
+</div>
+<p class="text-xs text-on-surface-variant leading-relaxed">
+            Re-opening export for an unmodified note with identical encryption parameters instantly provides <code class="font-mono text-primary bg-surface-container-high px-1.5 py-0.5 rounded text-[11px]">Project notes.fnote</code> from memory/cache, badged with <strong>'Using prepared export'</strong>. Eliminates expensive redundant file packaging.
+          </p>
+</div>
+<div class="mt-4 pt-3 border-t border-outline-variant/30 flex items-center justify-between text-[11px] font-mono text-on-surface-variant/70">
+<span>CACHE: SHA-256 STATE HASH</span>
+<span class="text-emerald-400">0ms LATENCY</span>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="p-5 rounded-2xl bg-surface-container/60 border border-outline-variant/50 flex flex-col justify-between hover:border-outline/80 transition-colors">
+<div class="space-y-2.5">
+<div class="flex items-center gap-2 text-emerald-400">
+<div class="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+<span class="material-symbols-outlined text-base" data-icon="layers">layers</span>
+</div>
+<h3 class="font-headline font-semibold text-sm text-on-surface">Persistent Dialog Underneath</h3>
+</div>
+<p class="text-xs text-on-surface-variant leading-relaxed">
+            Launching SAF (<code class="text-[11px] font-mono text-on-surface-variant">ACTION_CREATE_DOCUMENT</code>) or the native Android system share sheet retains the export result modal underneath in the activity stack. Eliminates repacking, loss of progress, or disorientation if the user cancels out of the picker.
+          </p>
+</div>
+<div class="mt-4 pt-3 border-t border-outline-variant/30 flex items-center justify-between text-[11px] font-mono text-on-surface-variant/70">
+<span>ANDROID SAF INTENT</span>
+<span class="text-primary">STACK PERSISTENT</span>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="p-5 rounded-2xl bg-surface-container/60 border border-outline-variant/50 flex flex-col justify-between hover:border-outline/80 transition-colors">
+<div class="space-y-2.5">
+<div class="flex items-center gap-2 text-amber-400">
+<div class="p-1.5 rounded-lg bg-amber-400/10 border border-amber-400/20">
+<span class="material-symbols-outlined text-base" data-icon="security_update_good">security_update_good</span>
+</div>
+<h3 class="font-headline font-semibold text-sm text-on-surface">Transfer Guard &amp; Lock</h3>
+</div>
+<p class="text-xs text-on-surface-variant leading-relaxed">
+            Active disk writes render a determinate <code class="font-mono text-primary bg-surface-container-high px-1.5 py-0.5 rounded text-[11px]">Saving file</code> progress stream and lock both Save and Share CTA triggers (<code class="font-mono text-[11px]">opacity-40 cursor-not-allowed</code>) to prevent race conditions, corrupted buffers, or redundant parallel streams.
+          </p>
+</div>
+<div class="mt-4 pt-3 border-t border-outline-variant/30 flex items-center justify-between text-[11px] font-mono text-on-surface-variant/70">
+<span>MUTEX GUARD</span>
+<span class="text-amber-400">SAFE PIPELINE</span>
+</div>
+</div>
+</section>
+</main>
+</body></html>

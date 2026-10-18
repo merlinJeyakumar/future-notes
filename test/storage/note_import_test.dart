@@ -171,7 +171,7 @@ void main() {
           source,
           resolveConflict: (match) async {
             prompts++;
-            expect(match.identical, isTrue);
+            expect(match.identical, isNull);
             return NoteImportDecision.ignore;
           },
         );
@@ -575,7 +575,7 @@ void main() {
             await package(incoming),
             resolveConflict: (match) async {
               prompts++;
-              expect(match.identical, identical);
+              expect(match.identical, isNull);
               expect(match.reference.contentPath, ref.contentPath);
               return choice;
             },
@@ -607,7 +607,7 @@ void main() {
               resolveConflict: (match) async {
                 reimportPrompts++;
                 expect(match.reference.fileName, result.value!.fileName);
-                expect(match.identical, isTrue);
+                expect(match.identical, isNull);
                 return NoteImportDecision.ignore;
               },
             );
@@ -649,6 +649,61 @@ void main() {
     }
   }
 
+  for (final choice in NoteImportDecision.values) {
+    test(
+      'UID decision ${choice.name} occurs before opening existing attachment payloads',
+      () async {
+        final fields = note();
+        fields['attachments'] = [
+          {'id': 'incoming', 'fileName': 'synthetic.txt', 'size': 19},
+        ];
+        final source = await package(
+          fields,
+          attachments: {'incoming': await payload('uid-only')},
+        );
+        final first = await editor.importNoteFile(source);
+        expect(first.isSuccess, isTrue, reason: first.message);
+        final ref = (await app.files.resolveNote(first.value!.fileName))!;
+        final saved = await stored(first.value!.fileName);
+        final attachmentId =
+            (saved['attachments'] as List).single['id'] as String;
+        final oldPayload = File(
+          p.join(ref.attachmentLocation, '$attachmentId.med'),
+        );
+        expect(await oldPayload.exists(), isTrue);
+        await oldPayload.delete(); // Only this test's disposable library.
+        final before = await File(ref.contentPath).readAsBytes();
+        var prompted = false;
+        final result = await editor.importNoteFile(
+          source,
+          resolveConflict: (match) async {
+            prompted = true;
+            expect(match.identical, isNull);
+            expect(match.reference.contentPath, ref.contentPath);
+            return choice;
+          },
+        );
+        expect(prompted, isTrue);
+        expect(await File(ref.contentPath).readAsBytes(), before);
+        if (choice == NoteImportDecision.replace) {
+          expect(
+            result.isSuccess,
+            isFalse,
+            reason: 'Replacement needs a recoverable predecessor.',
+          );
+        } else {
+          expect(result.isSuccess, isTrue, reason: result.message);
+          expect(
+            result.value!.disposition,
+            choice == NoteImportDecision.ignore
+                ? NoteImportDisposition.ignored
+                : NoteImportDisposition.duplicated,
+          );
+        }
+      },
+    );
+  }
+
   test(
     'fingerprints ignore key order and attachment IDs but retain unknown fields',
     () async {
@@ -672,9 +727,14 @@ void main() {
           '_payloadSha256': 'unknown metadata',
         },
       ];
-      final expected = await NoteImportService.fingerprint(a, {
-        'first': source,
-      });
+      final progress = <(String, int, int)>[];
+      final expected = await NoteImportService.fingerprint(
+        a,
+        {'first': source},
+        onProgress: (name, bytes, total) => progress.add((name, bytes, total)),
+      );
+      expect(progress.first, ('same.txt', 0, source.length));
+      expect(progress.last, ('same.txt', source.length, source.length));
       expect(
         await NoteImportService.fingerprint(b, {'other': source}),
         expected,

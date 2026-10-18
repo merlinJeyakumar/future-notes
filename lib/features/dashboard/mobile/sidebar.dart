@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import '../../../core/theme/app_dialog.dart';
 import '../../../core/theme/app_motion.dart';
 import 'note_activity.dart';
+import '../widgets/app_overflow_menu.dart';
 import '../models/note_list_ui_state.dart';
 import '../models/note_model.dart';
 
@@ -21,12 +22,14 @@ class MobileNotesList extends StatelessWidget {
     required this.onImport,
     required this.onNotifications,
     this.notificationCount = 0,
+    this.activeJobCount,
     this.activity,
     required this.onSettings,
     required this.onRefresh,
     required this.onRetrySearch,
     required this.onDelete,
     required this.onExport,
+    this.onExportProgress,
   });
   final NoteListUiState listState;
   final ValueListenable<Map<String, NoteActivity>>? activity;
@@ -41,7 +44,9 @@ class MobileNotesList extends StatelessWidget {
       onRefresh,
       onRetrySearch;
   final ValueChanged<RecentFile> onDelete, onExport;
+  final VoidCallback? onExportProgress;
   final int notificationCount;
+  final ValueListenable<int>? activeJobCount;
 
   @override
   Widget build(BuildContext context) {
@@ -74,15 +79,7 @@ class MobileNotesList extends StatelessWidget {
                     onPressed: onSettings,
                     icon: const Icon(Icons.settings_outlined),
                   ),
-                  if (notificationCount > 0)
-                    IconButton(
-                      tooltip: '$notificationCount job notifications',
-                      onPressed: onNotifications,
-                      icon: Badge.count(
-                        count: notificationCount,
-                        child: const Icon(Icons.notifications_outlined),
-                      ),
-                    ),
+                  AppOverflowMenu(onBackgroundTasks: onNotifications),
                 ],
               ),
             ),
@@ -145,6 +142,27 @@ class MobileNotesList extends StatelessWidget {
                         ),
                       ),
                       const Spacer(),
+                      if (onExportProgress != null)
+                        IconButton(
+                          key: const ValueKey('notes-export-progress'),
+                          tooltip: 'View export progress',
+                          onPressed: onExportProgress,
+                          icon: SizedBox.square(
+                            dimension: 28,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                const Icon(Icons.ios_share, size: 18),
+                                if (!AppMotion.reduced(context))
+                                  const Positioned.fill(
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 1.5,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
                       TextButton.icon(
                         onPressed: onImport,
                         icon: const Icon(Icons.file_upload_outlined, size: 20),

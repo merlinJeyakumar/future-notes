@@ -44,9 +44,18 @@ class JobNotifications(private val context: Context) {
         .setContentText(if (ongoing) "$count active job(s)" else "$count interrupted job(s)")
         .setGroupSummary(true).setOngoing(ongoing).setContentIntent(open()).build()
 
+    private fun dismiss(ids: List<String>): PendingIntent {
+        val identity = ids.sorted().joinToString(",")
+        val intent = Intent(context, InterruptedJobDismissal::class.java)
+            .setAction(InterruptedJobDismissal.ACTION)
+            .setData(Uri.Builder().scheme("future-notes-job").authority("dismiss").appendPath(identity).build())
+            .putStringArrayListExtra(InterruptedJobDismissal.IDS, ArrayList(ids))
+        return PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
+
     fun sync(active: List<Map<String, Any?>>, interrupted: List<Map<String, Any?>>) {
         val records = linkedMapOf<String, Pair<Map<String, Any?>, Boolean>>()
-        for (job in interrupted) (job["id"] as? String)?.let { records[it] = job to false }
+        for (job in interrupted.filter { it["notificationDismissed"] != true }) (job["id"] as? String)?.let { records[it] = job to false }
         for (job in active) (job["id"] as? String)?.let { records[it] = job to true }
         val tags = records.keys.map { TAG + it }.toSet()
         // Tagged identities avoid hash collisions and allow stale cleanup after process death.
@@ -58,12 +67,23 @@ class JobNotifications(private val context: Context) {
         for ((id, entry) in records) {
             val (job, running) = entry
             val title = (job["fileName"] as? String)?.take(256)?.takeIf { it.isNotBlank() } ?: "Attachment operation"
+            val detail = (job["detail"] as? String)?.take(256)?.takeIf { it.isNotBlank() }
             val notification = builder().setContentTitle(title)
-                .setContentText(if (running) "${operation(job["operation"])} · ${phase(job["phase"])}" else "Interrupted · Tap to review recovery")
+                .setContentText(if (running) "${operation(job["operation"])} · ${detail ?: phase(job["phase"])}" else "Interrupted · Tap to review recovery")
                 .setContentIntent(open(id)).setOngoing(running).setAutoCancel(false)
             if (running) {
                 val total = (job["total"] as? Number)?.toLong()?.coerceAtLeast(0) ?: 0L
                 val done = (job["bytes"] as? Number)?.toLong()?.coerceAtLeast(0) ?: 0L
+                val fileTotal = (job["currentTotal"] as? Number)?.toLong() ?: 0L
+                val fileDone = (job["currentBytes"] as? Number)?.toLong() ?: 0L
+                if (fileTotal > 0 && total > 0) {
+                    fun metric(bytes: Long, size: Long): String {
+                        val percent = (bytes.toDouble() / size * 100).coerceIn(0.0, 100.0).toInt()
+                        return "${android.text.format.Formatter.formatShortFileSize(context, bytes)} / ${android.text.format.Formatter.formatShortFileSize(context, size)} · $percent%"
+                    }
+                    notification.setStyle(Notification.BigTextStyle().bigText(
+                        "${detail ?: "Saving encrypted files"}\nCurrent file: ${metric(fileDone, fileTotal)}\nOverall saving: ${metric(done, total)}"))
+                }
                 notification.setProgress(1000, if (total > 0) ((done.toDouble() / total).coerceIn(0.0, 1.0) * 1000).toInt() else 0, total == 0L)
                 if (job["cancellable"] == true) {
                     val intent = Intent(context, AttachmentJobService::class.java).setAction(AttachmentJobService.CANCEL_JOB)
@@ -72,13 +92,21 @@ class JobNotifications(private val context: Context) {
                     val cancel = PendingIntent.getService(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                     notification.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancel)
                 }
+            } else {
+                val dismissal = dismiss(listOf(id))
+                notification.setDeleteIntent(dismissal)
+                    .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dismiss", dismissal)
             }
             try { manager.notify(TAG + id, CHILD, notification.build()) }
             catch (_: SecurityException) { /* Per-job in-app access remains available. */ }
         }
         if (active.isEmpty()) {
             if (records.isEmpty()) manager.cancel(SUMMARY)
-            else try { manager.notify(SUMMARY, summary(records.size, false)) }
+            else try { manager.notify(SUMMARY, builder()
+                .setContentTitle(context.applicationInfo.loadLabel(context.packageManager))
+                .setContentText("${records.size} interrupted task(s)")
+                .setGroupSummary(true).setOngoing(false).setContentIntent(open())
+                .setDeleteIntent(dismiss(records.keys.toList())).build()) }
             catch (_: SecurityException) { /* Notification permission is optional for recovery access. */ }
         }
     }

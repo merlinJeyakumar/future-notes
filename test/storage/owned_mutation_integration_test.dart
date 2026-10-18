@@ -3,11 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_application_1/core/storage/attachment_performance.dart';
+import 'package:flutter_application_1/features/dashboard/services/streaming_pack_service.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_application_1/core/operations/operation_result.dart';
 import 'package:flutter_application_1/core/storage/owned_app_services.dart';
 import 'package:flutter_application_1/core/storage/storage_environment.dart';
 import 'package:flutter_application_1/features/dashboard/models/attachment_job.dart';
+import 'package:flutter_application_1/features/dashboard/mobile/note_activity.dart';
 import 'package:flutter_application_1/features/dashboard/models/draft_transition.dart';
 import 'package:flutter_application_1/features/dashboard/services/encryption_service.dart';
 import 'package:flutter_application_1/features/dashboard/services/note_codec.dart';
@@ -37,6 +40,18 @@ class PausedEncryption extends EncryptionService {
   }
 }
 
+class ExportPolicyViewModel extends ContentViewModel {
+  ExportPolicyViewModel({
+    required super.fileService,
+    required super.settings,
+    required super.encryptionService,
+    required super.onDraftDecision,
+  }) : super(startBackgroundServices: false);
+  bool mobile = false;
+  @override
+  bool get mobileAttachmentExportPolicy => mobile;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late Directory run;
@@ -58,11 +73,10 @@ void main() {
     cipher = PausedEncryption();
     editorClosed = false;
     decisions = null;
-    editor = ContentViewModel(
+    editor = ExportPolicyViewModel(
       fileService: app.files,
       settings: app.settings,
       encryptionService: cipher,
-      startBackgroundServices: false,
       onDraftDecision: (request) async =>
           decisions == null ? DraftDecision.discard : await decisions!(request),
     );
@@ -614,8 +628,161 @@ void main() {
   );
 
   test(
+    'package export activity belongs to the exported note without an open editor',
+    () async {
+      await save();
+      final name = editor.currentFileName!;
+      final reference = (await app.files.resolveNote(name))!;
+      final exporter = ContentViewModel(
+        fileService: app.files,
+        settings: app.settings,
+        encryptionService: cipher,
+        startBackgroundServices: false,
+      );
+      final activity = MobileNoteActivityController(
+        jobs: exporter.attachmentJobsNotifier,
+        library: reference.binding.root,
+        ownerOf: (id) =>
+            NoteJobOwner.fromRecovery(exporter.attachmentJobRecovery(id)),
+      );
+      final seen = <String>{};
+      activity.addListener(() => seen.addAll(activity.value.keys));
+      try {
+        final result = await exporter.exportOwnedPackageTo(
+          p.join(run.path, 'list-export.fnote'),
+          fileName: name,
+          format: ExportFormat.binary,
+        );
+        expect(result.isSuccess, isTrue, reason: result.message);
+        expect(seen, {name});
+        expect(activity.value, isEmpty);
+        expect(exporter.currentFileName, isNull);
+      } finally {
+        activity.dispose();
+        exporter.dispose();
+        await exporter.closeLibraryResources();
+      }
+    },
+  );
+  for (final format in ExportFormat.values) {
+    for (final check in [false, true]) {
+      for (final verify in [false, true]) {
+        for (final backup in [false, true]) {
+          test(
+            'mobile ${format.name} source=$check output=$verify backup=$backup remain independent',
+            () async {
+              (editor as ExportPolicyViewModel).mobile = true;
+              await app.settings.setAttachmentPerformance(
+                AttachmentPerformance(
+                  checkBeforeOpen: check,
+                  verifyAfterOpen: verify,
+                  validateExportedBackup: backup,
+                ),
+              );
+              await save();
+              final source = await input('Synthetic attachment bytes');
+              expect(
+                (await editor.addOwnedAttachment(
+                  source.path,
+                  'synthetic.txt',
+                )).isSuccess,
+                isTrue,
+              );
+              final reference = (await app.files.resolveNote(
+                editor.currentFileName!,
+              ))!;
+              final attachment = editor.attachments.single;
+              final originalCiphertext = await File(
+                p.join(reference.attachmentLocation, '${attachment.id}.med'),
+              ).readAsBytes();
+              final stages = <AttachmentJobSnapshot>[];
+              final watched = <AttachmentJobState>{};
+              void watch() {
+                for (final job in editor.attachmentJobsNotifier.value) {
+                  if (job.progress.value.operation ==
+                          AttachmentJobOperation.export &&
+                      watched.add(job)) {
+                    job.progress.addListener(
+                      () => stages.add(job.progress.value),
+                    );
+                  }
+                }
+              }
+
+              editor.attachmentJobsNotifier.addListener(watch);
+              final destination = p.join(
+                run.path,
+                'mobile-${format.name}.package',
+              );
+              try {
+                final result = await editor.exportOwnedPackageTo(
+                  destination,
+                  format: format,
+                  password: 'synthetic-archive-password',
+                );
+                expect(result.isSuccess, isTrue, reason: result.message);
+                expect(
+                  stages.any(
+                    (s) =>
+                        s.detail?.startsWith('Checking export attachments') ==
+                        true,
+                  ),
+                  check,
+                );
+                expect(
+                  stages.any(
+                    (s) =>
+                        s.detail?.startsWith('Preparing export files') == true,
+                  ),
+                  !check,
+                );
+                expect(
+                  stages.any((s) => s.detail == 'Validating exported backup'),
+                  backup,
+                );
+                expect(
+                  stages.any(
+                    (s) =>
+                        s.detail?.startsWith('Validating backup encryption') ==
+                        true,
+                  ),
+                  isFalse,
+                );
+                final readback = await Directory(
+                  p.join(run.path, 'readback'),
+                ).create();
+                final restored = await const StreamingPackService()
+                    .importPackage(
+                      source: destination,
+                      operationDirectory: readback.path,
+                      password: 'synthetic-archive-password',
+                    );
+                expect(restored.note.note.id, (await stored())['id']);
+                expect(
+                  await File(
+                    restored.attachments[attachment.id]!.path,
+                  ).readAsBytes(),
+                  originalCiphertext,
+                );
+                expect(
+                  editor.attachmentJobsNotifier.value.last.progress.value.phase,
+                  AttachmentJobPhase.completed,
+                );
+              } finally {
+                editor.attachmentJobsNotifier.removeListener(watch);
+              }
+            },
+          );
+        }
+      }
+    }
+  }
+  test(
     'export source checking reports bytes and acknowledges cancellation without publishing',
     () async {
+      await app.settings.setAttachmentPerformance(
+        app.settings.attachmentPerformance.copyWith(checkBeforeOpen: true),
+      );
       await save();
       final source = await input('x' * (4 * 1024 * 1024));
       expect(

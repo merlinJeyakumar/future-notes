@@ -290,7 +290,9 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
             const SizedBox(height: 6),
             SwitchListTile(
               key: const ValueKey('check-before-open'),
-              title: const Text('Check encrypted file before opening'),
+              title: const Text(
+                'Check encrypted files before opening/exporting',
+              ),
               subtitle: const Text(
                 'Optional full source hash scan. Off by default.',
               ),
@@ -302,11 +304,35 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
             SwitchListTile(
               key: const ValueKey('verify-after-open'),
               title: const Text('Verify decrypted output'),
-              subtitle: const Text('Optional output readback. Off by default.'),
+              subtitle: const Text(
+                'Optional plaintext readback for previews and Share / Save attachments. Off by default.',
+              ),
               value: current.verifyAfterOpen,
               onChanged: pending
                   ? null
                   : (v) => save(current.copyWith(verifyAfterOpen: v)),
+            ),
+            SwitchListTile(
+              key: const ValueKey('validate-exported-backup'),
+              title: const Text('Validate exported backups'),
+              subtitle: const Text(
+                'Optional full-package read-back before sharing. Off by default.',
+              ),
+              value: current.validateExportedBackup,
+              onChanged: pending
+                  ? null
+                  : (v) => save(current.copyWith(validateExportedBackup: v)),
+            ),
+            SwitchListTile(
+              key: const ValueKey('verify-large-file-writes'),
+              title: const Text('Extra verification after large writes'),
+              subtitle: const Text(
+                'Optional encryption and publication read-back. Off by default.',
+              ),
+              value: current.verifyLargeFileWrites,
+              onChanged: pending
+                  ? null
+                  : (v) => save(current.copyWith(verifyLargeFileWrites: v)),
             ),
             const Text(
               'Attachment metadata is validated when loading/unlocking the note. Required file-safety, length and padding checks always apply.',
@@ -323,7 +349,7 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
           ],
         ),
         const Text(
-          'Viewing options do not change encryption formats or journal commit verification.',
+          'Optional checks do not change encryption formats. Basic safety and recovery journals remain active.',
         ),
       ],
     );

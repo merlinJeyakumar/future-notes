@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../viewmodels/content_viewmodel.dart';
@@ -9,9 +10,11 @@ class AndroidAttachmentDropZone extends StatefulWidget {
     super.key,
     required this.model,
     required this.child,
+    this.exportRequests,
   });
   final ContentViewModel model;
   final Widget child;
+  final ValueListenable<int>? exportRequests;
   @override
   State<AndroidAttachmentDropZone> createState() =>
       _AndroidAttachmentDropZoneState();
@@ -28,11 +31,14 @@ class _AndroidAttachmentDropZoneState extends State<AndroidAttachmentDropZone> {
     if (!Platform.isAndroid) return;
     _owner = this;
     widget.model.addListener(_sync);
+    widget.model.attachmentJobsNotifier.addListener(_sync);
+    widget.exportRequests?.addListener(_sync);
     _channel.setMethodCallHandler((call) async {
       if (!mounted) return;
       if (call.method == 'hover') {
         setState(
           () => _hover =
+              !_blocked &&
               call.arguments == true &&
               (ModalRoute.of(context)?.isCurrent ?? true),
         );
@@ -45,7 +51,9 @@ class _AndroidAttachmentDropZoneState extends State<AndroidAttachmentDropZone> {
         // Always adopt/close native leases, including stale drops and modal UI.
         final result = await widget.model.attachNativeDroppedSources(
           sources,
-          (ModalRoute.of(context)?.isCurrent ?? true) ? target : 'dismissed',
+          !_blocked && (ModalRoute.of(context)?.isCurrent ?? true)
+              ? target
+              : 'dismissed',
         );
         if (!result.isSuccess)
           widget.model.operationResultNotifier.value = result;
@@ -59,8 +67,12 @@ class _AndroidAttachmentDropZoneState extends State<AndroidAttachmentDropZone> {
     _sync();
   }
 
+  bool get _blocked =>
+      (widget.exportRequests?.value ?? 0) > 0 || widget.model.hasActiveExport;
+
   void _sync() {
-    final target = widget.model.mobileDropTarget;
+    if (_blocked && _hover && mounted) setState(() => _hover = false);
+    final target = _blocked ? null : widget.model.mobileDropTarget;
     if (_target == target) return;
     _target = target;
     unawaited(_channel.invokeMethod<void>('target', {'token': target}));
@@ -70,6 +82,8 @@ class _AndroidAttachmentDropZoneState extends State<AndroidAttachmentDropZone> {
   void dispose() {
     if (Platform.isAndroid) {
       widget.model.removeListener(_sync);
+      widget.model.attachmentJobsNotifier.removeListener(_sync);
+      widget.exportRequests?.removeListener(_sync);
       if (identical(_owner, this)) {
         _owner = null;
         _channel.setMethodCallHandler(null);

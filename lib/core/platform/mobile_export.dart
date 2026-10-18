@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:ui';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -9,12 +10,64 @@ import 'attachment_batch_export.dart';
 /// Save-to-Files flow. No entire package is passed through a platform message.
 class MobileExport {
   static final _owned = <String>{};
+  static const _files = MethodChannel('future_notes/files');
+  static bool _saving = false;
+  static final _initializations = <String, Future<void>>{};
+  static Future<void> _removeOrphans(Directory root) async {
+    await for (final item in root.list(followLinks: false)) {
+      if (item is Directory &&
+          p.basename(item.path).startsWith('future-notes-export-') &&
+          await item.resolveSymbolicLinks() == item.path &&
+          !_owned.any((path) => p.isWithin(item.path, path))) {
+        await item.delete(recursive: true);
+      }
+    }
+  }
+
+  /// Native create-document/Files picker; bytes stay out of platform messages.
+  static Future<bool> save(
+    String path, {
+    void Function(int, int)? onProgress,
+  }) async {
+    if (!_owned.contains(path) || _saving) {
+      throw StateError('Export unavailable.');
+    }
+    _saving = true;
+    _files.setMethodCallHandler((call) async {
+      if (call.method == 'exportSaveProgress') {
+        final args = call.arguments as Map;
+        onProgress?.call(args['bytes'] as int, args['total'] as int);
+      }
+    });
+    try {
+      return await _files.invokeMethod<bool>('saveExport', {'path': path}) ??
+          false;
+    } finally {
+      _files.setMethodCallHandler(null);
+      _saving = false;
+    }
+  }
+
+  static Future<bool> sharePrepared(String path) async {
+    if (!_owned.contains(path)) throw StateError('Export unavailable.');
+    return await _files.invokeMethod<bool>('shareExport', {'path': path}) ??
+        false;
+  }
+
   static Future<String> destination(String fileName) async {
     final temporary = await getTemporaryDirectory();
     // Android/iOS may expose the app cache through an OS directory alias.
     // Resolve the trusted platform root before allocating children; downstream
     // revision/publication checks still reject links in export paths.
-    final root = Directory(await temporary.resolveSymbolicLinks());
+    final cache = Directory(await temporary.resolveSymbolicLinks());
+    await _initializations.putIfAbsent(cache.path, () => _removeOrphans(cache));
+    final root = await Directory(
+      p.join(cache.path, 'prepared-exports'),
+    ).create();
+    if (await root.resolveSymbolicLinks() != root.path) {
+      throw StateError('Export cache escaped its private root.');
+    }
+    await _initializations.putIfAbsent(root.path, () => _removeOrphans(root));
     final directory = await root.createTemp('future-notes-export-');
     final name = p
         .basename(fileName)

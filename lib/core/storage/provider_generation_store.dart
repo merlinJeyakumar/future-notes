@@ -10,6 +10,8 @@ import 'permanent_deletion.dart';
 import 'provider_legacy_journal.dart';
 import 'commit_record.dart';
 import 'provider_legacy_recovery.dart';
+import 'owned_write.dart';
+import 'file_operation_progress.dart';
 
 enum ProviderCommitBoundary {
   staged,
@@ -27,11 +29,21 @@ class ProviderMutation {
     required this.source,
     required this.expected,
     required this.envelope,
+    this.verifyReadback = true,
+    this.expectedSourceHash,
+    this.ownedCandidate,
+    this.sourceReceipt,
+    this.displayName,
   });
   final List<String> path;
   final BoundedByteSource source;
   final ProviderRevision? expected;
   final bool envelope;
+  final bool verifyReadback;
+  final String? expectedSourceHash;
+  final OwnedWriteReceipt? ownedCandidate;
+  final OwnedWriteReceipt? sourceReceipt;
+  final String? displayName;
 }
 
 /// Local/SD publication protocol. Two provider renames are recoverable, never
@@ -58,7 +70,8 @@ class ProviderGenerationStore {
   Future<OperationResult<String>> commit(
     List<ProviderMutation> mutations, {
     void Function(String, int, int)? onProgress,
-  }) => _serialize(() => _commit(mutations, onProgress));
+    void Function(FileOperationProgress)? onFileProgress,
+  }) => _serialize(() => _commit(mutations, onProgress, onFileProgress));
 
   Future<OperationResult<DeletionReport>> deleteNote(
     List<String> envelope,
@@ -68,6 +81,7 @@ class ProviderGenerationStore {
   Future<OperationResult<String>> _commit(
     List<ProviderMutation> mutations,
     void Function(String, int, int)? onProgress,
+    void Function(FileOperationProgress)? onFileProgress,
   ) async {
     var guarded = false;
     final id = const Uuid().v4();
@@ -102,8 +116,38 @@ class ProviderGenerationStore {
         ...mutations.where((e) => e.envelope),
       ];
       final records = <_Record>[];
+      final payloads = ordered.where((e) => !e.envelope).toList();
+      final overallTotal = payloads.fold<int>(0, (n, e) => n + e.source.length);
+      var completedBytes = 0;
+      final candidates = <int, LibraryDocument>{};
       for (var i = 0; i < ordered.length; i++) {
         final item = ordered[i];
+        var savedBytes = 0;
+        void report(String stage, int bytes, int total) {
+          if (bytes > savedBytes)
+            savedBytes = bytes.clamp(0, item.source.length);
+          onFileProgress?.call(
+            FileOperationProgress(
+              stage: item.envelope ? 'Finishing import' : stage,
+              fileName:
+                  item.displayName ??
+                  (item.envelope ? 'Note details' : item.path.last),
+              fileIndex: item.envelope ? payloads.length : i + 1,
+              fileCount: payloads.length,
+              bytes: item.envelope ? 0 : bytes,
+              total: item.envelope ? 0 : total,
+              overallBytes: completedBytes + (item.envelope ? 0 : savedBytes),
+              overallTotal: overallTotal,
+            ),
+          );
+          onProgress?.call(stage, bytes, total);
+        }
+
+        report(
+          item.envelope ? 'Finishing import' : 'Saving encrypted files',
+          0,
+          item.source.length,
+        );
         final parent = await io.directory(
           item.path.sublist(0, item.path.length - 1),
         );
@@ -116,16 +160,52 @@ class ProviderGenerationStore {
         }
         final candidateName = '.future-notes-$id-$i.pending';
         final retiredName = '.future-notes-$id-$i.previous';
-        final candidate = await io.documents.create(
-          io.library,
-          parent,
-          candidateName,
-        );
-        final next = await io.write(
-          candidate,
-          item.source,
-          onProgress: onProgress,
-        );
+        final proof = item.ownedCandidate;
+        final transferred = item.sourceReceipt;
+        if (!item.verifyReadback &&
+            proof == null &&
+            (transferred == null ||
+                transferred.length != item.source.length ||
+                transferred.sha256Hex != item.expectedSourceHash ||
+                !await transferred.isCurrent())) {
+          throw const FormatException(
+            'Unchecked transfer requires a current owned write receipt.',
+          );
+        }
+        late final LibraryDocument candidate;
+        late final ProviderRevision next;
+        if (proof != null) {
+          final sink = proof.target.sink;
+          if (sink == null ||
+              sink.library.token != io.library.token ||
+              sink.parent.token != parent.token ||
+              proof.length != item.source.length ||
+              !await proof.isCurrent())
+            throw const FormatException('Invalid owned provider candidate.');
+          final currentCandidate = await io.child(parent, sink.document.name);
+          if (currentCandidate?.token != sink.document.token)
+            throw const FormatException('Provider candidate identity changed.');
+          candidate = await _rename(parent, currentCandidate!, candidateName);
+          next = ProviderRevision(proof.length, proof.sha256Hex);
+          if (item.verifyReadback &&
+              !next.matches(await io.revision(candidate))) {
+            throw const FormatException('Owned provider readback failed.');
+          }
+        } else {
+          candidate = await io.documents.create(
+            io.library,
+            parent,
+            candidateName,
+          );
+          next = await io.write(
+            candidate,
+            item.source,
+            onProgress: report,
+            verifyReadback: item.verifyReadback,
+            expectedHash: item.expectedSourceHash,
+          );
+        }
+        candidates[i] = await io.documents.stat(io.library, candidate);
         await boundary?.call(ProviderCommitBoundary.staged, i);
         if (current != null) {
           final prior = await io.documents.create(
@@ -136,6 +216,8 @@ class ProviderGenerationStore {
           final copied = await io.write(
             prior,
             ProviderByteSource(io, current, item.expected!.length),
+            verifyReadback: item.verifyReadback,
+            expectedHash: item.expected!.hash,
             onProgress: (phase, bytes, total) => onProgress?.call(
               'Retaining previous encrypted version',
               bytes,
@@ -164,6 +246,14 @@ class ProviderGenerationStore {
           ),
         );
         await boundary?.call(ProviderCommitBoundary.backedUp, i);
+        if (!item.envelope) {
+          report(
+            'Saving encrypted files',
+            item.source.length,
+            item.source.length,
+          );
+          completedBytes += item.source.length;
+        }
       }
       final intent = await _metadata(journal, 'intent.json', {
         'version': 2,
@@ -195,14 +285,23 @@ class ProviderGenerationStore {
         if (current != null) await _rename(parent, current, record.retired);
         await boundary?.call(ProviderCommitBoundary.retired, record.index);
         final candidate = await io.child(parent, record.candidate);
-        if (candidate == null || !await _matches(candidate, record.after)) {
+        final fast = !ordered[record.index].verifyReadback;
+        final captured = candidates[record.index]!;
+        if (candidate == null ||
+            (fast
+                ? candidate.token != captured.token ||
+                      candidate.length != record.after.length ||
+                      candidate.modifiedMillis != captured.modifiedMillis
+                : !await _matches(candidate, record.after))) {
           throw const FormatException('Staged candidate changed.');
         }
-        await _rename(parent, candidate, record.path.last);
-        if (!await _matches(
-          await io.child(parent, record.path.last),
-          record.after,
-        )) {
+        final renamed = await _rename(parent, candidate, record.path.last);
+        final published = await io.child(parent, record.path.last);
+        if (fast
+            ? published == null ||
+                  published.token != renamed.token ||
+                  published.length != record.after.length
+            : !await _matches(published, record.after)) {
           throw const FormatException('Published readback failed.');
         }
         await boundary?.call(ProviderCommitBoundary.published, record.index);
@@ -438,7 +537,7 @@ class ProviderGenerationStore {
       ? document == null
       : document != null && expected.matches(await io.revision(document));
 
-  Future<void> _rename(
+  Future<LibraryDocument> _rename(
     LibraryDocument parent,
     LibraryDocument document,
     String name,
@@ -453,6 +552,7 @@ class ProviderGenerationStore {
         'Provider rename did not preserve exact identity.',
       );
     }
+    return found;
   }
 
   Future<(LibraryDocument, ProviderRevision)> _metadata(

@@ -51,6 +51,7 @@ class MobileNoteActivityController
     AttachmentJobOperation.add,
     AttachmentJobOperation.open,
     AttachmentJobOperation.protection,
+    AttachmentJobOperation.export,
   };
 
   void _refresh() {

@@ -1,5 +1,7 @@
 import 'dart:async';
 import '../../../core/operations/operation_result.dart';
+import '../../../core/platform/library_documents.dart';
+import '../../../core/platform/mobile_diagnostics.dart';
 import '../models/note_model.dart';
 import 'background_service.dart';
 import 'encryption_service.dart';
@@ -55,57 +57,118 @@ class ProviderDiscovery implements LibraryDiscovery {
   }
 
   Future<void> _scan(DiscoveryRequest request) async {
+    var stage =
+        1; // enumerate, recognize/resolve, decode, confirm folder access
     try {
       final recent = <RecentFile>[];
-      for (final name in await files.getRecentFiles()) {
+      var unreadable = 0;
+      for (final entry in await files.discoveryCandidates()) {
         if (!isCurrent(request)) return;
-        final reference = await files.resolveNote(name);
-        if (reference == null) continue;
+        stage = 2;
         try {
+          final candidate = await files.inspectDiscoveryCandidate(entry);
+          if (candidate == null) continue;
+          final reference = candidate.reference;
+          stage = 3;
           final source = await files.readResolved(reference);
-          if (source == null) continue;
+          if (source == null) throw const FormatException('Note disappeared.');
           final decoded = await NoteCodec.decode(
             source,
             decryptApp: _cipher.decryptAppResult,
           );
           final note = decoded.note;
-          final stats = await files.getFileStats(name);
+          final metadata = candidate.metadata;
           recent.add(
             RecentFile(
-              path: name,
+              path: entry.name,
               fullPath: reference.contentPath,
               title: note.title,
               noteId: note.id,
               isLocked: note.isLocked,
               created: DateTime.fromMillisecondsSinceEpoch(note.timestamp),
-              modified: stats?.modified,
-              sizeBytes: stats?.size,
+              modified: metadata.modifiedMillis == null
+                  ? null
+                  : DateTime.fromMillisecondsSinceEpoch(
+                      metadata.modifiedMillis!,
+                    ),
+              sizeBytes: metadata.length,
             ),
           );
-        } on FormatException {
-          // Non-note files can coexist in a selected folder. Do not migrate them.
-          continue;
+        } catch (error) {
+          if (error is LibraryAccessException &&
+              const {
+                'unsupported_provider',
+                'wrong_backend',
+              }.contains(error.code)) {
+            rethrow;
+          }
+          // One damaged/unreadable entry must not hide the rest of the library.
+          // Unrelated files that passed only the conservative header probe are
+          // ignored. Recognizable entry failures are diagnostic-only; confirm
+          // folder access below before publishing the remaining valid notes.
+          if (error is! FormatException ||
+              entry.isDirectory ||
+              entry.name.startsWith('note_') ||
+              entry.name.endsWith('.enc')) {
+            unreadable++;
+            _diagnose(stage, error);
+          }
         }
+      }
+      if (unreadable > 0) {
+        stage = 4;
+        // A provider-wide outage must not acknowledge an empty/partial scan.
+        await files.documents.root(files.location);
       }
       recent.sort(
         (a, b) => (b.modified ?? b.created ?? DateTime(1970)).compareTo(
           a.modified ?? a.created ?? DateTime(1970),
         ),
       );
-      if (isCurrent(request))
+      if (isCurrent(request)) {
         _snapshots.add(DiscoverySnapshot(request, recent, isFinal: true));
-    } catch (_) {
-      if (isCurrent(request))
+      }
+    } catch (error) {
+      _diagnose(stage, error);
+      if (isCurrent(request)) {
         _failures.add(
           DiscoveryFailureEvent(
-            const OperationResult.failure(
+            OperationResult.failure(
               OperationOutcome.ioFailure,
-              'Selected-folder discovery failed. Check its availability and refresh.',
+              error is LibraryAccessException &&
+                      error.code == 'permission_revoked'
+                  ? 'Folder permission is unavailable. Select the folder again in Settings.'
+                  : 'Selected folder could not be read. Previous results are retained. Check its availability and retry.',
             ),
             request: request,
           ),
         );
+      }
     }
+  }
+
+  void _diagnose(int stage, Object error) {
+    const reasons = [
+      'permission_revoked',
+      'missing_document',
+      'metadata_limit',
+      'ambiguous_names',
+      'revision_changed',
+      'short_read',
+      'document_io',
+    ];
+    final index = error is LibraryAccessException
+        ? reasons.indexOf(error.code)
+        : -1;
+    final reason = error is FormatException
+        ? 1
+        : index < 0
+        ? 0
+        : index + 2;
+    MobileDiagnostics.record(MobileDiagnostic.discoveryFailed, {
+      'stage': stage,
+      'reason': reason,
+    });
   }
 
   @override

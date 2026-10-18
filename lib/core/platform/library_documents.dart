@@ -120,3 +120,30 @@ abstract interface class LibraryCapacity {
     LibraryDocument document,
   );
 }
+
+/// A newly created provider document held by its native owner. The path is an
+/// owned open-handle endpoint, never a path guessed from a provider URI.
+class LibraryOutputSinkLease {
+  const LibraryOutputSinkLease({
+    required this.library,
+    required this.document,
+    required this.parent,
+    required this.lease,
+    required this.path,
+  });
+  final LibraryLocation library;
+  final LibraryDocument document;
+  final LibraryDocument parent;
+  final String lease;
+  final String path;
+}
+
+abstract interface class LibraryOutputSinks {
+  Future<LibraryOutputSinkLease> openOutputSink(
+    LibraryLocation library,
+    LibraryDocument parent,
+    String name,
+  );
+  Future<LibraryDocument> checkOutputSink(LibraryOutputSinkLease sink);
+  Future<void> closeOutputSink(LibraryOutputSinkLease sink);
+}

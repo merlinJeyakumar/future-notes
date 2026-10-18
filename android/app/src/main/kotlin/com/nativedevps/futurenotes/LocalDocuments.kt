@@ -16,6 +16,7 @@ import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import java.util.UUID
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import android.system.Os
 import android.system.OsConstants
 
@@ -31,19 +32,35 @@ class LocalDocuments(context: Context, messenger: BinaryMessenger) {
     private val channel = MethodChannel(messenger, "future_notes/documents")
     private var picker: MethodChannel.Result? = null
     private val sources = mutableMapOf<String, Pair<String, ParcelFileDescriptor>>()
+    // A staged transfer keeps its granted handle until flush instead of
+    // reopening the provider for every 1 MiB message. All access is serialized.
+    private val appenders = linkedMapOf<String, FileOutputStream>()
+    private data class OutputLease(val library: String, val uri: Uri, val fd: ParcelFileDescriptor, var claimed: Boolean = false)
+    private val outputs = mutableMapOf<String, OutputLease>()
+    fun acquireCipherOutput(path: String, lease: String): FileOutputStream = executor.submit<FileOutputStream> {
+        val output = outputs[lease] ?: throw DocumentFailure("invalid_handle", "Output lease expired.")
+        require(path == "/proc/self/fd/${output.fd.fd}" && output.fd.statSize == 0L && !output.claimed)
+        output.claimed = true
+        // Preserve the SAF grant. Reopening /proc/self/fd performs a new
+        // scoped-storage permission check; dup retains the granted handle.
+        FileOutputStream(Os.dup(output.fd.fileDescriptor))
+    }.get()
+
     private val pickedUris = mutableMapOf<String, Uri>()
     private val dropGrants = mutableMapOf<String, android.view.DragAndDropPermissions>()
     private val forgetUris = mutableSetOf<Uri>()
     fun attach(host: Activity) { activity = host }
     fun detach(host: Activity) { if (activity === host) activity = null }
 
-    /** Acquire an independent read handle while the registered grant is live.
+    /** Duplicate a granted read handle. Cipher reads are positional, so each
+     * job has an independent logical cursor despite the duplicated descriptor.
      * Never canonicalize provider descriptors into guessed filesystem paths.
      * Acquisition and release run on the same executor, preventing fd reuse
      * between checking the registry and opening the independent handle. */
     fun acquireCipherSource(path: String): FileInputStream = executor.submit<FileInputStream> {
         require(sources.values.any { path == "/proc/self/fd/${it.second.fd}" })
-        FileInputStream(Os.open(path, OsConstants.O_RDONLY, 0))
+        val source = sources.values.single { path == "/proc/self/fd/${it.second.fd}" }.second
+        FileInputStream(Os.dup(source.fileDescriptor))
     }.get()
 
     init { channel.setMethodCallHandler(::handle) }
@@ -190,10 +207,25 @@ class LocalDocuments(context: Context, messenger: BinaryMessenger) {
         if (uri.scheme != "content" || uri.authority != tree.authority ||
             !DocumentsContract.isTreeUri(uri) ||
             DocumentsContract.getTreeDocumentId(uri) != DocumentsContract.getTreeDocumentId(tree) ||
-            (uri != root(tree) && !DocumentsContract.isChildDocument(resolver, root(tree), uri))) {
+            (uri != root(tree) && !isScopedChild(tree, uri))) {
             throw DocumentFailure("outside_library", "The document is outside the selected folder.")
         }
         return uri
+    }
+
+    private fun isScopedChild(tree: Uri, uri: Uri): Boolean {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            return DocumentsContract.isChildDocument(resolver, root(tree), uri)
+        }
+        // API 24-28 has no public isChildDocument client API. A tree-scoped
+        // document query invokes DocumentsProvider.enforceTree on the provider
+        // before returning metadata. Keep the exact authority/tree/grant checks
+        // above; never interpret an opaque document ID as a filesystem path.
+        return try {
+            resolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID), null, null, null)?.use {
+                it.count == 1 && it.moveToFirst() && it.getString(0) == DocumentsContract.getDocumentId(uri)
+            } ?: false
+        } catch (_: SecurityException) { false }
     }
 
     private fun metadata(uri: Uri): Map<String, Any?> {
@@ -257,6 +289,25 @@ class LocalDocuments(context: Context, messenger: BinaryMessenger) {
             if (source?.first == "picked") { sources.remove(key); source.second.close(); pickedUris.remove(key)?.let { releasePickedGrant(it) }; dropGrants.remove(key)?.let { grant -> if (dropGrants.values.none { it === grant }) grant.release() } }
             return null
         }
+        if (call.method == "closeOutputSink") {
+            val key = call.argument<String>("lease") ?: throw DocumentFailure("invalid_handle", "Missing output lease.")
+            val output = outputs[key]
+            if (output != null && output.library == call.argument<String>("library")) { outputs.remove(key); output.fd.close() }
+            return null
+        }
+        if (call.method == "borrowReader" || call.method == "checkReader") {
+            val path = call.argument<String>("path") ?: throw DocumentFailure("invalid_handle", "Missing read capability.")
+            val entry = sources.entries.singleOrNull { path == "/proc/self/fd/${it.value.second.fd}" }
+                ?: throw DocumentFailure("invalid_handle", "Read capability expired.")
+            val status = Os.fstat(entry.value.second.fileDescriptor)
+            require(OsConstants.S_ISREG(status.st_mode) && status.st_size >= 0)
+            val stamp = "${status.st_dev}:${status.st_ino}:${status.st_size}:${status.st_mtime}:${status.st_ctime}"
+            if (call.method == "checkReader") {
+                require(call.argument<String>("lease") == entry.key && call.argument<String>("stamp") == stamp)
+                return null
+            }
+            return mapOf("fd" to entry.value.second.fd, "length" to status.st_size, "lease" to entry.key, "stamp" to stamp)
+        }
         val tree = tree(call)
         if (call.method == "closeSource") {
             val key = call.argument<String>("lease") ?: throw DocumentFailure("invalid_handle", "Missing source lease.")
@@ -267,6 +318,14 @@ class LocalDocuments(context: Context, messenger: BinaryMessenger) {
             }
             return null
         }
+        if (call.method == "checkOutputSink") {
+            val key = call.argument<String>("lease") ?: throw DocumentFailure("invalid_handle", "Missing output lease.")
+            val output = outputs[key] ?: throw DocumentFailure("invalid_handle", "Output lease expired.")
+            require(output.library == tree.toString() && call.argument<String>("path") == "/proc/self/fd/${output.fd.fd}" && call.argument<String>("document") == output.uri.toString())
+            val info = metadata(output.uri)
+            require(info["length"] == output.fd.statSize)
+            return info
+        }
         if (call.method == "root") return metadata(root(tree))
         val doc = document(call, tree)
         when (call.method) {
@@ -275,6 +334,23 @@ class LocalDocuments(context: Context, messenger: BinaryMessenger) {
                     val space = android.system.Os.fstatvfs(descriptor.fileDescriptor)
                     return Math.multiplyExact(space.f_bavail, space.f_frsize)
                 } ?: throw DocumentFailure("capacity_unavailable", "The selected filesystem capacity is unavailable.")
+            }
+            "openOutputSink" -> {
+                val name = name(call)
+                require(Regex("^\\.future-notes-owned-[a-f0-9-]{36}\\.pending$").matches(name))
+                if (children(tree, doc).any { it["name"] == name }) throw DocumentFailure("name_exists", "Output already exists.")
+                val created = DocumentsContract.createDocument(resolver, doc, "application/octet-stream", name)
+                    ?: throw DocumentFailure("create_failed", "Output candidate could not be created.")
+                val descriptor = resolver.openFileDescriptor(created, "rw") ?: throw DocumentFailure("write_failed", "Output could not be opened.")
+                try {
+                    val status = Os.fstat(descriptor.fileDescriptor)
+                    require(OsConstants.S_ISREG(status.st_mode) && status.st_size == 0L)
+                    val key = UUID.randomUUID().toString()
+                    val info = metadata(created)
+                    require(info["name"] == name && info["length"] == 0L)
+                    outputs[key] = OutputLease(tree.toString(), created, descriptor)
+                    return mapOf("lease" to key, "path" to "/proc/self/fd/${descriptor.fd}", "document" to info)
+                } catch (error: Exception) { descriptor.close(); throw error }
             }
             "stat" -> return metadata(doc)
             "openSource" -> {
@@ -314,20 +390,36 @@ class LocalDocuments(context: Context, messenger: BinaryMessenger) {
                 val offset = call.argument<Number>("offset")?.toLong() ?: -1
                 val bytes = call.argument<ByteArray>("bytes") ?: byteArrayOf()
                 range(offset, bytes.size)
-                resolver.openFileDescriptor(doc, "rw")?.let { descriptor ->
-                    ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { output ->
-                        if (output.channel.size() != offset) throw DocumentFailure("revision_changed", "The staged document length changed.")
-                        output.channel.position(offset)
-                        val buffer = ByteBuffer.wrap(bytes)
-                        while (buffer.hasRemaining()) {
-                            if (output.channel.write(buffer) <= 0) throw DocumentFailure("short_write", "The provider did not accept all bytes.")
+                val key = doc.toString()
+                try {
+                    val output = appenders[key] ?: run {
+                        if (appenders.size >= 8) {
+                            val oldest = appenders.keys.first()
+                            appenders.remove(oldest)?.close()
                         }
+                        val descriptor = resolver.openFileDescriptor(doc, "rw")
+                            ?: throw DocumentFailure("write_failed", "The document could not be written.")
+                        ParcelFileDescriptor.AutoCloseOutputStream(descriptor).also { appenders[key] = it }
                     }
-                } ?: throw DocumentFailure("write_failed", "The document could not be written.")
+                    if (output.channel.size() != offset) throw DocumentFailure("revision_changed", "The staged document length changed.")
+                    output.channel.position(offset)
+                    val buffer = ByteBuffer.wrap(bytes)
+                    while (buffer.hasRemaining()) {
+                        if (output.channel.write(buffer) <= 0) throw DocumentFailure("short_write", "The provider did not accept all bytes.")
+                    }
+                } catch (error: Exception) {
+                    appenders.remove(key)?.close()
+                    throw error
+                }
             }
-            "flush" -> resolver.openFileDescriptor(doc, "rw")?.use { descriptor -> descriptor.fileDescriptor.sync() }
-                ?: throw DocumentFailure("flush_failed", "The document could not be flushed.")
+            "flush" -> {
+                val output = appenders.remove(doc.toString())
+                if (output != null) output.use { it.fd.sync() }
+                else resolver.openFileDescriptor(doc, "rw")?.use { it.fileDescriptor.sync() }
+                    ?: throw DocumentFailure("flush_failed", "The document could not be flushed.")
+            }
             "rename" -> {
+                appenders.remove(doc.toString())?.close()
                 if (doc == root(tree)) throw DocumentFailure("root_rename", "The selected folder cannot be renamed.")
                 val name = name(call)
                 // The caller rechecks exact sibling inventory and content after
@@ -337,6 +429,7 @@ class LocalDocuments(context: Context, messenger: BinaryMessenger) {
                 return metadata(renamed)
             }
             "delete" -> {
+                appenders.remove(doc.toString())?.close()
                 if (doc == root(tree)) throw DocumentFailure("root_delete", "The selected folder cannot be deleted.")
                 if (metadata(doc)["directory"] == true && children(tree, doc).isNotEmpty()) {
                     throw DocumentFailure("not_empty", "Unrecognized folder contents were retained.")
@@ -363,7 +456,10 @@ class LocalDocuments(context: Context, messenger: BinaryMessenger) {
         picker?.error("picker_closed", "The activity closed before folder selection completed.", null)
         picker = null
         // Join already queued I/O before releasing descriptors used by it.
-        executor.execute { sources.values.forEach { it.second.close() }; sources.clear() }
+        executor.execute {
+            appenders.values.forEach { it.close() }; appenders.clear()
+            sources.values.forEach { it.second.close() }; sources.clear()
+        }
         executor.shutdown()
     }
 

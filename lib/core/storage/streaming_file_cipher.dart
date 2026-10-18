@@ -7,6 +7,9 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:pointycastle/export.dart' hide Digest;
 import '../platform/android_native_cipher.dart';
+import 'owned_write.dart';
+import 'bounded_file_reader.dart';
+import 'owned_stream_writer.dart';
 
 /// A reopenable file or package record. Bounds are checked before opening and
 /// after consumption; callers own the source until the operation settles.
@@ -17,22 +20,57 @@ class StreamingFileSource {
     this.offset = 0,
     this.sha256Hex,
     this.modifiedMicros,
+    this.receipt,
   });
   final String path;
   final int length;
   final int offset;
   final String? sha256Hex;
   final int? modifiedMicros;
+  final OwnedWriteReceipt? receipt;
 }
 
 class CipherFileResult {
-  const CipherFileResult(this.length, this.plaintextHash);
+  const CipherFileResult(this.length, this.plaintextHash, [this.receipt]);
   final int length;
   final String plaintextHash;
+  final OwnedWriteReceipt? receipt;
 }
 
 class FileJobCancelled implements Exception {
   const FileJobCancelled();
+}
+
+/// Bounded SIC/PKCS7 stream encoder used when framing and encryption share one
+/// output pass. Uses the same key/IV implementation as existing .med files.
+class FileCipherEncoder {
+  FileCipherEncoder._(this.iv, this._cipher);
+  final Uint8List iv;
+  final _ReaderCipher _cipher;
+  int _bytes = 0;
+  static Future<FileCipherEncoder> open(
+    String? password, {
+    bool Function()? cancelled,
+  }) async {
+    final random = Random.secure();
+    final iv = Uint8List.fromList(
+      List.generate(16, (_) => random.nextInt(256)),
+    );
+    return FileCipherEncoder._(
+      iv,
+      await _ReaderCipher.create(password, iv, cancelled: cancelled),
+    );
+  }
+
+  Future<Uint8List> add(Uint8List bytes) {
+    _bytes += bytes.length;
+    return _cipher.process(bytes);
+  }
+
+  Future<Uint8List> finish() => _cipher.process(
+    Uint8List.fromList(List.filled(16 - _bytes % 16, 16 - _bytes % 16)),
+  );
+  Future<void> close() => _cipher.close();
 }
 
 typedef FileByteProgress = void Function(String phase, int bytes, int total);
@@ -81,7 +119,9 @@ class StreamingFileCipher {
     bool requireWholeSource = false,
     double Function()? duty,
     bool useNative = true,
+    OwnedWriteTarget? ownedTarget,
   }) async {
+    await ownedTarget?.validate(destination);
     if (useNative && AndroidNativeCipher.ready) {
       return AndroidNativeCipher.transform(
         source: source,
@@ -97,6 +137,7 @@ class StreamingFileCipher {
         verifyOutput: verifyOutput,
         expectedPlaintextBytes: expectedPlaintextBytes,
         requireWholeSource: requireWholeSource,
+        ownedTarget: ownedTarget,
       );
     }
     if (source.offset < 0 || source.length < 0 || source.path == destination) {
@@ -104,7 +145,9 @@ class StreamingFileCipher {
     }
     final file = File(source.path);
     final before = await file.stat();
-    if (!verifyOutput && (!decryptSource || encryptDestination)) {
+    if (!verifyOutput &&
+        (!decryptSource || encryptDestination) &&
+        ownedTarget == null) {
       throw const FormatException(
         'Output readback is mandatory for writes and rekeying.',
       );
@@ -130,11 +173,15 @@ class StreamingFileCipher {
     }
     // Never truncate an existing object, including a prior failed attempt.
     final output = File(destination);
-    await output.create(exclusive: true);
-    RandomAccessFile? input;
+    if (ownedTarget?.sink == null) await output.create(exclusive: true);
+    BoundedFileReader? input;
     RandomAccessFile? sink;
     final plaintextDigest = _DigestSink();
     final hash = sha256.startChunkedConversion(plaintextDigest);
+    final outputDigest = _DigestSink();
+    final outputHash = encryptDestination
+        ? sha256.startChunkedConversion(outputDigest)
+        : null;
     final sourceDigest = _DigestSink();
     // No unused second hash when the source has no captured expected digest.
     final sourceHash = source.sha256Hex == null
@@ -153,7 +200,7 @@ class StreamingFileCipher {
 
     try {
       _checkCancelled(cancelled);
-      input = await file.open();
+      input = await BoundedFileReader.openPath(file.path);
       await input.setPosition(source.offset);
       sink = await output.open(mode: FileMode.writeOnly);
       SICStreamCipher? decoder;
@@ -171,6 +218,7 @@ class StreamingFileCipher {
         );
         encoder = _cipher(destinationPassword, iv);
         await sink.writeFrom(iv);
+        outputHash?.add(iv);
         written = 16;
       }
       var remaining = source.length - (decryptSource ? 16 : 0);
@@ -228,6 +276,7 @@ class StreamingFileCipher {
           endCompute?.call();
         }
         await sink.writeFrom(encoded);
+        outputHash?.add(encoded);
         written += encoded.length;
         report(phase, consumed);
       }
@@ -237,9 +286,11 @@ class StreamingFileCipher {
           Uint8List.fromList(List.filled(padding, padding)),
         );
         await sink.writeFrom(tail);
+        outputHash?.add(tail);
         written += tail.length;
       }
       hash.close();
+      outputHash?.close();
       if (expectedPlaintextBytes != null &&
           plaintextBytes != expectedPlaintextBytes) {
         throw const FormatException(
@@ -286,14 +337,31 @@ class StreamingFileCipher {
         report('Verifying', source.length, force: true);
       }
       _checkCancelled(cancelled);
-      return CipherFileResult(written, plaintextDigest.value.toString());
+      final receipt = ownedTarget == null
+          ? null
+          : await OwnedWriteReceipt.closed(
+              target: ownedTarget,
+              length: written,
+              sha256Hex: (encryptDestination ? outputDigest : plaintextDigest)
+                  .value
+                  .toString(),
+              verifyReadback: verifyOutput,
+              payloadReadBytes: source.length,
+              readbackBytes: verifyOutput ? written : 0,
+            );
+      return CipherFileResult(
+        written,
+        plaintextDigest.value.toString(),
+        receipt,
+      );
     } catch (_) {
       await sink?.close();
       sink = null;
       await input?.close();
       input = null;
       // The exclusively-created destination belongs to this attempt only.
-      if (await output.exists()) await output.delete();
+      if (ownedTarget?.sink == null && await output.exists())
+        await output.delete();
       rethrow;
     } finally {
       await input?.close();
@@ -400,7 +468,7 @@ class LegacyFileReader {
   );
   final File _file;
   final FileStat _before;
-  final RandomAccessFile _input;
+  final BoundedFileReader _input;
   final _ReaderCipher? _cipher;
   final StreamingFileSource _source;
   final _DigestSink _rawDigest;
@@ -410,6 +478,7 @@ class LegacyFileReader {
     StreamingFileSource source, {
     bool encrypted = false,
     String? password,
+    bool Function()? cancelled,
   }) async {
     final file = File(source.path);
     final before = await file.stat();
@@ -419,7 +488,7 @@ class LegacyFileReader {
         before.type != FileSystemEntityType.file) {
       throw const FormatException('Invalid package source.');
     }
-    final input = await file.open();
+    final input = await BoundedFileReader.openPath(file.path);
     final digest = _DigestSink();
     final hash = sha256.startChunkedConversion(digest);
     try {
@@ -445,7 +514,7 @@ class LegacyFileReader {
       }
       final iv = await input.read(16);
       if (iv.length != 16) throw const FormatException('Truncated package IV.');
-      hash.add(iv);
+      if (source.sha256Hex != null) hash.add(iv);
       final blocks = (source.length - 16) ~/ 16;
       final counter = Uint8List.fromList(iv);
       var carry = blocks - 1;
@@ -480,7 +549,7 @@ class LegacyFileReader {
         file,
         before,
         input,
-        await _ReaderCipher.create(password, iv),
+        await _ReaderCipher.create(password, iv, cancelled: cancelled),
         source.length - 16 - padding,
         source,
         digest,
@@ -505,7 +574,7 @@ class LegacyFileReader {
       if (bytes.isEmpty) {
         throw const FormatException('Truncated package record.');
       }
-      _rawHash.add(bytes);
+      if (_source.sha256Hex != null) _rawHash.add(bytes);
       output.setAll(
         offset,
         _cipher == null ? bytes : await _cipher.process(bytes),
@@ -516,38 +585,80 @@ class LegacyFileReader {
     return output;
   }
 
-  Future<void> copyTo(
+  Future<OwnedWriteReceipt> copyTo(
     String destination,
     int length, {
     bool Function()? cancelled,
+    bool verifyWrites = false,
+    void Function(int bytes, int total)? onProgress,
   }) async {
     if (length < 0 || length > remaining) {
       throw const FormatException('Truncated package attachment.');
     }
-    final file = File(destination);
-    await file.create(exclusive: true);
-    final output = await file.open(mode: FileMode.writeOnly);
+    // An unencrypted package record is already a bounded byte slice. Keep the
+    // copy and streamed checksum in the existing owned native worker; do not
+    // shuttle its payload through Dart. A captured whole-source checksum still
+    // uses the sequential reader so that its validation remains intact.
+    if (_cipher == null &&
+        _source.sha256Hex == null &&
+        AndroidNativeCipher.hasOwnedWorker &&
+        // Native dispatch/polling costs more than a small sequential copy.
+        length >= 4 * StreamingFileCipher.window) {
+      StreamingFileCipher._checkCancelled(cancelled);
+      final start = _input.position;
+      onProgress?.call(0, length);
+      final target = OwnedWriteTarget.forPath(destination);
+      final copied = await StreamingFileCipher.transform(
+        source: StreamingFileSource(
+          _source.path,
+          length,
+          offset: start,
+          modifiedMicros: _before.modified.microsecondsSinceEpoch,
+        ),
+        destination: destination,
+        decryptSource: false,
+        encryptDestination: false,
+        ownedTarget: target,
+        verifyOutput: verifyWrites,
+        cancelled: cancelled,
+        expectedPlaintextBytes: length,
+        maxPlaintextBytes: StreamingFileCipher.maxAttachmentBytes + 32,
+        progress: (_, bytes, total) => onProgress?.call(bytes, total),
+      );
+      await _input.setPosition(start + length);
+      remaining -= length;
+      onProgress?.call(length, length);
+      return copied.receipt!;
+    }
+    final output = await OwnedStreamWriter.open(
+      destination,
+      cancelled: cancelled,
+    );
     try {
       var left = length;
+      onProgress?.call(0, length);
       while (left > 0) {
         StreamingFileCipher._checkCancelled(cancelled);
         final count = min(left, StreamingFileCipher.window);
-        await output.writeFrom(await read(count));
+        await output.add(await read(count));
+        output.payloadReadBytes += count;
         left -= count;
+        onProgress?.call(length - left, length);
       }
-      await output.flush();
-    } finally {
-      await output.close();
+      return await output.close(verifyReadback: verifyWrites);
+    } catch (_) {
+      await output.abort();
+      rethrow;
     }
   }
 
   Future<void> close() async {
     try {
       if (remaining == 0) {
-        final padding =
-            _source.offset + _source.length - await _input.position();
+        final padding = _source.offset + _source.length - _input.position;
         if (padding > 0 && padding <= 16) {
-          _rawHash.add(await _input.read(padding));
+          final bytes = await _input.read(padding);
+          if (_source.sha256Hex != null) _rawHash.add(bytes);
         }
         _rawHash.close();
         if (_source.sha256Hex != null &&
@@ -575,13 +686,17 @@ class _ReaderCipher {
   _ReaderCipher(this.dart, this.native);
   final SICStreamCipher? dart;
   final NativeCipherSession? native;
-  static Future<_ReaderCipher> create(String? password, Uint8List iv) async =>
-      AndroidNativeCipher.ready
+  static Future<_ReaderCipher> create(
+    String? password,
+    Uint8List iv, {
+    bool Function()? cancelled,
+  }) async => AndroidNativeCipher.ready
       ? _ReaderCipher(
           null,
           await AndroidNativeCipher.session(
             StreamingFileCipher._key(password),
             iv,
+            cancelled: cancelled,
           ),
         )
       : _ReaderCipher(StreamingFileCipher._cipher(password, iv), null);

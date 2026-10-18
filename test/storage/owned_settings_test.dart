@@ -61,6 +61,8 @@ void main() {
         memoryMiB: 256,
         checkBeforeOpen: true,
         verifyAfterOpen: true,
+        validateExportedBackup: true,
+        verifyLargeFileWrites: true,
       );
       owner.failCommit = OperationOutcome.ioFailure;
       await expectLater(

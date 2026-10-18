@@ -1,9 +1,14 @@
 import 'dart:convert';
+import 'dart:io';
+import 'package:flutter_application_1/core/storage/owned_stream_writer.dart';
+import 'package:flutter_application_1/core/storage/owned_write.dart';
+import '../support/validation_directory.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_application_1/core/operations/operation_result.dart';
 import 'package:flutter_application_1/core/platform/library_documents.dart';
 import 'package:flutter_application_1/core/storage/provider_document_io.dart';
 import 'package:flutter_application_1/core/storage/provider_generation_store.dart';
+import 'package:flutter_application_1/core/storage/file_operation_progress.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../support/memory_library_documents.dart';
 
@@ -15,8 +20,13 @@ const envelope = ['note_opaque', 'note_content_opaque.enc'];
 const attachment = ['note_opaque', 'attachments', 'stable-storage-id.med'];
 
 void main() {
+  final runs = <Directory>[];
+  tearDown(() async {
+    for (final run in runs) await deleteValidationRun(run);
+    runs.clear();
+  });
   Future<(MemoryLibraryDocuments, ProviderDocumentIo, List<ProviderMutation>)>
-  fixture() async {
+  fixture({bool verify = true}) async {
     final backend = MemoryLibraryDocuments();
     final io = ProviderDocumentIo(backend, location);
     for (final path in [envelope, attachment]) {
@@ -26,12 +36,27 @@ void main() {
     }
     final changes = <ProviderMutation>[];
     for (final path in [envelope, attachment]) {
+      OwnedWriteReceipt? receipt;
+      if (!verify) {
+        final run = await Directory.systemTemp.createTemp(
+          'future-notes-validation-',
+        );
+        runs.add(run);
+        final output = await OwnedStreamWriter.open('${run.path}/payload');
+        await output.add(utf8.encode('new-${path.last}'));
+        receipt = await output.close();
+      }
       changes.add(
         ProviderMutation(
           path: path,
           source: _Source('new-${path.last}'),
           expected: await io.revision((await io.resolve(path))!),
           envelope: path == envelope,
+          verifyReadback: verify,
+          sourceReceipt: receipt,
+          expectedSourceHash: sha256
+              .convert(utf8.encode('new-${path.last}'))
+              .toString(),
         ),
       );
     }
@@ -49,6 +74,78 @@ void main() {
     );
   }
 
+  test(
+    'publication reports named files and cumulative byte-weighted saving',
+    () async {
+      final backend = MemoryLibraryDocuments();
+      final io = ProviderDocumentIo(backend, location);
+      final events = <FileOperationProgress>[];
+      final result = await ProviderGenerationStore(io).commit([
+        ProviderMutation(
+          path: [...attachment.take(2), 'one.med'],
+          source: _Source('a' * 23),
+          expected: null,
+          envelope: false,
+          displayName: 'One.txt',
+        ),
+        ProviderMutation(
+          path: [...attachment.take(2), 'two.med'],
+          source: _Source('b' * 101),
+          expected: null,
+          envelope: false,
+          displayName: 'Two.mp4',
+        ),
+        ProviderMutation(
+          path: envelope,
+          source: _Source('{}'),
+          expected: null,
+          envelope: true,
+        ),
+      ], onFileProgress: events.add);
+      expect(result.isSuccess, isTrue, reason: result.message);
+      final files = events.where((e) => e.total > 0).toList();
+      expect(files.map((e) => e.fileName).toSet(), {'One.txt', 'Two.mp4'});
+      expect(
+        files.every((e) => e.fileCount == 2 && e.overallTotal == 124),
+        isTrue,
+      );
+      final second = files.where((e) => e.fileIndex == 2).toList();
+      expect(second.first.bytes, 0);
+      expect(second.first.overallBytes, 23);
+      expect(second.last.overallBytes, 124);
+      for (var i = 1; i < files.length; i++) {
+        expect(
+          files[i].overallBytes,
+          greaterThanOrEqualTo(files[i - 1].overallBytes),
+        );
+      }
+      expect(events.last.stage, 'Finishing import');
+      expect(events.last.total, 0);
+      expect(events.last.overallBytes, 124);
+    },
+  );
+
+  for (final verify in [false, true]) {
+    test(
+      'provider fallback verify=$verify has only necessary transfer reads',
+      () async {
+        final (backend, io, changes) = await fixture(verify: verify);
+        backend.readBytesByName.clear();
+        expect(
+          (await ProviderGenerationStore(io).commit(changes)).isSuccess,
+          isTrue,
+        );
+        final candidates = backend.readBytesByName.entries.where(
+          (e) => e.key.endsWith('.pending'),
+        );
+        expect(
+          candidates.fold<int>(0, (n, e) => n + e.value),
+          verify ? greaterThan(0) : 0,
+        );
+        expect(await content(io, attachment), 'new-${attachment.last}');
+      },
+    );
+  }
   test(
     'attachment-first publication verifies canonical data and removes guard last',
     () async {
@@ -74,31 +171,36 @@ void main() {
     },
   );
 
-  for (final boundary in ProviderCommitBoundary.values) {
-    test(
-      'interruption at ${boundary.name} recovers one complete generation',
-      () async {
-        final (_, io, changes) = await fixture();
-        final store = ProviderGenerationStore(
-          io,
-          boundary: (phase, index) async {
-            if (phase == boundary) {
-              throw StateError('Synthetic process interruption');
-            }
-          },
-        );
-        expect((await store.commit(changes)).isSuccess, isFalse);
-        expect((await ProviderGenerationStore(io).recover()).isSuccess, isTrue);
-        final body = await content(io, envelope);
-        final payload = await content(io, attachment);
-        expect(body.startsWith('new-'), payload.startsWith('new-'));
-        expect(
-          (await ProviderGenerationStore(io).recover()).isSuccess,
-          isTrue,
-          reason: 'Recovery is idempotent',
-        );
-      },
-    );
+  for (final verify in [false, true]) {
+    for (final boundary in ProviderCommitBoundary.values) {
+      test(
+        'verify=$verify interruption at ${boundary.name} recovers one complete generation',
+        () async {
+          final (_, io, changes) = await fixture(verify: verify);
+          final store = ProviderGenerationStore(
+            io,
+            boundary: (phase, index) async {
+              if (phase == boundary) {
+                throw StateError('Synthetic process interruption');
+              }
+            },
+          );
+          expect((await store.commit(changes)).isSuccess, isFalse);
+          expect(
+            (await ProviderGenerationStore(io).recover()).isSuccess,
+            isTrue,
+          );
+          final body = await content(io, envelope);
+          final payload = await content(io, attachment);
+          expect(body.startsWith('new-'), payload.startsWith('new-'));
+          expect(
+            (await ProviderGenerationStore(io).recover()).isSuccess,
+            isTrue,
+            reason: 'Recovery is idempotent',
+          );
+        },
+      );
+    }
   }
 
   test(
@@ -201,6 +303,22 @@ void main() {
       expect(await content(io, envelope), 'old-${envelope.last}');
     },
   );
+
+  for (final verify in [false, true]) {
+    test(
+      'predecessor copy readback follows job policy verify=$verify',
+      () async {
+        final (backend, io, changes) = await fixture(verify: verify);
+        final result = await ProviderGenerationStore(io).commit(changes);
+        expect(result.isSuccess, isTrue, reason: result.message);
+        final priorReadBytes = backend.readBytesByName.entries
+            .where((entry) => entry.key.startsWith('prior-'))
+            .fold<int>(0, (total, entry) => total + entry.value);
+        expect(priorReadBytes, verify ? greaterThan(0) : 0);
+        expect(await content(io, envelope), 'new-${envelope.last}');
+      },
+    );
+  }
 
   test('source bytes are copied and hashed in bounded windows', () async {
     final backend = MemoryLibraryDocuments();

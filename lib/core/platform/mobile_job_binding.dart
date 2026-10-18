@@ -29,6 +29,16 @@ class MobileJobBinding {
         await _takeNotification();
         return;
       }
+      if (call.method == 'interruptedJobsChanged') {
+        final encoded = call.arguments;
+        if (!_closed && encoded is String) {
+          retained.value = (jsonDecode(encoded) as List)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          _countNotifications();
+        }
+        return;
+      }
       if (call.method == 'cancelJob') {
         final id = (call.arguments as Map?)?['id'];
         if (id is String) {
@@ -40,6 +50,7 @@ class MobileJobBinding {
             }
           }
         }
+        _refresh(); // Drop an already-settled native notification as well.
         return;
       }
       if (call.method == 'cancelSafeJobs' || call.method == 'timeout') {
@@ -57,6 +68,7 @@ class MobileJobBinding {
   final ContentViewModel model;
   final ValueChanged<String>? onNotification;
   final notificationCount = ValueNotifier<int>(0);
+  final activeCount = ValueNotifier<int>(0);
   final _listeners = <AttachmentJobState, void Function()>{};
   Timer? _timer;
   Timer? _poll;
@@ -101,9 +113,13 @@ class MobileJobBinding {
 
   void _countNotifications() {
     if (_closed) return;
-    final ids = {
+    final activeIds = {
       for (final state in model.attachmentJobsNotifier.value)
         if (state.progress.value.active) state.progress.value.id,
+    };
+    activeCount.value = activeIds.length;
+    final ids = {
+      ...activeIds,
       for (final record in retained.value) record['id'],
     };
     notificationCount.value = ids.length;
@@ -176,10 +192,15 @@ class MobileJobBinding {
               'id': state.progress.value.id,
               'fileName': state.progress.value.fileName,
               'phase': state.progress.value.phase.name,
+              'detail': state.progress.value.detail,
               'operation': state.progress.value.operation.name,
               'cancellable': state.progress.value.cancellable,
               'bytes': state.progress.value.bytes,
               'total': state.progress.value.total,
+              if (state.progress.value.fileProgress case final file?) ...{
+                'currentBytes': file.bytes,
+                'currentTotal': file.total,
+              },
               if (model.attachmentJobRecovery(state.progress.value.id)
                   case final recovery?)
                 'recovery': recovery,
@@ -213,8 +234,23 @@ class MobileJobBinding {
     }
   }
 
+  Future<void> dismissInterruptedNotification(String id) async {
+    if (!retained.value.any((record) => record['id'] == id)) return;
+    await _channel.invokeMethod<void>('dismissInterruptedNotification', {
+      'ids': [id],
+    });
+    if (!_closed)
+      retained.value = [
+        for (final record in retained.value)
+          if (record['id'] == id)
+            {...record, 'notificationDismissed': true}
+          else
+            record,
+      ];
+  }
+
   Future<void> acknowledgeInterrupted(String id) async {
-    if (Platform.isAndroid) {
+    if (retained.value.any((record) => record['id'] == id)) {
       await _channel.invokeMethod<void>('acknowledgeInterrupted', {
         'ids': [id],
       });
@@ -236,6 +272,7 @@ class MobileJobBinding {
     _closed = true;
     retained.dispose();
     notificationCount.dispose();
+    activeCount.dispose();
     _timer?.cancel();
     _poll?.cancel();
     model.attachmentJobsNotifier.removeListener(_refresh);

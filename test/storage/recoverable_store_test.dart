@@ -11,6 +11,7 @@ import 'package:flutter_application_1/core/storage/storage_environment.dart';
 import 'package:flutter_application_1/core/storage/windows_file_actions.dart';
 
 import '../support/validation_directory.dart';
+import 'package:flutter_application_1/core/storage/owned_stream_writer.dart';
 
 void main() {
   late Directory run;
@@ -86,6 +87,78 @@ void main() {
     );
   }
 
+  for (final boundary in CommitBoundary.values.where(
+    (b) => b.index <= CommitBoundary.receiptVerified.index,
+  )) {
+    test(
+      'owned candidate interrupted at ${boundary.name} preserves a complete generation',
+      () async {
+        final sources = await Directory(
+          p.join(root, '.future-notes-storage', 'sources', 'synthetic'),
+        ).create(recursive: true);
+        final writer = await OwnedStreamWriter.open(
+          p.join(sources.path, 'new.med'),
+        );
+        await writer.add(List.filled(4096, 42));
+        final proof = await writer.close();
+        final canonical = File(p.join(root, 'attachments', 'new.med'));
+        await canonical.parent.create(recursive: true);
+        await canonical.writeAsBytes(List.filled(4096, 17), flush: true);
+        final expected = await primitives.captureRevision(canonical.path);
+        final store = await open(
+          fault: (phase, id) async {
+            if (phase == boundary) throw StateError('Synthetic interruption');
+          },
+        );
+        final result = await store.commit(
+          target: 'attachments/new.med',
+          expected: expected,
+          source: CommitFileSource(proof.path, proof.length, receipt: proof),
+        );
+        expect(result.isSuccess, isFalse);
+        await store.close();
+        owners.remove(store);
+        final reopened = await open();
+        expect(reopened.recovery.libraryReadOnly, isFalse);
+        final bytes = await canonical.readAsBytes();
+        expect(bytes.toSet(), anyOf({17}, {42}));
+        expect(bytes.length, 4096);
+        await reopened.close();
+        owners.remove(reopened);
+      },
+    );
+  }
+  test('owned adoption skips copy and payload readback stages', () async {
+    final dir = await Directory(
+      p.join(root, '.future-notes-storage', 'sources', 'synthetic'),
+    ).create(recursive: true);
+    final writer = await OwnedStreamWriter.open(p.join(dir.path, 'new.med'));
+    await writer.add(List.filled(4096, 42));
+    final proof = await writer.close();
+    final phases = <String>[];
+    final store = await open();
+    final result = await store.commit(
+      target: 'attachments/new.med',
+      expected: const StorageRevision.missing(),
+      source: CommitFileSource(proof.path, proof.length, receipt: proof),
+      onProgress: (phase, _, _) => phases.add(phase),
+    );
+    expect(result.isSuccess, isTrue, reason: result.message);
+    expect(await File(proof.path).exists(), isFalse);
+    expect(
+      phases.any(
+        (p) =>
+            p.contains('Checking prepared') ||
+            p.contains('Verifying published') ||
+            p.contains('Confirming staged'),
+      ),
+      isFalse,
+    );
+    expect(
+      await File(p.join(root, 'attachments', 'new.med')).readAsBytes(),
+      List.filled(4096, 42),
+    );
+  });
   test(
     'production and escaped roots are rejected without creating storage',
     () async {

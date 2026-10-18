@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_motion.dart';
+import 'editor_panels.dart';
 
 /// Touch disclosure stays in normal layout and never covers the writing area.
 class MobileFormattingBar extends StatefulWidget {
@@ -11,20 +12,35 @@ class MobileFormattingBar extends StatefulWidget {
     required this.restoreEditorFocus,
     this.surfaceColor,
     this.outlineColor,
+    this.panels,
   });
   final Widget child;
   final Widget expandedChild;
   final VoidCallback restoreEditorFocus;
   final Color? surfaceColor;
   final Color? outlineColor;
+  final MobileEditorPanels? panels;
   @override
   State<MobileFormattingBar> createState() => _MobileFormattingBarState();
 }
 
 class _MobileFormattingBarState extends State<MobileFormattingBar> {
-  bool _expanded = false;
+  final _ownedPanels = MobileEditorPanels();
+  MobileEditorPanels get panels => widget.panels ?? _ownedPanels;
+  bool get _expanded => panels.value == MobileEditorPanel.formatting;
   @override
-  Widget build(BuildContext context) {
+  void dispose() {
+    _ownedPanels.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: panels,
+    builder: (context, _) => _build(context),
+  );
+
+  Widget _build(BuildContext context) {
     final theme = Theme.of(context);
     final available = math.max(
       0.0,
@@ -47,10 +63,13 @@ class _MobileFormattingBarState extends State<MobileFormattingBar> {
                   color: theme.dividerColor.withValues(alpha: .4),
                 ),
               ),
-              TextButton(
+              IconButton(
                 key: const ValueKey('formatting-touch-toggle'),
-                style: TextButton.styleFrom(
-                  minimumSize: const Size(64, 48),
+                tooltip: _expanded
+                    ? 'Collapse formatting tools'
+                    : 'Expand formatting tools',
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(48, 48),
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   foregroundColor: theme.colorScheme.primary,
                   backgroundColor: _expanded
@@ -61,10 +80,10 @@ class _MobileFormattingBarState extends State<MobileFormattingBar> {
                   ),
                 ),
                 onPressed: () {
-                  setState(() => _expanded = !_expanded);
-                  widget.restoreEditorFocus();
+                  panels.toggle(MobileEditorPanel.formatting);
+                  panels.restoreFocus(widget.restoreEditorFocus);
                 },
-                child: Text(_expanded ? 'Less' : 'Format'),
+                icon: Icon(_expanded ? Icons.expand_less : Icons.expand_more),
               ),
             ],
           ),
@@ -92,39 +111,44 @@ class _MobileFormattingBarState extends State<MobileFormattingBar> {
           ),
       ],
     );
-    return TextFieldTapRegion(
-      child: FocusTraversalGroup(
-        child: DecoratedBox(
-          key: const ValueKey('formatting-card'),
-          decoration: BoxDecoration(
-            color: widget.surfaceColor ?? Theme.of(context).colorScheme.surface,
-            border: Border.all(
+    return MobilePanelRegion(
+      panels: panels,
+      panel: MobileEditorPanel.formatting,
+      child: TextFieldTapRegion(
+        child: FocusTraversalGroup(
+          child: DecoratedBox(
+            key: const ValueKey('formatting-card'),
+            decoration: BoxDecoration(
               color:
-                  widget.outlineColor ??
-                  theme.dividerColor.withValues(alpha: .3),
-            ),
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(
-                  alpha: theme.brightness == Brightness.dark ? .22 : .10,
-                ),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
+                  widget.surfaceColor ?? Theme.of(context).colorScheme.surface,
+              border: Border.all(
+                color:
+                    widget.outlineColor ??
+                    theme.dividerColor.withValues(alpha: .3),
               ),
-            ],
-          ),
-          child: Semantics(
-            expanded: _expanded,
-            child: AppMotion.reduced(context)
-                ? panel
-                : AnimatedSize(
-                    duration: AppMotion.panelIn,
-                    reverseDuration: AppMotion.panelOut,
-                    alignment: Alignment.topCenter,
-                    curve: Curves.easeOutCubic,
-                    child: panel,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(
+                    alpha: theme.brightness == Brightness.dark ? .22 : .10,
                   ),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Semantics(
+              expanded: _expanded,
+              child: AppMotion.reduced(context)
+                  ? panel
+                  : AnimatedSize(
+                      duration: AppMotion.panelIn,
+                      reverseDuration: AppMotion.panelOut,
+                      alignment: Alignment.topCenter,
+                      curve: Curves.easeOutCubic,
+                      child: panel,
+                    ),
+            ),
           ),
         ),
       ),

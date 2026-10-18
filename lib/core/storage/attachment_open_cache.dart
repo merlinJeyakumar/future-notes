@@ -9,6 +9,7 @@ import '../../features/dashboard/models/note_model.dart';
 import 'note_reference.dart';
 import 'attachment_transform_worker.dart';
 import 'streaming_file_cipher.dart';
+import 'owned_write.dart';
 import 'attachment_performance.dart';
 
 typedef AttachmentSourceResolver =
@@ -348,6 +349,7 @@ class AttachmentOpenCache {
         encryptDestination: false,
         sourcePassword: password,
         verifyOutput: policy.verifyAfterOpen,
+        ownedTarget: OwnedWriteTarget.forPath(candidate),
         requireWholeSource: true,
         // Legacy entries may have size=0 meaning unknown rather than empty.
         expectedPlaintextBytes: attachment.size > 0 ? attachment.size : null,
@@ -371,6 +373,7 @@ class AttachmentOpenCache {
           decryptSource: true,
           encryptDestination: false,
           verifyOutput: policy.verifyAfterOpen,
+          ownedTarget: OwnedWriteTarget.forPath(candidate),
           requireWholeSource: true,
           expectedPlaintextBytes: attachment.size > 0 ? attachment.size : null,
         );

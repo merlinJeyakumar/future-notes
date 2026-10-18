@@ -43,6 +43,7 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/attachment_paths" />
         </provider>
         <service android:name=".AttachmentJobService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <receiver android:name=".InterruptedJobDismissal" android:exported="false" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

@@ -4,6 +4,39 @@ import 'package:flutter_quill_delta_from_html/flutter_quill_delta_from_html.dart
 
 void main() {
   test(
+    'mobile expands text blocks without changing desktop output or rich text',
+    () {
+      for (final source in [
+        '<p>Synthetic text</p>',
+        '<p>Synthetic <strong>bold</strong> text</p>',
+        '<div><p>One</p><p>Two <em>styled</em></p></div>',
+        '<p><a href="fnotes://attachment/stable-id">@report.pdf</a> next</p>',
+        '<p>Unicode தமிழ் 🌸 <b>bold</b><br/>next</p>',
+        '<p> edge spaces <b>bold</b> </p>',
+        '<pre>  keep\n whitespace</pre>',
+        '<script>if (a < b) { x = ">"; }</script>',
+      ]) {
+        final desktop = formatHtmlSource(source);
+        final mobile = formatExpandedHtmlSource(source);
+        expect(formatHtmlSource(source), desktop);
+        expect(formatExpandedHtmlSource(mobile), mobile, reason: source);
+        expect(
+          HtmlToDelta().convert(mobile).toJson(),
+          HtmlToDelta().convert(source).toJson(),
+          reason: source,
+        );
+      }
+      expect(
+        formatHtmlSource('<p>Synthetic text</p>'),
+        '<p>Synthetic text</p>',
+      );
+      expect(
+        formatExpandedHtmlSource('<p>Synthetic text</p>'),
+        '<p>\n  Synthetic text\n</p>',
+      );
+    },
+  );
+  test(
     'structures mixed rich text with explicit breaks and preserves its delta',
     () {
       const source =

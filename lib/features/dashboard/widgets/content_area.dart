@@ -10,6 +10,8 @@ import 'attachment_strip.dart';
 import 'attachment_mentions.dart';
 import 'attachment_preview.dart';
 import 'expanding_formatting_bar.dart';
+import 'background_tasks_dialog.dart';
+import 'app_overflow_menu.dart';
 import '../../../core/routing/fnotes_uri.dart';
 import '../models/note_model.dart';
 import 'password_dialog.dart';
@@ -38,7 +40,12 @@ class _ContentColors {
 class ContentArea extends StatefulWidget {
   final ContentViewModel viewModel;
 
-  const ContentArea({super.key, required this.viewModel});
+  const ContentArea({
+    super.key,
+    required this.viewModel,
+    this.onBackgroundTasks,
+  });
+  final VoidCallback? onBackgroundTasks;
 
   @override
   State<ContentArea> createState() => _ContentAreaState();
@@ -434,9 +441,25 @@ class _ContentAreaState extends State<ContentArea> {
           ),
         if (!viewModel.isLocked)
           _buildSubtleIconButton(
-            Icons.settings_outlined,
+            Icons.more_vert,
             'Note actions',
             onPressed: () => _showSettingsMenu(context),
+          ),
+        if (viewModel.isLocked)
+          AppOverflowMenu(
+            onBackgroundTasks: () {
+              if (widget.onBackgroundTasks != null) {
+                widget.onBackgroundTasks!();
+              } else {
+                showAppDialog<void>(
+                  context: context,
+                  builder: (_) => BackgroundTasksDialog(
+                    model: viewModel,
+                    selectExportJobs: false,
+                  ),
+                );
+              }
+            },
           ),
       ],
     );
@@ -981,6 +1004,7 @@ class _ContentAreaState extends State<ContentArea> {
     showAppDialog(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         backgroundColor: colors.toolbarIsland,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Column(
@@ -1009,6 +1033,24 @@ class _ContentAreaState extends State<ContentArea> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            _buildSettingsTile(
+              icon: Icons.pending_actions,
+              title: 'Background tasks',
+              onTap: () {
+                Navigator.pop(context);
+                if (widget.onBackgroundTasks != null) {
+                  widget.onBackgroundTasks!();
+                } else {
+                  showAppDialog<void>(
+                    context: this.context,
+                    builder: (_) => BackgroundTasksDialog(
+                      model: viewModel,
+                      selectExportJobs: false,
+                    ),
+                  );
+                }
+              },
+            ),
             // Change/Set Password
             _buildSettingsTile(
               icon: viewModel.isPasswordSet

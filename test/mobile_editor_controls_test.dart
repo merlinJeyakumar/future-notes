@@ -1,9 +1,283 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:code_text_field/code_text_field.dart';
+import 'package:flutter_application_1/features/dashboard/models/attachment_job.dart';
+import 'package:flutter_application_1/features/dashboard/models/save_ui_state.dart';
 import 'package:flutter_application_1/features/dashboard/mobile/expanding_formatting_bar.dart';
 import 'package:flutter_application_1/features/dashboard/widgets/mention_popup_layout.dart';
+import 'package:flutter_application_1/features/dashboard/mobile/content_area.dart';
+import 'package:flutter_application_1/main.dart';
+import 'support/editor_harness.dart';
 
 void main() {
+  for (final html in [false, true]) {
+    for (final terminal in [
+      AttachmentJobPhase.completed,
+      AttachmentJobPhase.cancelled,
+      AttachmentJobPhase.failed,
+    ]) {
+      testWidgets(
+        'export locks editor through Hide and restores on $terminal (HTML=$html)',
+        (tester) async {
+          final h = await EditorHarness.create(
+            deltaToHtml: (_) async => '<p>Synthetic body</p>',
+          );
+          final requests = ValueNotifier<int>(0);
+          AttachmentJobState? job;
+          h.seed('demo', h.note('demo', 'Synthetic body'));
+          await h.editor.loadNote('demo');
+          if (html) await h.editor.setEditorMode(EditorMode.html);
+          final controller = h.editor.quillController;
+          final document = controller.document;
+          final body = document.toPlainText();
+          final delta = document.toDelta().toJson();
+          final source = h.editor.htmlController.text;
+          AttachmentJobSnapshot snapshot(AttachmentJobPhase phase) =>
+              AttachmentJobSnapshot(
+                id: 'read-only-export',
+                owner: h.editor.draftSession.generation,
+                fileName: 'Synthetic package',
+                phase: phase,
+                operation: AttachmentJobOperation.export,
+              );
+          try {
+            await tester.pumpWidget(
+              MyApp(
+                settings: h.settings,
+                home: Scaffold(
+                  body: MobileContentArea(
+                    viewModel: h.editor,
+                    exportRequests: requests,
+                    onExport: () async {},
+                  ),
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+            final title = find.byType(TextField).first;
+            expect(tester.widget<TextField>(title).readOnly, isFalse);
+            expect(controller.readOnly, isFalse);
+            requests.value =
+                1; // Export options/preparation, before a worker exists.
+            await tester.pump();
+            expect(tester.widget<TextField>(title).readOnly, isTrue);
+            expect(controller.readOnly, isTrue);
+            expect(
+              tester
+                  .widget<IconButton>(
+                    find.byWidgetPredicate(
+                      (w) => w is IconButton && w.tooltip == 'Attach file',
+                    ),
+                  )
+                  .onPressed,
+              isNull,
+            );
+            expect(
+              tester
+                  .widget<TextButton>(
+                    find.widgetWithText(TextButton, 'Rich text'),
+                  )
+                  .onPressed,
+              isNull,
+            );
+            expect(
+              tester
+                  .widget<TextButton>(find.widgetWithText(TextButton, 'HTML'))
+                  .onPressed,
+              isNull,
+            );
+            if (html) {
+              expect(
+                tester.widget<CodeField>(find.byType(CodeField)).readOnly,
+                isTrue,
+              );
+              expect(
+                tester
+                    .widget<TextButton>(
+                      find
+                          .ancestor(
+                            of: find.text('Format HTML'),
+                            matching: find.byWidgetPredicate(
+                              (w) => w is TextButton,
+                            ),
+                          )
+                          .first,
+                    )
+                    .onPressed,
+                isNull,
+              );
+            } else {
+              final bar = find.byKey(const ValueKey('formatting-card'));
+              final before = tester.getSize(bar);
+              await tester.tap(
+                find.byKey(const ValueKey('formatting-touch-toggle')),
+                warnIfMissed: false,
+              );
+              await tester.pump(const Duration(milliseconds: 250));
+              expect(tester.getSize(bar), before);
+              expect(h.editor.focusNode.hasFocus, isFalse);
+              h.editor.focusNode.requestFocus();
+              await tester.pump();
+              expect(h.editor.focusNode.hasFocus, isFalse);
+              await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+              await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+              await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+              expect(document.toDelta().toJson(), delta);
+            }
+            job = AttachmentJobState(snapshot(AttachmentJobPhase.preparing));
+            h.editor.attachmentJobsNotifier.value = [job];
+            requests.value =
+                0; // Hidden/reconnected presentation must not unlock it.
+            await tester.pump();
+            expect(controller.readOnly, isTrue);
+            expect(tester.widget<TextField>(title).readOnly, isTrue);
+            await tester.tap(find.byTooltip('Note actions'));
+            await tester.pump(const Duration(milliseconds: 300));
+            expect(
+              tester
+                  .widget<ListTile>(
+                    find.widgetWithText(ListTile, 'Set Password'),
+                  )
+                  .enabled,
+              isFalse,
+            );
+            expect(
+              tester
+                  .widget<ListTile>(
+                    find.widgetWithText(ListTile, 'Delete File'),
+                  )
+                  .enabled,
+              isFalse,
+            );
+            expect(
+              tester
+                  .widget<ListTile>(find.widgetWithText(ListTile, 'Export'))
+                  .enabled,
+              isTrue,
+            );
+            job.update(snapshot(terminal));
+            h.editor.attachmentJobsNotifier.value = List.of(
+              h.editor.attachmentJobsNotifier.value,
+            );
+            await tester.pump(const Duration(milliseconds: 300));
+            // An already-open actions menu also restores without being recreated.
+            expect(
+              tester
+                  .widget<ListTile>(
+                    find.widgetWithText(ListTile, 'Set Password'),
+                  )
+                  .enabled,
+              isTrue,
+            );
+            await tester.tap(find.text('Close'));
+            await tester.pumpAndSettle();
+            expect(controller.readOnly, isFalse);
+            expect(tester.widget<TextField>(title).readOnly, isFalse);
+            expect(
+              tester
+                  .widget<IconButton>(
+                    find.byWidgetPredicate(
+                      (w) => w is IconButton && w.tooltip == 'Attach file',
+                    ),
+                  )
+                  .onPressed,
+              isNotNull,
+            );
+            expect(h.editor.quillController, same(controller));
+            expect(controller.document, same(document));
+            expect(document.toPlainText(), body);
+            expect(h.editor.htmlController.text, source);
+            expect(h.editor.isHtmlMode, html);
+            expect(h.files.writeAttempts, 0);
+            expect(h.encryption.binaryDecryptCalls, 0);
+            expect(tester.takeException(), isNull);
+          } finally {
+            await tester.pumpWidget(const SizedBox.shrink());
+            h.editor.attachmentJobsNotifier.value = [];
+            job?.dispose();
+            requests.dispose();
+            await tester.runAsync(h.dispose);
+          }
+        },
+      );
+    }
+  }
+  testWidgets(
+    'cancelled export setup preserves an existing read-only controller',
+    (tester) async {
+      final h = await EditorHarness.create();
+      final requests = ValueNotifier<int>(0);
+      h.editor.quillController.readOnly = true;
+      try {
+        await tester.pumpWidget(
+          MyApp(
+            settings: h.settings,
+            home: Scaffold(
+              body: MobileContentArea(
+                viewModel: h.editor,
+                exportRequests: requests,
+              ),
+            ),
+          ),
+        );
+        requests.value = 1;
+        await tester.pump();
+        requests.value = 0;
+        await tester.pump();
+        expect(h.editor.quillController.readOnly, isTrue);
+        expect(tester.takeException(), isNull);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        requests.dispose();
+        await tester.runAsync(h.dispose);
+      }
+    },
+  );
+  for (final locked in [false, true]) {
+    testWidgets(
+      'editor action menu exposes Export without changing note state (locked=$locked)',
+      (tester) async {
+        final h = await EditorHarness.create();
+        h.seed('demo', h.note('demo', 'Synthetic body', locked: locked));
+        await h.editor.loadNote('demo');
+        var exports = 0;
+        final controller = h.editor.quillController;
+        final body = controller.document.toPlainText();
+        try {
+          await tester.pumpWidget(
+            MyApp(
+              settings: h.settings,
+              home: Scaffold(
+                body: MobileContentArea(
+                  viewModel: h.editor,
+                  onExport: () async {
+                    exports++;
+                  },
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.byTooltip('Note actions'));
+          await tester.pumpAndSettle();
+          expect(find.text('Export').hitTestable(), findsOneWidget);
+          await tester.tap(find.text('Export'));
+          await tester.pumpAndSettle();
+          expect(exports, 1);
+          expect(find.byType(AlertDialog), findsNothing);
+          expect(h.editor.isLocked, locked);
+          expect(h.editor.quillController, same(controller));
+          expect(controller.document.toPlainText(), body);
+          expect(h.files.writeAttempts, 0);
+          expect(tester.takeException(), isNull);
+        } finally {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.runAsync(h.dispose);
+        }
+      },
+    );
+  }
   test('mention popup stays above changing IME and inside safe bounds', () {
     for (final keyboard in [0.0, 240.0, 360.0]) {
       for (final caretY in [80.0, 280.0, 500.0]) {

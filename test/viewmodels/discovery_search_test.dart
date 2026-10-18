@@ -187,6 +187,32 @@ void main() {
     expect(f.editor.recentFiles.single.title, 'Current');
   });
 
+  searchTest('folder failure retains previous rows and publishes its error', (
+    tester,
+    f,
+  ) async {
+    f.publish(['Synthetic retained']);
+    final request = f.reader.desired!;
+    f.reader.failures.add(
+      DiscoveryFailureEvent(
+        const OperationResult.failure(
+          OperationOutcome.ioFailure,
+          'Folder unavailable; previous results retained.',
+        ),
+        request: request,
+      ),
+    );
+    await tester.pump();
+    expect(f.editor.recentFiles.single.title, 'Synthetic retained');
+    expect(
+      f.editor.noteListStateNotifier.value.error,
+      contains('Folder unavailable'),
+    );
+    expect(f.editor.noteListStateNotifier.value.isScanning, isFalse);
+    f.reader.publish([f.file('Recovered')]);
+    expect(f.editor.noteListStateNotifier.value.error, isNull);
+  });
+
   searchTest('a delayed older query cannot replace the newer search', (
     tester,
     f,

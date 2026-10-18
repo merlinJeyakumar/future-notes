@@ -10,17 +10,53 @@ import androidx.core.content.FileProvider
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import android.os.Handler
+import android.os.Looper
+import java.util.concurrent.Executors
+import android.net.Uri
+import android.provider.DocumentsContract
 
 class AttachmentFiles(private val context: Context, messenger: BinaryMessenger) {
     private var activity: Activity? = null
     private val channel = MethodChannel(messenger, "future_notes/files")
     private val root = File(context.cacheDir, "attachment-previews")
+    private val exportExecutor = Executors.newSingleThreadExecutor()
+    private val main = Handler(Looper.getMainLooper())
+    private var exportPicker: Pair<File, MethodChannel.Result>? = null
+    private val exportRequest = 6831
     fun attach(host: Activity) { activity = host }
     fun detach(host: Activity) { if (activity === host) activity = null }
     init {
         channel.setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
+                    "shareExport" -> {
+                        val file = ownedExport(call.argument<String>("path") ?: "")
+                        val host = activity ?: throw IllegalStateException()
+                        val uri = FileProvider.getUriForFile(context, context.packageName + ".attachments", file)
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = if (file.extension == "zip") "application/zip" else "application/octet-stream"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            clipData = ClipData.newRawUri("Export", uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        host.startActivity(Intent.createChooser(intent, "Share export"))
+                        result.success(true)
+                    }
+                    "saveExport" -> {
+                        if (exportPicker != null) throw IllegalStateException()
+                        val file = ownedExport(call.argument<String>("path") ?: "")
+                        val host = activity ?: throw IllegalStateException()
+                        exportPicker = Pair(file, result)
+                        try {
+                            host.startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                type = if (file.extension == "zip") "application/zip" else "application/octet-stream"
+                                putExtra(Intent.EXTRA_TITLE, file.name)
+                                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                            }, exportRequest)
+                        } catch (error: Exception) { exportPicker = null; throw error }
+                    }
                     "readLibrarySelection" -> {
                         val file = AtomicFile(File(context.noBackupFilesDir, "future-notes-library.json"))
                         val bytes = try { file.openRead().use { if (it.channel.size() > 65536) throw IllegalStateException(); it.readBytes() } } catch (_: java.io.FileNotFoundException) { null }
@@ -79,6 +115,54 @@ class AttachmentFiles(private val context: Context, messenger: BinaryMessenger) 
         val file = File(path)
         if (!file.isAbsolute || !file.canonicalPath.startsWith(root.canonicalPath + File.separator)) throw SecurityException()
         return file
+    }
+    private fun ownedExport(path: String): File {
+        val file = File(path)
+        val cache = File(context.cacheDir, "prepared-exports").canonicalFile
+        require(file.isAbsolute && file.path == file.canonicalPath && file.isFile)
+        require(file.parentFile?.parentFile == cache && file.parentFile!!.name.startsWith("future-notes-export-"))
+        return file
+    }
+    fun activityResult(request: Int, status: Int, data: Intent?): Boolean {
+        if (request != exportRequest) return false
+        val pending = exportPicker ?: return true
+        if (status != Activity.RESULT_OK || data?.data == null) {
+            exportPicker = null; pending.second.success(false); return true
+        }
+        val uri = data.data!!
+        exportExecutor.execute {
+            try {
+                require(uri.scheme == "content")
+                val file = ownedExport(pending.first.path)
+                val length = file.length(); val modified = file.lastModified()
+                var bytes = 0L; var last = 0L
+                fun progress() { val amount = bytes; main.post { channel.invokeMethod("exportSaveProgress", mapOf("bytes" to amount, "total" to length)) } }
+                file.inputStream().use { input ->
+                    val descriptor = context.contentResolver.openFileDescriptor(uri, "w") ?: throw IllegalStateException()
+                    android.os.ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { output ->
+                        val buffer = ByteArray(256 * 1024)
+                        progress()
+                        while (true) {
+                            val count = input.read(buffer); if (count < 0) break
+                            if (bytes + count > length) throw IllegalStateException()
+                            output.write(buffer, 0, count); bytes += count
+                            val now = android.os.SystemClock.elapsedRealtime()
+                            if (now - last >= 150) { last = now; progress() }
+                        }
+                        require(bytes == length && file.length() == length && file.lastModified() == modified)
+                        output.flush()
+                    }
+                }
+                progress()
+                main.post { exportPicker = null; pending.second.success(true) }
+            } catch (_: Exception) {
+                // ACTION_CREATE_DOCUMENT created this target for this request.
+                // Retain the private prepared file so the user can retry.
+                try { DocumentsContract.deleteDocument(context.contentResolver, uri) } catch (_: Exception) { }
+                main.post { exportPicker = null; pending.second.error("export_save_failed", "The file could not be saved. The prepared export is still available.", null) }
+            }
+        }
+        return true
     }
     fun dispose() { channel.setMethodCallHandler(null) }
 }

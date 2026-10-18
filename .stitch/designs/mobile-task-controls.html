@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Future Notes - Refined Mobile Editor, HTML Source &amp; Background Task Telemetry</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&amp;family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            vault: {
+              outer: "#0B0F17",
+              container: "#131A26",
+              surface: "#1A2332",
+              elevated: "#222D40",
+              border: "#2A364C",
+              accent: "#4299E1",
+              success: "#22C55E",
+              warning: "#F59E0B",
+              danger: "#EF4444",
+              muted: "#8A99AD",
+              subtle: "#4B5B73"
+            }
+          },
+          borderRadius: {
+            DEFAULT: "0.25rem",
+            lg: "0.5rem",
+            xl: "0.75rem",
+            full: "9999px"
+          },
+          fontFamily: {
+            headline: ["Public Sans", "sans-serif"],
+            display: ["Public Sans", "sans-serif"],
+            body: ["Public Sans", "sans-serif"],
+            label: ["Public Sans", "sans-serif"],
+            mono: ["JetBrains Mono", "monospace"]
+          }
+        }
+      }
+    };
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    .material-symbols-outlined.fill-icon {
+      font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+    /* Custom clean scrollbars for horizontal code */
+    .custom-code-scroll::-webkit-scrollbar {
+      height: 6px;
+    }
+    .custom-code-scroll::-webkit-scrollbar-track {
+      background: #131A26;
+    }
+    .custom-code-scroll::-webkit-scrollbar-thumb {
+      background: #2A364C;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body class="bg-[#0B0F17] text-slate-100 font-body antialiased min-h-screen selection:bg-[#4299E1]/30">
+<!-- Desktop Presentation Outer Wrapper (1440px target layout) -->
+<div class="max-w-[1520px] mx-auto px-6 py-8">
+<!-- Top Global Header / Board Specification Meta -->
+<header class="mb-8 border-b border-[#2A364C]/50 pb-5">
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+<div>
+<div class="flex items-center gap-3">
+<span class="px-2.5 py-0.5 rounded text-[11px] font-mono font-medium tracking-wide bg-[#4299E1]/15 text-[#4299E1] border border-[#4299E1]/30">
+              SPEC-UI-v3.42 · FLUTTER ENGINE
+            </span>
+<span class="px-2 py-0.5 rounded text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#22C55E] animate-pulse"></span>
+              PRODUCTION READY
+            </span>
+</div>
+<h1 class="text-2xl md:text-3xl font-display font-bold tracking-tight text-white mt-1.5">
+            Future Notes - Refined Mobile Editor, HTML Source &amp; Background Task Telemetry
+          </h1>
+<p class="text-xs md:text-sm text-[#8A99AD] mt-1 max-w-4xl">
+            Mobile reference viewport specification (390×844dp phone canvas). Enforces 48dp accessible disclosure targets, strict segregation of interrupted background workers vs. running sync telemetry, and continuous code-first horizontal HTML editing.
+          </p>
+</div>
+<!-- Board Meta Metrics -->
+<div class="flex items-center gap-3 shrink-0 text-xs text-[#8A99AD] bg-[#131A26] border border-[#2A364C] px-4 py-2.5 rounded-xl">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[#4299E1] text-[18px]">devices</span>
+<span>Mobile 390dp (iOS / Android Material 3)</span>
+</div>
+<div class="h-4 w-px bg-[#2A364C]"></div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-emerald-400 text-[18px]">verified_user</span>
+<span>AES-GCM Offline Vault</span>
+</div>
+</div>
+</div>
+</header>
+<!-- Main Triple Phone Mockups Showcase Grid -->
+<main class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start justify-items-center mb-10">
+<!-- ======================================================== -->
+<!-- FRAME 1: NOTES LIST & BACKGROUND TASK DIALOG INSET     -->
+<!-- ======================================================== -->
+<section class="w-full max-w-[390px] flex flex-col items-center">
+<!-- Frame Label Anchor -->
+<div class="w-full flex items-center justify-between mb-2.5 px-1">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-[#4299E1]"></span>
+<span class="text-xs font-mono font-semibold uppercase tracking-wider text-[#8A99AD]">Frame 01</span>
+</div>
+<span class="text-[11px] font-medium text-slate-400 bg-[#131A26] px-2 py-0.5 rounded border border-[#2A364C]">
+            Task Telemetry &amp; Inset
+          </span>
+</div>
+<!-- Phone Shell Container (390x844dp replica) -->
+<div class="w-[390px] h-[844px] bg-[#0B0F17] rounded-[44px] border-[5px] border-[#2A364C] shadow-2xl relative overflow-hidden flex flex-col justify-between select-none">
+<!-- Top Phone Bezel Notch & Status Bar -->
+<div class="w-full pt-3 px-6 pb-1 bg-[#131A26] flex items-center justify-between text-[13px] font-semibold tracking-tight text-slate-300 shrink-0 z-30">
+<span>9:41</span>
+<!-- Speaker Ear-piece Notch -->
+<div class="w-24 h-4 bg-[#0B0F17] rounded-full mx-auto"></div>
+<div class="flex items-center gap-1.5 text-slate-300">
+<span class="material-symbols-outlined text-[15px]">signal_cellular_4_bar</span>
+<span class="material-symbols-outlined text-[15px]">wifi</span>
+<span class="material-symbols-outlined text-[15px]">battery_full</span>
+</div>
+</div>
+<!-- Base Screen Content Layer -->
+<div class="flex-1 flex flex-col overflow-hidden bg-[#0B0F17] relative">
+<!-- 56dp Header Component -->
+<div class="h-14 px-4 bg-[#131A26] border-b border-[#2A364C]/70 flex items-center justify-between shrink-0">
+<div class="flex items-center gap-2.5">
+<button aria-label="Menu" class="w-9 h-9 rounded-full flex items-center justify-center text-slate-300 hover:bg-[#1A2332]">
+<span class="material-symbols-outlined text-[20px]">menu</span>
+</button>
+<div>
+<h2 class="text-sm font-semibold tracking-tight text-white leading-none">Future Notes</h2>
+<span class="text-[10px] text-[#4299E1] font-mono leading-tight">Personal Vault</span>
+</div>
+</div>
+<div class="flex items-center gap-1">
+<!-- Material Background tasks icon with strict badge = 1 -->
+<button aria-label="Background tasks (1 active)" class="relative w-11 h-11 rounded-full flex items-center justify-center text-slate-200 hover:bg-[#1A2332] active:scale-95 transition-all">
+<span class="material-symbols-outlined text-[22px] text-[#4299E1] animate-spin" style="animation-duration: 3s;">sync</span>
+<!-- Badge Strictly "1" (Active Running Task Only) -->
+<span class="absolute top-1 right-1 w-4 h-4 rounded-full bg-[#4299E1] text-[10px] font-bold text-slate-950 flex items-center justify-center shadow-md">
+                    1
+                  </span>
+</button>
+<button aria-label="More options" class="w-9 h-9 rounded-full flex items-center justify-center text-slate-300 hover:bg-[#1A2332]">
+<span class="material-symbols-outlined text-[20px]">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Search Field (48dp height requirement) -->
+<div class="p-3.5 bg-[#131A26]/50 border-b border-[#2A364C]/40">
+<div class="h-12 w-full rounded-xl bg-[#1A2332] border border-[#2A364C] flex items-center px-3.5 gap-2.5 text-slate-400">
+<span class="material-symbols-outlined text-[20px] text-[#8A99AD]">search</span>
+<span class="text-xs text-[#8A99AD]">Search encrypted notes...</span>
+<span class="material-symbols-outlined text-[18px] ml-auto text-[#8A99AD]">mic</span>
+</div>
+</div>
+<!-- Synthetic Notes List -->
+<div class="flex-1 p-3.5 space-y-2.5 overflow-y-auto">
+<!-- Item 1: Note with Active Background Task Indicator -->
+<div class="p-3.5 rounded-xl bg-[#131A26] border border-[#4299E1]/40 shadow-sm relative overflow-hidden">
+<div class="absolute top-0 left-0 bottom-0 w-1 bg-[#4299E1]"></div>
+<div class="flex items-start justify-between">
+<div class="space-y-1">
+<div class="flex items-center gap-2">
+<span class="text-xs font-semibold text-white">Project notes</span>
+<!-- Synchronizing active telemetry ring -->
+<span class="inline-flex items-center gap-1 text-[10px] text-[#4299E1] bg-[#4299E1]/10 px-1.5 py-0.5 rounded font-mono">
+<span class="material-symbols-outlined text-[12px] animate-spin">progress_activity</span>
+                        Exporting (60%)
+                      </span>
+</div>
+<p class="text-[11px] text-[#8A99AD] line-clamp-1">Reviewing offline secure storage layer telemetry with batch encryption...</p>
+</div>
+<span class="text-[10px] font-mono text-[#8A99AD] shrink-0">14:15</span>
+</div>
+</div>
+<!-- Item 2: Trip plans -->
+<div class="p-3.5 rounded-xl bg-[#131A26] border border-[#2A364C] opacity-90">
+<div class="flex items-start justify-between">
+<div class="space-y-1">
+<div class="flex items-center gap-1.5">
+<span class="text-xs font-semibold text-slate-200">Trip plans</span>
+<span class="material-symbols-outlined text-[13px] text-slate-400">lock</span>
+</div>
+<p class="text-[11px] text-[#8A99AD] line-clamp-1">Boarding passes, reservation keys, and regional travel itineraries.</p>
+</div>
+<span class="text-[10px] font-mono text-[#8A99AD]">Yesterday</span>
+</div>
+</div>
+<!-- Item 3: Research notes -->
+<div class="p-3.5 rounded-xl bg-[#131A26] border border-[#2A364C] opacity-90">
+<div class="flex items-start justify-between">
+<div class="space-y-1">
+<div class="flex items-center gap-1.5">
+<span class="text-xs font-semibold text-slate-200">Research notes</span>
+<span class="material-symbols-outlined text-[13px] text-slate-400">lock</span>
+</div>
+<p class="text-[11px] text-[#8A99AD] line-clamp-1">Distributed ledger sync primitives and edge document tree parsing.</p>
+</div>
+<span class="text-[10px] font-mono text-[#8A99AD]">Oct 12</span>
+</div>
+</div>
+</div>
+<!-- INSET DIALOG OVERLAY: "Background tasks" -->
+<div class="absolute inset-0 bg-[#0B0F17]/75 backdrop-blur-[2px] z-40 flex items-center justify-center p-3.5 animate-fadeIn">
+<div class="w-full bg-[#131A26] border border-[#2A364C] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+<!-- Modal Header -->
+<div class="px-4 py-3 border-b border-[#2A364C] flex items-center justify-between bg-[#1A2332]/50">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px] text-[#4299E1]">dns</span>
+<h3 class="text-xs font-semibold text-white tracking-wide">Background tasks</h3>
+</div>
+<button aria-label="Close dialog" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-[#222D40]">
+<span class="material-symbols-outlined text-[16px]">close</span>
+</button>
+</div>
+<!-- Modal Body: Job 1 & Job 2 -->
+<div class="p-3.5 space-y-3.5 text-xs">
+<!-- Job 1: Active Running Task -->
+<div class="p-3 rounded-xl bg-[#1A2332] border border-[#2A364C] space-y-2">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2 min-w-0">
+<span class="material-symbols-outlined text-[17px] text-[#4299E1] animate-spin" style="animation-duration: 2s;">sync</span>
+<div class="truncate">
+<p class="font-medium text-white truncate text-[11px]">Exporting: report.note</p>
+<p class="text-[10px] text-[#8A99AD] font-mono">420 MiB / 700 MiB · 60%</p>
+</div>
+</div>
+<!-- Accessible Cancel Button -->
+<button class="px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:text-white bg-[#222D40] hover:bg-red-500/20 hover:text-red-400 border border-[#2A364C] rounded-lg transition-colors">
+                        Cancel
+                      </button>
+</div>
+<!-- Determinate Progress Bar (60%) -->
+<div class="w-full h-1.5 bg-[#0B0F17] rounded-full overflow-hidden">
+<div class="h-full bg-[#4299E1] rounded-full transition-all duration-300" style="width: 60%"></div>
+</div>
+</div>
+<!-- Job 2: Interrupted Task (STRICT DISCIPLINE: No spinner, no progress bar, no percentage readout, no Cancel) -->
+<div class="p-3 rounded-xl bg-[#1A2332] border border-amber-500/30 space-y-2 relative">
+<div class="flex items-start justify-between gap-2">
+<div class="flex items-start gap-2">
+<span class="material-symbols-outlined text-[18px] text-[#F59E0B] shrink-0 mt-0.5">warning</span>
+<div>
+<p class="font-medium text-slate-100 text-[11px]">sample-document.pdf</p>
+<p class="text-[10px] text-[#F59E0B] font-medium">Interrupted during encryption</p>
+</div>
+</div>
+</div>
+<!-- Clean Action Cluster: Review (Outlined) & Dismiss (Text) -->
+<div class="flex items-center justify-end gap-2 pt-1 border-t border-[#2A364C]/50">
+<button class="px-2.5 py-1 text-[11px] font-medium text-[#8A99AD] hover:text-slate-200 transition-colors">
+                        Dismiss
+                      </button>
+<button class="px-3 py-1 text-[11px] font-semibold text-[#4299E1] bg-[#4299E1]/15 hover:bg-[#4299E1]/25 border border-[#4299E1]/40 rounded-lg transition-colors">
+                        Review
+                      </button>
+</div>
+</div>
+<!-- Strict Telemetry Clarification Micro-Notice -->
+<div class="px-2 py-1.5 bg-[#0B0F17]/60 rounded-lg border border-[#2A364C]/40 flex items-start gap-1.5 text-[10px] text-[#8A99AD]">
+<span class="material-symbols-outlined text-[13px] text-[#4299E1] shrink-0 mt-0.5">info</span>
+<span>Top badge count strictly reflects running jobs (1). Interrupted tasks require direct user resolution without false telemetry overhead.</span>
+</div>
+</div>
+<!-- Modal Bottom Bar -->
+<div class="px-3 py-2 bg-[#1A2332]/30 border-t border-[#2A364C] flex justify-end">
+<button class="text-[11px] font-medium text-slate-300 hover:text-white px-3 py-1">
+                    Close
+                  </button>
+</div>
+</div>
+</div>
+<!-- Bottom Floating Action Button Mock (New Note) -->
+<div class="absolute bottom-4 right-4 z-10">
+<button aria-label="New Note" class="w-12 h-12 rounded-2xl bg-[#4299E1] text-slate-950 flex items-center justify-center shadow-lg active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-[24px]">add</span>
+</button>
+</div>
+</div>
+<!-- Bottom Phone Navigation Bar/Home Indicator -->
+<div class="w-full h-5 bg-[#131A26] flex items-center justify-center shrink-0">
+<div class="w-32 h-1 bg-slate-600 rounded-full"></div>
+</div>
+</div>
+<div class="mt-2 text-center text-[11px] text-[#8A99AD]">
+          Active sync badge isolates interrupted queue
+        </div>
+</section>
+<!-- ======================================================== -->
+<!-- FRAME 2: RICH TEXT EDITOR WITH 48DP CHEVRON DISCLOSURE  -->
+<!-- ======================================================== -->
+<section class="w-full max-w-[390px] flex flex-col items-center">
+<!-- Frame Label Anchor -->
+<div class="w-full flex items-center justify-between mb-2.5 px-1">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-[#22C55E]"></span>
+<span class="text-xs font-mono font-semibold uppercase tracking-wider text-[#8A99AD]">Frame 02</span>
+</div>
+<span class="text-[11px] font-medium text-slate-400 bg-[#131A26] px-2 py-0.5 rounded border border-[#2A364C]">
+            Rich Text Mode &amp; 48dp Target
+          </span>
+</div>
+<!-- Phone Shell Container -->
+<div class="w-[390px] h-[844px] bg-[#0B0F17] rounded-[44px] border-[5px] border-[#2A364C] shadow-2xl relative overflow-hidden flex flex-col justify-between select-none">
+<!-- Top Phone Status Bar -->
+<div class="w-full pt-3 px-6 pb-1 bg-[#131A26] flex items-center justify-between text-[13px] font-semibold tracking-tight text-slate-300 shrink-0 z-30">
+<span>9:41</span>
+<div class="w-24 h-4 bg-[#0B0F17] rounded-full mx-auto"></div>
+<div class="flex items-center gap-1.5 text-slate-300">
+<span class="material-symbols-outlined text-[15px]">signal_cellular_4_bar</span>
+<span class="material-symbols-outlined text-[15px]">wifi</span>
+<span class="material-symbols-outlined text-[15px]">battery_full</span>
+</div>
+</div>
+<!-- Phone Inner Canvas -->
+<div class="flex-1 flex flex-col overflow-hidden bg-[#0B0F17]">
+<!-- Editor Top Navigation Bar -->
+<div class="h-13 px-3 py-2 bg-[#131A26] border-b border-[#2A364C]/70 flex items-center justify-between shrink-0">
+<div class="flex items-center gap-2">
+<button aria-label="Back" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:bg-[#1A2332]">
+<span class="material-symbols-outlined text-[20px]">arrow_back</span>
+</button>
+<div>
+<h2 class="text-xs font-semibold text-white tracking-tight leading-none">Project journal</h2>
+<p class="text-[10px] text-[#8A99AD] font-mono mt-0.5">Edited 14:15 · fn-94</p>
+</div>
+</div>
+<!-- Segmented Control [Rich text | HTML] -->
+<div class="flex items-center p-0.5 bg-[#0B0F17] rounded-lg border border-[#2A364C]">
+<button aria-current="true" class="px-2.5 py-1 text-[11px] font-semibold rounded-md bg-[#4299E1] text-slate-950 shadow-sm">
+                  Rich text
+                </button>
+<button class="px-2.5 py-1 text-[11px] font-medium text-[#8A99AD] hover:text-white transition-colors">
+                  HTML
+                </button>
+</div>
+</div>
+<!-- Secondary Action Row: [Attach] [🔒 Encrypted] [Save] -->
+<div class="px-3.5 py-2 bg-[#131A26]/60 border-b border-[#2A364C]/50 flex items-center justify-between text-xs shrink-0">
+<div class="flex items-center gap-2">
+<button class="h-7 px-2.5 rounded-md bg-[#1A2332] border border-[#2A364C] text-[#8A99AD] hover:text-slate-100 flex items-center gap-1.5 transition-colors">
+<span class="material-symbols-outlined text-[14px]">attachment</span>
+<span class="text-[11px]">Attach</span>
+</button>
+<span class="inline-flex items-center gap-1 text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
+<span class="material-symbols-outlined text-[12px] fill-icon">lock</span>
+                  Encrypted
+                </span>
+</div>
+<button class="h-7 px-3 rounded-md border border-[#4299E1] text-[#4299E1] font-semibold text-[11px] hover:bg-[#4299E1]/10 flex items-center gap-1 transition-colors">
+<span class="material-symbols-outlined text-[13px]">check</span>
+                Save
+              </button>
+</div>
+<!-- Formatting Card Container (In normal document flow above editor body) -->
+<div class="bg-[#1A2332] border-b border-[#2A364C] shadow-sm shrink-0">
+<!-- Primary Row: Undo, Redo, B, I + 48dp Touch Target Chevron Button -->
+<div class="h-12 px-2 flex items-center justify-between">
+<!-- Inline Action Group -->
+<div class="flex items-center gap-1">
+<button aria-label="Undo" class="w-8 h-8 rounded text-slate-300 hover:bg-[#222D40] flex items-center justify-center">
+<span class="material-symbols-outlined text-[18px]">undo</span>
+</button>
+<button aria-label="Redo" class="w-8 h-8 rounded text-slate-300 hover:bg-[#222D40] flex items-center justify-center">
+<span class="material-symbols-outlined text-[18px]">redo</span>
+</button>
+<div class="h-4 w-px bg-[#2A364C] mx-1"></div>
+<button aria-label="Bold" class="w-8 h-8 rounded bg-[#4299E1]/20 text-[#4299E1] font-bold text-xs flex items-center justify-center border border-[#4299E1]/30">
+                    B
+                  </button>
+<button aria-label="Italic" class="w-8 h-8 rounded text-slate-300 hover:bg-[#222D40] italic text-xs font-serif flex items-center justify-center">
+                    I
+                  </button>
+</div>
+<!-- Mandatory 48dp Chevron Disclosure Icon Button (Replacing 'Format / Less') -->
+<div class="flex items-center">
+<span class="text-[10px] font-mono text-[#4299E1] mr-1 hidden sm:inline">48dp Target</span>
+<button aria-label="Collapse formatting tools tray" class="w-12 h-12 flex items-center justify-center rounded-xl bg-[#222D40] text-[#4299E1] border border-[#4299E1]/40 shadow-sm transition-transform active:scale-90" title="Toggle formatting tools tray">
+<!-- Showing expand_less to represent expanded tray state -->
+<span class="material-symbols-outlined text-[24px]">expand_less</span>
+</button>
+</div>
+</div>
+<!-- Expanded Formatting Tools Tray in normal document flow (no popover clipping) -->
+<div class="px-2.5 pb-2.5 pt-1 border-t border-[#2A364C]/60 grid grid-cols-5 gap-1.5 bg-[#131A26]/70">
+<button aria-label="Underline" class="h-8 rounded bg-[#1A2332] text-slate-300 hover:text-white flex items-center justify-center border border-[#2A364C]">
+<span class="material-symbols-outlined text-[17px]">format_underlined</span>
+</button>
+<button aria-label="Strikethrough" class="h-8 rounded bg-[#1A2332] text-slate-300 hover:text-white flex items-center justify-center border border-[#2A364C]">
+<span class="material-symbols-outlined text-[17px]">strikethrough_s</span>
+</button>
+<button aria-label="Text Color" class="h-8 rounded bg-[#1A2332] text-slate-300 hover:text-white flex items-center justify-center border border-[#2A364C]">
+<span class="material-symbols-outlined text-[17px] text-[#4299E1]">format_color_text</span>
+</button>
+<button aria-label="Highlight" class="h-8 rounded bg-[#1A2332] text-slate-300 hover:text-white flex items-center justify-center border border-[#2A364C]">
+<span class="material-symbols-outlined text-[17px] text-amber-400">ink_highlighter</span>
+</button>
+<button aria-label="Bullet list" class="h-8 rounded bg-[#1A2332] text-slate-300 hover:text-white flex items-center justify-center border border-[#2A364C]">
+<span class="material-symbols-outlined text-[17px]">format_list_bulleted</span>
+</button>
+<button aria-label="Numbered list" class="h-8 rounded bg-[#1A2332] text-slate-300 hover:text-white flex items-center justify-center border border-[#2A364C]">
+<span class="material-symbols-outlined text-[17px]">format_list_numbered</span>
+</button>
+<button aria-label="Blockquote" class="h-8 rounded bg-[#1A2332] text-slate-300 hover:text-white flex items-center justify-center border border-[#2A364C]">
+<span class="material-symbols-outlined text-[17px]">format_quote</span>
+</button>
+<button aria-label="Code block" class="h-8 rounded bg-[#1A2332] text-slate-300 hover:text-white flex items-center justify-center border border-[#2A364C]">
+<span class="material-symbols-outlined text-[17px]">code</span>
+</button>
+<button aria-label="Insert Link" class="h-8 rounded bg-[#1A2332] text-slate-300 hover:text-white flex items-center justify-center border border-[#2A364C]">
+<span class="material-symbols-outlined text-[17px]">link</span>
+</button>
+<button aria-label="Heading level" class="h-8 rounded bg-[#1A2332] text-slate-300 hover:text-white flex items-center justify-center border border-[#2A364C]">
+<span class="text-[11px] font-bold">H2</span>
+</button>
+</div>
+</div>
+<!-- Note Body Editable Area -->
+<div class="flex-1 p-4 overflow-y-auto space-y-3 text-slate-200">
+<h1 class="text-xl font-bold tracking-tight text-white border-b border-[#2A364C]/60 pb-2">
+                Specification Draft
+              </h1>
+<p class="text-xs leading-relaxed text-slate-300">
+                Reviewing field telemetry and verifying offline encrypted cache integrity...
+              </p>
+<div class="p-3 bg-[#131A26] rounded-xl border border-[#2A364C] text-[11px] text-[#8A99AD] space-y-1">
+<span class="font-mono text-emerald-400 font-semibold text-[10px] uppercase">Telemetry Note</span>
+<p>Task synchronization completes synchronously with local SQLite blob storage before network transmission.</p>
+</div>
+</div>
+<!-- Collapsed Bottom Attachment Bar -->
+<div class="px-3.5 py-2.5 bg-[#131A26] border-t border-[#2A364C] flex items-center justify-between shrink-0">
+<div class="flex items-center gap-2">
+<span class="text-[11px] font-semibold text-slate-300">Files (2)</span>
+<!-- PDF Tag -->
+<div class="h-6 px-2 rounded bg-[#1A2332] border border-[#2A364C] flex items-center gap-1 text-[10px] text-slate-300">
+<span class="material-symbols-outlined text-[12px] text-red-400">picture_as_pdf</span>
+<span>spec.pdf</span>
+</div>
+<!-- Sheet Tag -->
+<div class="h-6 px-2 rounded bg-[#1A2332] border border-[#2A364C] flex items-center gap-1 text-[10px] text-slate-300">
+<span class="material-symbols-outlined text-[12px] text-emerald-400">table_chart</span>
+<span>data.csv</span>
+</div>
+</div>
+<button aria-label="Add attachment" class="w-6 h-6 rounded-md bg-[#222D40] text-slate-300 hover:text-white flex items-center justify-center">
+<span class="material-symbols-outlined text-[14px]">add</span>
+</button>
+</div>
+</div>
+<!-- Bottom Phone Home Indicator -->
+<div class="w-full h-5 bg-[#131A26] flex items-center justify-center shrink-0">
+<div class="w-32 h-1 bg-slate-600 rounded-full"></div>
+</div>
+</div>
+<div class="mt-2 text-center text-[11px] text-[#8A99AD]">
+          48dp touch-target replaces text buttons
+        </div>
+</section>
+<!-- ======================================================== -->
+<!-- FRAME 3: COMPACT HTML SOURCE EDITOR VIEW                 -->
+<!-- ======================================================== -->
+<section class="w-full max-w-[390px] flex flex-col items-center">
+<!-- Frame Label Anchor -->
+<div class="w-full flex items-center justify-between mb-2.5 px-1">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-[#F59E0B]"></span>
+<span class="text-xs font-mono font-semibold uppercase tracking-wider text-[#8A99AD]">Frame 03</span>
+</div>
+<span class="text-[11px] font-medium text-slate-400 bg-[#131A26] px-2 py-0.5 rounded border border-[#2A364C]">
+            Horizontal HTML Editor
+          </span>
+</div>
+<!-- Phone Shell Container -->
+<div class="w-[390px] h-[844px] bg-[#0B0F17] rounded-[44px] border-[5px] border-[#2A364C] shadow-2xl relative overflow-hidden flex flex-col justify-between select-none">
+<!-- Top Phone Status Bar -->
+<div class="w-full pt-3 px-6 pb-1 bg-[#131A26] flex items-center justify-between text-[13px] font-semibold tracking-tight text-slate-300 shrink-0 z-30">
+<span>9:41</span>
+<div class="w-24 h-4 bg-[#0B0F17] rounded-full mx-auto"></div>
+<div class="flex items-center gap-1.5 text-slate-300">
+<span class="material-symbols-outlined text-[15px]">signal_cellular_4_bar</span>
+<span class="material-symbols-outlined text-[15px]">wifi</span>
+<span class="material-symbols-outlined text-[15px]">battery_full</span>
+</div>
+</div>
+<!-- Phone Inner Canvas -->
+<div class="flex-1 flex flex-col overflow-hidden bg-[#0B0F17]">
+<!-- Editor Top Navigation Bar -->
+<div class="h-13 px-3 py-2 bg-[#131A26] border-b border-[#2A364C]/70 flex items-center justify-between shrink-0">
+<div class="flex items-center gap-2">
+<button aria-label="Back" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:bg-[#1A2332]">
+<span class="material-symbols-outlined text-[20px]">arrow_back</span>
+</button>
+<div>
+<h2 class="text-xs font-semibold text-white tracking-tight leading-none">Project journal</h2>
+<p class="text-[10px] text-[#8A99AD] font-mono mt-0.5">Source Editor</p>
+</div>
+</div>
+<!-- Segmented Control [Rich text | HTML] (HTML selected) -->
+<div class="flex items-center p-0.5 bg-[#0B0F17] rounded-lg border border-[#2A364C]">
+<button class="px-2.5 py-1 text-[11px] font-medium text-[#8A99AD] hover:text-white transition-colors">
+                  Rich text
+                </button>
+<button aria-current="true" class="px-2.5 py-1 text-[11px] font-semibold rounded-md bg-[#4299E1] text-slate-950 shadow-sm">
+                  HTML
+                </button>
+</div>
+</div>
+<!-- Action Row Above Code View: Stats & 'Format HTML' Normalization -->
+<div class="px-3 py-2 bg-[#1A2332] border-b border-[#2A364C] flex items-center justify-between shrink-0">
+<div class="flex items-center gap-2 font-mono text-[10px] text-[#8A99AD]">
+<span class="material-symbols-outlined text-[14px] text-[#4299E1]">terminal</span>
+<span>UTF-8 · 42 lines · 2-space</span>
+</div>
+<!-- Explicit "Format HTML" action button -->
+<button class="h-7 px-2.5 rounded bg-[#222D40] hover:bg-[#2A364C] border border-[#2A364C] text-[11px] font-medium text-[#4299E1] flex items-center gap-1.5 transition-colors">
+<span class="material-symbols-outlined text-[13px]">code_blocks</span>
+                Format HTML
+              </button>
+</div>
+<!-- STRICT CODE DISPLAY CONTAINER: Continuous Gutter, 2-Space indent, NO SOFT WRAP, horizontal scrolling -->
+<div class="flex-1 bg-[#0E141E] overflow-y-auto overflow-x-hidden flex font-mono text-xs">
+<!-- Left Gutter with Continuous Line Numbers -->
+<div class="w-9 py-3 bg-[#0B0F17] border-r border-[#2A364C]/60 text-right pr-2 text-[#4B5B73] select-none text-[11px] leading-6 shrink-0 font-mono">
+<div>1</div>
+<div>2</div>
+<div>3</div>
+<div>4</div>
+<div>5</div>
+<div>6</div>
+<div>7</div>
+<div>8</div>
+<div>9</div>
+<div>10</div>
+<div>11</div>
+<div>12</div>
+<div>13</div>
+<div>14</div>
+<div>15</div>
+</div>
+<!-- Monospaced Horizontal Scroll Container (Preserving 2-space indent & no soft wrap) -->
+<div class="flex-1 py-3 px-3 overflow-x-auto whitespace-pre custom-code-scroll leading-6 text-slate-200">
+<div><span class="text-[#4299E1]">&lt;article</span> <span class="text-amber-400">class=</span><span class="text-emerald-400">"vault-note"</span> <span class="text-amber-400">data-id=</span><span class="text-emerald-400">"fn-94"</span><span class="text-[#4299E1]">&gt;</span></div>
+<div> <span class="text-[#4299E1]">&lt;header&gt;</span></div>
+<div> <span class="text-[#4299E1]">&lt;h1</span> <span class="text-amber-400">class=</span><span class="text-emerald-400">"note-title text-xl font-bold"</span><span class="text-[#4299E1]">&gt;</span>Specification Draft<span class="text-[#4299E1]">&lt;/h1&gt;</span></div>
+<div> <span class="text-[#4299E1]">&lt;time</span> <span class="text-amber-400">datetime=</span><span class="text-emerald-400">"2023-10-24T14:15:00Z"</span><span class="text-[#4299E1]">&gt;</span>14:15 UTC<span class="text-[#4299E1]">&lt;/time&gt;</span></div>
+<div> <span class="text-[#4299E1]">&lt;/header&gt;</span></div>
+<div> <span class="text-[#4299E1]">&lt;section</span> <span class="text-amber-400">class=</span><span class="text-emerald-400">"body-content"</span><span class="text-[#4299E1]">&gt;</span></div>
+<div> <span class="text-[#4299E1]">&lt;p&gt;</span>Reviewing field telemetry and verifying offline encrypted cache integrity across all active nodes without blocking main UI thread.<span class="text-[#4299E1]">&lt;/p&gt;</span></div>
+<div> <span class="text-[#4299E1]">&lt;blockquote</span> <span class="text-amber-400">class=</span><span class="text-emerald-400">"border-l-2 border-accent"</span><span class="text-[#4299E1]">&gt;</span></div>
+<div>      Task synchronization completes synchronously with local SQLite blob storage before network transmission.</div>
+<div> <span class="text-[#4299E1]">&lt;/blockquote&gt;</span></div>
+<div> <span class="text-[#4299E1]">&lt;ul</span> <span class="text-amber-400">class=</span><span class="text-emerald-400">"list-disc"</span><span class="text-[#4299E1]">&gt;</span></div>
+<div> <span class="text-[#4299E1]">&lt;li&gt;</span>Atomic AES-256 payload envelopes<span class="text-[#4299E1]">&lt;/li&gt;</span></div>
+<div> <span class="text-[#4299E1]">&lt;li&gt;</span>Persistent background sync job isolation<span class="text-[#4299E1]">&lt;/li&gt;</span></div>
+<div> <span class="text-[#4299E1]">&lt;/ul&gt;</span></div>
+<div> <span class="text-[#4299E1]">&lt;/section&gt;</span></div>
+<div><span class="text-[#4299E1]">&lt;/article&gt;</span></div>
+</div>
+</div>
+<!-- Bottom Editor Status & Shortcut Helper -->
+<div class="px-3.5 py-2 bg-[#131A26] border-t border-[#2A364C] flex items-center justify-between text-xs shrink-0">
+<div class="flex items-center gap-1.5 text-slate-400 font-mono text-[11px]">
+<span class="w-2 h-2 rounded-full bg-[#22C55E]"></span>
+<span>SYNTAX VALID</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="px-2 py-0.5 rounded bg-[#1A2332] text-slate-300 font-mono text-[10px] border border-[#2A364C]">
+                  &lt;/&gt; Auto Close
+                </button>
+<button class="h-6 px-2.5 rounded bg-[#4299E1] text-slate-950 font-semibold text-[10px] flex items-center gap-1">
+                  Save
+                </button>
+</div>
+</div>
+</div>
+<!-- Bottom Phone Home Indicator -->
+<div class="w-full h-5 bg-[#131A26] flex items-center justify-center shrink-0">
+<div class="w-32 h-1 bg-slate-600 rounded-full"></div>
+</div>
+</div>
+<div class="mt-2 text-center text-[11px] text-[#8A99AD]">
+          Monospace code view with horizontal scrolling
+        </div>
+</section>
+</main>
+<!-- ======================================================== -->
+<!-- BOTTOM SPECIFICATION CALLOUT CARDS (ENGINEERING NOTES)  -->
+<!-- ======================================================== -->
+<section class="border-t border-[#2A364C]/70 pt-6">
+<div class="flex items-center gap-2 mb-4">
+<span class="material-symbols-outlined text-[#4299E1] text-[20px]">architecture</span>
+<h2 class="text-sm font-semibold tracking-wider uppercase text-white font-mono">
+          Architectural Directives &amp; UX Guarantees
+        </h2>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+<!-- Callout 1 -->
+<article class="p-4 rounded-xl bg-[#131A26] border border-[#2A364C] flex flex-col justify-between space-y-3 relative overflow-hidden">
+<div class="space-y-1.5">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-md bg-[#4299E1]/20 text-[#4299E1] flex items-center justify-center text-xs font-mono font-bold">01</span>
+<h3 class="text-xs font-semibold text-white tracking-tight">48dp Chevron Formatting Disclosure</h3>
+</div>
+<p class="text-xs text-[#8A99AD] leading-relaxed">
+              Accessible icon button (<code class="font-mono text-slate-200">expand_more</code> / <code class="font-mono text-slate-200">expand_less</code>) completely supersedes legacy text labels. Toggling executes inline within the normal document flow directly above the editor canvas, eliminating modal viewport collisions and keyboard overlap.
+            </p>
+</div>
+<div class="pt-2 border-t border-[#2A364C]/60 flex items-center justify-between text-[11px] text-[#4299E1] font-mono">
+<span>WCAG 2.1 Target Size</span>
+<span class="font-semibold">48 × 48 dp verified</span>
+</div>
+</article>
+<!-- Callout 2 -->
+<article class="p-4 rounded-xl bg-[#131A26] border border-[#2A364C] flex flex-col justify-between space-y-3 relative overflow-hidden">
+<div class="space-y-1.5">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-md bg-[#22C55E]/20 text-[#22C55E] flex items-center justify-center text-xs font-mono font-bold">02</span>
+<h3 class="text-xs font-semibold text-white tracking-tight">Code-First HTML Source View</h3>
+</div>
+<p class="text-xs text-[#8A99AD] leading-relaxed">
+              Continuous line numbered gutter coupled with preserved two-space indentation. Long element definitions are strictly preserved via horizontal scrolling (<code class="font-mono text-slate-200">overflow-x-auto</code>) rather than forced soft-wrapping to retain structural code legibility during mobile debugging.
+            </p>
+</div>
+<div class="pt-2 border-t border-[#2A364C]/60 flex items-center justify-between text-[11px] text-emerald-400 font-mono">
+<span>Prettier AST Normalizer</span>
+<span class="font-semibold">Explicit 'Format HTML'</span>
+</div>
+</article>
+<!-- Callout 3 -->
+<article class="p-4 rounded-xl bg-[#131A26] border border-[#2A364C] flex flex-col justify-between space-y-3 relative overflow-hidden">
+<div class="space-y-1.5">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-md bg-[#F59E0B]/20 text-[#F59E0B] flex items-center justify-center text-xs font-mono font-bold">03</span>
+<h3 class="text-xs font-semibold text-white tracking-tight">Active vs. Interrupted Task Telemetry</h3>
+</div>
+<p class="text-xs text-[#8A99AD] leading-relaxed">
+              Top bar sync badge strictly counts only executing workloads (value: <code class="font-mono text-slate-200 font-bold">1</code>). Interrupted tasks suppress all indeterminate spinners, progress bars, and progress percentages—rendering only actionable <code class="font-mono text-slate-200">Review</code> and <code class="font-mono text-slate-200">Dismiss</code> touch controls.
+            </p>
+</div>
+<div class="pt-2 border-t border-[#2A364C]/60 flex items-center justify-between text-[11px] text-amber-400 font-mono">
+<span>Worker Queue Filter</span>
+<span class="font-semibold">State: EXECUTING_ONLY</span>
+</div>
+</article>
+</div>
+</section>
+</div>
+</body></html>

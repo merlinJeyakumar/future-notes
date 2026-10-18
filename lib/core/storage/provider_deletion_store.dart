@@ -327,7 +327,10 @@ class ProviderDeletionStore {
     if (bytes.length > maxMetadata)
       throw const FormatException('Deletion journal too large.');
     final doc = await io.documents.create(io.library, parent, name);
-    return (doc, await io.write(doc, _Data(bytes)));
+    final revision = await io.write(doc, _Data(bytes));
+    // Creation metadata describes the empty file. Callers immediately read
+    // the completed journal, so return its closed, refreshed length instead.
+    return (await io.documents.stat(io.library, doc), revision);
   }
 
   static bool _legacyOwns(List<String> path, List<CommitRecord> records) {

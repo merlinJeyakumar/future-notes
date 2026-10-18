@@ -19,18 +19,21 @@ class AttachmentMentions extends StatefulWidget {
     required this.htmlKey,
     required this.htmlFocus,
     required this.child,
+    this.enabled = true,
   });
   final ContentViewModel model;
   final GlobalKey<EditorState> richKey;
   final GlobalKey htmlKey;
   final FocusNode htmlFocus;
   final Widget child;
+  final bool enabled;
   @override
   State<AttachmentMentions> createState() => _AttachmentMentionsState();
 }
 
 class _AttachmentMentionsState extends State<AttachmentMentions>
     with WidgetsBindingObserver {
+  final _tapGroup = Object();
   OverlayEntry? _overlay;
   AttachmentMentionQuery? _query;
   List<AttachmentModel> _matches = [];
@@ -49,6 +52,12 @@ class _AttachmentMentionsState extends State<AttachmentMentions>
   bool get _composing => model.isHtmlMode
       ? !model.htmlController.value.composing.isCollapsed
       : !(_composition?.value.isCollapsed ?? true);
+
+  @override
+  void didUpdateWidget(covariant AttachmentMentions oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.enabled) _dismiss();
+  }
 
   @override
   void initState() {
@@ -102,7 +111,8 @@ class _AttachmentMentionsState extends State<AttachmentMentions>
       _owner = owner;
     }
     // Lock/navigation/focus revoke the popup synchronously, without exit retention.
-    if (!_focused ||
+    if (!widget.enabled ||
+        !_focused ||
         model.isLocked ||
         model.isLibraryCutover ||
         model.isImportCutover) {
@@ -123,7 +133,7 @@ class _AttachmentMentionsState extends State<AttachmentMentions>
         _composition = composing;
         _composition?.addListener(_refresh);
       }
-      final query = _focused && !_composing && !_awaitingInput
+      final query = widget.enabled && _focused && !_composing && !_awaitingInput
           ? model.attachmentMentionQuery()
           : null;
       if (query == null) {
@@ -200,7 +210,11 @@ class _AttachmentMentionsState extends State<AttachmentMentions>
 
   void _insert(AttachmentModel attachment) {
     final query = _query;
-    if (query == null || !_focused || _composing || _queryOwner != _owner) {
+    if (!widget.enabled ||
+        query == null ||
+        !_focused ||
+        _composing ||
+        _queryOwner != _owner) {
       return;
     }
     final result = model.insertAttachmentMention(
@@ -266,122 +280,127 @@ class _AttachmentMentionsState extends State<AttachmentMentions>
       left: bounds.left,
       top: bounds.top,
       width: bounds.width,
-      child: TextFieldTapRegion(
-        child: ExcludeFocus(
-          child: Material(
-            key: const ValueKey('attachment-mention-popup'),
-            elevation: 8,
-            color: theme.colorScheme.surfaceContainerHigh,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-              side: BorderSide(color: theme.dividerColor),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  height: bounds.height - 29,
-                  child: _matches.isEmpty
-                      ? const Center(
-                          child: Text(
-                            'No matching attachments',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                        )
-                      : ListView.builder(
-                          controller: _rows,
-                          itemExtent: 48,
-                          padding: EdgeInsets.zero,
-                          itemCount: _matches.length,
-                          itemBuilder: (_, index) {
-                            final a = _matches[index];
-                            final duplicate =
-                                model.attachments
-                                    .where((e) => e.fileName == a.fileName)
-                                    .length >
-                                1;
-                            final id = a.mentionIdentity;
-                            final ext = a.fileName.contains('.')
-                                ? a.fileName.split('.').last.toUpperCase()
-                                : 'FILE';
-                            return Semantics(
-                              selected: _selected == index,
-                              button: true,
-                              child: InkWell(
-                                canRequestFocus: false,
-                                onHover: (hover) {
-                                  if (hover) {
-                                    _selected = index;
-                                    _position();
-                                  }
-                                },
-                                onTap: () => _insert(a),
-                                child: ColoredBox(
-                                  color: _selected == index
-                                      ? theme.colorScheme.primary.withValues(
-                                          alpha: .14,
-                                        )
-                                      : Colors.transparent,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 5,
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          Icons.attach_file,
-                                          size: 18,
-                                          color: theme.colorScheme.primary,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                a.fileName,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                              Text(
-                                                '$ext · ${formatAttachmentBytes(a.size)}${duplicate ? ' · ${id.substring(math.max(0, id.length - 5))}' : ''}',
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                  color: theme
-                                                      .colorScheme
-                                                      .onSurfaceVariant,
-                                                ),
-                                              ),
-                                            ],
+      child: TapRegion(
+        groupId: _tapGroup,
+        child: TextFieldTapRegion(
+          child: ExcludeFocus(
+            child: Material(
+              key: const ValueKey('attachment-mention-popup'),
+              elevation: 8,
+              color: theme.colorScheme.surfaceContainerHigh,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: BorderSide(color: theme.dividerColor),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    height: bounds.height - 29,
+                    child: _matches.isEmpty
+                        ? const Center(
+                            child: Text(
+                              'No matching attachments',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                          )
+                        : ListView.builder(
+                            controller: _rows,
+                            itemExtent: 48,
+                            padding: EdgeInsets.zero,
+                            itemCount: _matches.length,
+                            itemBuilder: (_, index) {
+                              final a = _matches[index];
+                              final duplicate =
+                                  model.attachments
+                                      .where((e) => e.fileName == a.fileName)
+                                      .length >
+                                  1;
+                              final id = a.mentionIdentity;
+                              final ext = a.fileName.contains('.')
+                                  ? a.fileName.split('.').last.toUpperCase()
+                                  : 'FILE';
+                              return Semantics(
+                                selected: _selected == index,
+                                button: true,
+                                child: InkWell(
+                                  canRequestFocus: false,
+                                  onHover: (hover) {
+                                    if (hover) {
+                                      _selected = index;
+                                      _position();
+                                    }
+                                  },
+                                  onTap: () => _insert(a),
+                                  child: ColoredBox(
+                                    color: _selected == index
+                                        ? theme.colorScheme.primary.withValues(
+                                            alpha: .14,
+                                          )
+                                        : Colors.transparent,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 5,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.attach_file,
+                                            size: 18,
+                                            color: theme.colorScheme.primary,
                                           ),
-                                        ),
-                                      ],
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  a.fileName,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                                Text(
+                                                  '$ext · ${formatAttachmentBytes(a.size)}${duplicate ? ' · ${id.substring(math.max(0, id.length - 5))}' : ''}',
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    color: theme
+                                                        .colorScheme
+                                                        .onSurfaceVariant,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            );
-                          },
-                        ),
-                ),
-                const SizedBox(
-                  height: 29,
-                  child: Center(
-                    child: Text(
-                      '↑ ↓ choose   Enter/Tab insert   Esc close',
-                      style: TextStyle(fontSize: 10),
+                              );
+                            },
+                          ),
+                  ),
+                  const SizedBox(
+                    height: 29,
+                    child: Center(
+                      child: Text(
+                        '↑ ↓ choose   Enter/Tab insert   Esc close',
+                        style: TextStyle(fontSize: 10),
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -413,6 +432,10 @@ class _AttachmentMentionsState extends State<AttachmentMentions>
           _position();
           return false;
         },
-        child: widget.child,
+        child: TapRegion(
+          groupId: _tapGroup,
+          onTapOutside: (_) => _dismiss(),
+          child: widget.child,
+        ),
       );
 }

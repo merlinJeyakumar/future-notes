@@ -148,6 +148,18 @@ void main() {
           isTrue,
         );
       }
+      for (var index = 0; index < 2; index++) {
+        expect(
+          progress.any(
+            (state) =>
+                state.originalAttachmentId == ids[index] &&
+                state.attachmentIds.length == 2 &&
+                state.attachmentIds[0] == ids[0] &&
+                state.attachmentIds[1] == ids[1],
+          ),
+          isTrue,
+        );
+      }
       expect(sink.allocated.map(p.basename), [
         'duplicate.txt',
         'duplicate.txt',
@@ -191,6 +203,9 @@ void main() {
   test(
     'cancelling source checking reports cancelled without preparing or sharing files',
     () async {
+      await app.settings.setAttachmentPerformance(
+        app.settings.attachmentPerformance.copyWith(checkBeforeOpen: true),
+      );
       final sink = RecordingOutput(run);
       final watched = <AttachmentJobState, void Function()>{};
       final signals = <Future<void>>[];

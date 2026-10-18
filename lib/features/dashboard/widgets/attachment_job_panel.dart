@@ -13,8 +13,12 @@ class AttachmentJobPanel extends StatefulWidget {
     super.key,
     required this.viewModel,
     this.auxiliaryOnly = false,
+    this.excludedOperations = const {},
   });
   final bool auxiliaryOnly;
+
+  /// Operations presented by a platform-specific progress surface instead.
+  final Set<AttachmentJobOperation> excludedOperations;
   final ContentViewModel viewModel;
   @override
   State<AttachmentJobPanel> createState() => _AttachmentJobPanelState();
@@ -47,7 +51,10 @@ class _AttachmentJobPanelState extends State<AttachmentJobPanel> {
       jobs = jobs
           .where(
             (job) =>
-                job.progress.value.operation != AttachmentJobOperation.import,
+                job.progress.value.operation != AttachmentJobOperation.import &&
+                !widget.excludedOperations.contains(
+                  job.progress.value.operation,
+                ),
           )
           .toList();
       if (widget.auxiliaryOnly) {

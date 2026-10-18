@@ -14,6 +14,7 @@ import '../widgets/attachment_presentation.dart';
 import 'attachment_preview.dart';
 import 'attachment_progress.dart';
 import 'attachment_viewer.dart';
+import 'editor_panels.dart';
 
 class AttachmentStrip extends StatefulWidget {
   const AttachmentStrip({
@@ -21,10 +22,12 @@ class AttachmentStrip extends StatefulWidget {
     required this.viewModel,
     this.playerFactory,
     this.collapseRequests,
+    this.panels,
   });
   final ContentViewModel viewModel;
   final AttachmentPlayerFactory? playerFactory;
   final Listenable? collapseRequests;
+  final MobileEditorPanels? panels;
   @override
   State<AttachmentStrip> createState() => _AttachmentStripState();
 }
@@ -36,7 +39,13 @@ class _AttachmentStripState extends State<AttachmentStrip> {
   String? _path;
   ContentViewModel get model => widget.viewModel;
   void _collapse() {
+    widget.panels?.collapse(MobileEditorPanel.attachments);
     if (expanded) setState(() => expanded = false);
+  }
+
+  void _panelChanged() {
+    final next = widget.panels?.value == MobileEditorPanel.attachments;
+    if (next != expanded && mounted) setState(() => expanded = next);
   }
 
   void _rememberOwner() {
@@ -49,9 +58,9 @@ class _AttachmentStripState extends State<AttachmentStrip> {
     final reset =
         _owner != model.draftSession.generation ||
         _path != model.currentContentPath ||
-        (_locked && !model.isLocked);
+        _locked != model.isLocked;
     _rememberOwner();
-    if (reset && expanded && mounted) setState(() => expanded = false);
+    if (reset) _collapse();
   }
 
   @override
@@ -60,11 +69,17 @@ class _AttachmentStripState extends State<AttachmentStrip> {
     _rememberOwner();
     model.addListener(_syncOwner);
     widget.collapseRequests?.addListener(_collapse);
+    widget.panels?.addListener(_panelChanged);
   }
 
   @override
   void didUpdateWidget(covariant AttachmentStrip oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.panels != widget.panels) {
+      oldWidget.panels?.removeListener(_panelChanged);
+      widget.panels?.addListener(_panelChanged);
+      expanded = widget.panels?.value == MobileEditorPanel.attachments;
+    }
     if (oldWidget.collapseRequests != widget.collapseRequests) {
       oldWidget.collapseRequests?.removeListener(_collapse);
       widget.collapseRequests?.addListener(_collapse);
@@ -81,6 +96,7 @@ class _AttachmentStripState extends State<AttachmentStrip> {
   void dispose() {
     model.removeListener(_syncOwner);
     widget.collapseRequests?.removeListener(_collapse);
+    widget.panels?.removeListener(_panelChanged);
     super.dispose();
   }
 
@@ -89,6 +105,7 @@ class _AttachmentStripState extends State<AttachmentStrip> {
     AttachmentModel attachment,
     FocusNode focus,
   ) async {
+    widget.panels?.collapse();
     if (action == AttachmentAction.open || action == AttachmentAction.system) {
       await openAttachmentPreview(
         context,
@@ -106,6 +123,7 @@ class _AttachmentStripState extends State<AttachmentStrip> {
   }
 
   Future<void> _showAll() {
+    widget.panels?.collapse();
     final owner = model.draftSession.generation;
     final credentials = model.draftSession.credentialGeneration;
     final path = model.currentContentPath;
@@ -173,8 +191,15 @@ class _AttachmentStripState extends State<AttachmentStrip> {
                             Expanded(
                               child: InkWell(
                                 key: const ValueKey('attachment-expand-toggle'),
-                                onTap: () =>
-                                    setState(() => expanded = !expanded),
+                                onTap: () {
+                                  if (widget.panels != null) {
+                                    widget.panels!.toggle(
+                                      MobileEditorPanel.attachments,
+                                    );
+                                  } else {
+                                    setState(() => expanded = !expanded);
+                                  }
+                                },
                                 child: Padding(
                                   padding: const EdgeInsets.fromLTRB(
                                     12,
@@ -428,7 +453,11 @@ class _AttachmentTileState extends State<_AttachmentTile> {
       AttachmentVisualKind.file => Icons.insert_drive_file_outlined,
     };
     final total = state?.total;
+    final exporting = state?.operation == AttachmentJobOperation.export;
+    final otherExportFile =
+        exporting && state?.originalAttachmentId != entry.id;
     final waiting =
+        otherExportFile ||
         state?.phase == AttachmentJobPhase.cancelling ||
         (state?.phase == AttachmentJobPhase.finalizing && total == null);
     final fraction = !waiting && total != null && total > 0
@@ -477,6 +506,10 @@ class _AttachmentTileState extends State<_AttachmentTile> {
     );
     final phase = state == null
         ? ''
+        : exporting
+        ? otherExportFile
+              ? 'Export in progress…'
+              : 'Export · ${attachmentPhaseLabel(state.phase)}'
         : state.detail ?? attachmentPhaseLabel(state.phase);
     return Material(
       color: widget.selected
@@ -499,7 +532,7 @@ class _AttachmentTileState extends State<_AttachmentTile> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      if (widget.selectionMode)
+                      if (widget.selectionMode && !active)
                         SizedBox(
                           width: 44,
                           height: 48,
@@ -681,10 +714,23 @@ List<_AttachmentEntry> _entries(ContentViewModel model) {
   final latest = <String, AttachmentJobState>{};
   for (final job in jobs) {
     final state = job.progress.value;
+    if (state.operation == AttachmentJobOperation.export) {
+      if (state.active) {
+        for (final id in {
+          ...state.attachmentIds,
+          ?state.originalAttachmentId,
+        }) {
+          latest[id] = job;
+        }
+      }
+      continue;
+    }
     final id =
         state.originalAttachmentId ??
         (state.operation == AttachmentJobOperation.add ? state.id : null);
-    if (id != null) latest[id] = job;
+    if (id != null && latest[id]?.progress.value.active != true) {
+      latest[id] = job;
+    }
   }
   final ids = attachments.map((a) => a.id).toSet();
   return [

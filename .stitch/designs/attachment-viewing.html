@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Future Notes - Desktop Native App</title>
+<!-- Material Symbols Outlined font -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Google Font: Public Sans -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            surface: {
+              DEFAULT: "#121417",
+              dim: "#0e1013",
+              bright: "#282a2f",
+              container: "#1a1d22",
+              "container-low": "#15181c",
+              "container-high": "#22262d",
+              "container-highest": "#2c313a"
+            },
+            primary: {
+              DEFAULT: "#4299E1",
+              container: "#1e3a5f",
+              "on-container": "#cfe4fc"
+            },
+            secondary: {
+              DEFAULT: "#82aaff",
+              container: "#233348",
+              "on-secondary-container": "#cbe0ff"
+            },
+            "on-surface": "#e2e8f0",
+            "on-surface-variant": "#94a3b8",
+            outline: "#475569",
+            "outline-variant": "#334155",
+            error: {
+              DEFAULT: "#f87171",
+              container: "#451a1a",
+              "on-container": "#fecaca"
+            },
+            warning: {
+              DEFAULT: "#fbbf24",
+              container: "#3b2d11",
+              "on-container": "#fef08a"
+            },
+            success: {
+              DEFAULT: "#34d399",
+              container: "#064e3b",
+              "on-container": "#a7f3d0"
+            }
+          },
+          borderRadius: {
+            DEFAULT: "0.25rem",
+            lg: "0.5rem",
+            xl: "0.75rem",
+            full: "9999px"
+          },
+          fontFamily: {
+            headline: ["Public Sans", "sans-serif"],
+            display: ["Public Sans", "sans-serif"],
+            body: ["Public Sans", "sans-serif"],
+            label: ["Public Sans", "sans-serif"],
+            mono: ["JetBrains Mono", "monospace"]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    /* Native Windows Scrollbars */
+    ::-webkit-scrollbar {
+      width: 7px;
+      height: 7px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #15181c;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+    .material-symbols-outlined {
+      font-size: 18px;
+      line-height: 1;
+      display: inline-block;
+      vertical-align: middle;
+      user-select: none;
+    }
+    /* Pulse bar effect */
+    @keyframes progress-stripe {
+      0% { background-position: 0 0; }
+      100% { background-position: 24px 0; }
+    }
+    .animate-progress-stripe {
+      background-image: repeating-linear-gradient(45deg, rgba(255,255,255,0.12), rgba(255,255,255,0.12) 8px, transparent 8px, transparent 16px);
+      background-size: 24px 24px;
+      animation: progress-stripe 1.2s linear infinite;
+    }
+    .custom-caret {
+      caret-color: #4299E1;
+    }
+    /* Subtle custom range input styling for player seekbar */
+    input[type=range] {
+      accent-color: #4299E1;
+    }
+  </style>
+</head>
+<body class="bg-surface text-on-surface antialiased font-body h-screen flex flex-col overflow-hidden select-none">
+<!-- ========================================================================= -->
+<!-- 1. WINDOW TITLE BAR (Docked Windows Native Top Shell)                     -->
+<!-- ========================================================================= -->
+<header class="bg-surface-container border-b border-outline-variant/30 flex justify-between items-center w-full px-3 py-1.5 select-none shrink-0 z-50">
+<!-- Left: Brand + Breadcrumb Navigation -->
+<div class="flex items-center gap-3">
+<!-- App Icon / Brand Name -->
+<div class="flex items-center gap-2">
+<div class="w-5 h-5 rounded bg-primary/20 border border-primary/40 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[14px]">lock</span>
+</div>
+<span class="font-display text-sm font-semibold tracking-tight text-on-surface">Future Notes</span>
+</div>
+<span class="text-outline-variant text-xs">/</span>
+<!-- Note Breadcrumb -->
+<div class="flex items-center gap-1.5 text-xs text-on-surface-variant font-medium">
+<span class="material-symbols-outlined text-[15px] text-primary">description</span>
+<span class="text-on-surface font-semibold truncate max-w-[280px]">Project Chronos: Multi-party Cryptographic Key Custody</span>
+</div>
+<!-- Sync Status Badge -->
+<div class="hidden md:flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container-high border border-outline-variant/40 text-[11px] text-on-surface-variant">
+<span class="w-1.5 h-1.5 rounded-full bg-success"></span>
+<span class="font-mono">Vault Synced</span>
+</div>
+</div>
+<!-- Right: Window Caption Controls + Actions matching JSON spec -->
+<div class="flex items-center gap-2">
+<!-- Lock reset & Sync quick action -->
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 transition-colors" title="Lock Reset">
+<span class="material-symbols-outlined">lock_reset</span>
+</button>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 transition-colors" title="Synchronize Vault">
+<span class="material-symbols-outlined">sync</span>
+</button>
+<!-- Settings trigger (toggles popover) -->
+<button class="p-1 rounded text-primary hover:text-on-surface hover:bg-surface-container-high/60 transition-colors relative" id="headerSettingsBtn" title="Windows Settings">
+<span class="material-symbols-outlined">settings</span>
+</button>
+<div class="w-px h-3.5 bg-outline-variant/40 mx-1"></div>
+<!-- Native Windows Caption Buttons -->
+<div class="flex items-center">
+<button class="px-2 py-1 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" title="Minimize">
+<span class="material-symbols-outlined text-[14px]">minimize</span>
+</button>
+<button class="px-2 py-1 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" title="Maximize / Restore">
+<span class="material-symbols-outlined text-[13px]">crop_square</span>
+</button>
+<button class="px-2.5 py-1 text-on-surface-variant hover:bg-rose-600 hover:text-white transition-colors" title="Close">
+<span class="material-symbols-outlined text-[14px]">close</span>
+</button>
+</div>
+</div>
+</header>
+<!-- ========================================================================= -->
+<!-- MAIN WORKSPACE: SIDEBAR + EDITOR & ATTACHMENT STRIP                       -->
+<!-- ========================================================================= -->
+<div class="flex-1 flex overflow-hidden relative">
+<!-- ----------------------------------------------------------------------- -->
+<!-- LEFT NAVIGATION SIDEBAR                                                 -->
+<!-- ----------------------------------------------------------------------- -->
+<aside class="flex flex-col h-full w-64 p-3 shrink-0 bg-surface-container-low border-r border-outline-variant/30 select-none">
+<!-- Vault Header -->
+<div class="flex items-center justify-between pb-3 mb-2 border-b border-outline-variant/30">
+<div class="flex items-center gap-2.5">
+<div class="w-7 h-7 rounded-lg bg-surface-container-highest flex items-center justify-center text-primary font-semibold text-xs border border-outline-variant/40">
+            PV
+          </div>
+<div class="flex flex-col">
+<span class="font-headline text-sm font-semibold text-on-surface">Personal Vault</span>
+<span class="font-label text-[10px] text-on-surface-variant flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-success"></span>
+              Synchronized &amp; Encrypted
+            </span>
+</div>
+</div>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-[16px]">more_vert</span>
+</button>
+</div>
+<!-- CTA: New Note Button -->
+<button class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary hover:bg-primary/90 text-surface-dim font-semibold text-xs tracking-wide transition-all shadow-sm active:scale-[0.99] mb-3">
+<span class="material-symbols-outlined text-[16px]">add</span>
+        New Note
+      </button>
+<!-- Category Filter Tabs -->
+<nav class="space-y-0.5 text-xs">
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg bg-secondary-container text-on-secondary-container font-medium" href="#all">
+<span class="material-symbols-outlined text-[17px]">description</span>
+<span>All Notes</span>
+<span class="ml-auto text-[10px] bg-secondary-container/80 px-1.5 py-0.2 rounded font-mono">14</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" href="#encrypted">
+<span class="material-symbols-outlined text-[17px]">lock</span>
+<span>Encrypted</span>
+<span class="ml-auto text-[10px] text-on-surface-variant font-mono">6</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" href="#recent">
+<span class="material-symbols-outlined text-[17px]">schedule</span>
+<span>Recent</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" href="#tags">
+<span class="material-symbols-outlined text-[17px]">label</span>
+<span>Tags</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" href="#trash">
+<span class="material-symbols-outlined text-[17px]">delete</span>
+<span>Trash</span>
+</a>
+</nav>
+<!-- Divider & Synthetic Notes Tree -->
+<div class="mt-4 pt-3 border-t border-outline-variant/30 flex-1 overflow-y-auto">
+<div class="flex items-center justify-between text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider px-2 mb-1.5">
+<span>Active Vault Notes</span>
+<span class="text-[10px] text-outline font-mono">5 notes</span>
+</div>
+<ul class="space-y-1 text-xs">
+<!-- Active Note -->
+<li>
+<div class="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-surface-container-high border-l-2 border-primary text-on-surface font-medium cursor-pointer">
+<span class="material-symbols-outlined text-[15px] text-primary">edit_note</span>
+<div class="truncate flex-1">
+<p class="truncate text-xs font-semibold">Project Chronos Specs</p>
+<p class="text-[10px] text-on-surface-variant truncate">Attached: demo-video, sample-image</p>
+</div>
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
+</div>
+</li>
+<li>
+<div class="flex items-center gap-2 px-2.5 py-1.5 rounded-md hover:bg-surface-container-high/60 text-on-surface-variant hover:text-on-surface cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-[15px]">lock</span>
+<div class="truncate flex-1">
+<p class="truncate text-xs">Q3 Encrypted Ledger</p>
+<p class="text-[10px] text-outline truncate">Updated yesterday</p>
+</div>
+</div>
+</li>
+<li>
+<div class="flex items-center gap-2 px-2.5 py-1.5 rounded-md hover:bg-surface-container-high/60 text-on-surface-variant hover:text-on-surface cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-[15px]">key</span>
+<div class="truncate flex-1">
+<p class="truncate text-xs">Decentralized Key Matrix</p>
+<p class="text-[10px] text-outline truncate">AES-256 verified</p>
+</div>
+</div>
+</li>
+<li>
+<div class="flex items-center gap-2 px-2.5 py-1.5 rounded-md hover:bg-surface-container-high/60 text-on-surface-variant hover:text-on-surface cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-[15px]">warning</span>
+<div class="truncate flex-1">
+<p class="truncate text-xs">Incident Report 2024-09</p>
+<p class="text-[10px] text-outline truncate">Key rotation logged</p>
+</div>
+</div>
+</li>
+<li>
+<div class="flex items-center gap-2 px-2.5 py-1.5 rounded-md hover:bg-surface-container-high/60 text-on-surface-variant hover:text-on-surface cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-[15px]">inventory_2</span>
+<div class="truncate flex-1">
+<p class="truncate text-xs">Archive - Vault 04</p>
+<p class="text-[10px] text-outline truncate">Cold storage</p>
+</div>
+</div>
+</li>
+</ul>
+</div>
+<!-- Footer Action Links with quick Settings Trigger -->
+<div class="pt-3 border-t border-outline-variant/30 space-y-1">
+<a class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" href="#security">
+<span class="material-symbols-outlined text-[16px] text-success">shield</span>
+<span class="font-medium">Security Status</span>
+<span class="ml-auto text-[10px] text-success font-mono">Active</span>
+</a>
+<button class="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors text-left" id="sidebarSettingsBtn">
+<span class="material-symbols-outlined text-[16px]">settings</span>
+<span class="font-medium">Vault &amp; App Settings</span>
+<span class="ml-auto text-[9px] bg-primary/20 text-primary px-1.5 py-0.5 rounded font-mono">Windows</span>
+</button>
+</div>
+</aside>
+<!-- ----------------------------------------------------------------------- -->
+<!-- RIGHT MAIN WORKSPACE: Toolbar + Compact Indicator + Doc + Attachments   -->
+<!-- ----------------------------------------------------------------------- -->
+<main class="flex-1 flex flex-col min-w-0 bg-surface-dim overflow-hidden relative">
+<!-- ===================================================================== -->
+<!-- TOP ACTION TOOLBAR & COMPACT WORK INDICATOR                           -->
+<!-- ===================================================================== -->
+<div class="h-10 bg-surface-container border-b border-outline-variant/30 flex items-center justify-between px-3 shrink-0">
+<!-- Formatting buttons group -->
+<div class="flex items-center gap-0.5 overflow-x-auto py-1">
+<!-- Undo / Redo -->
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Undo (Ctrl+Z)">
+<span class="material-symbols-outlined text-[16px]">undo</span>
+</button>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Redo (Ctrl+Y)">
+<span class="material-symbols-outlined text-[16px]">redo</span>
+</button>
+<div class="w-px h-4 bg-outline-variant/40 mx-1"></div>
+<!-- Headings -->
+<button class="px-1.5 py-0.5 rounded text-xs font-semibold text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors flex items-center gap-0.5" title="Heading">
+<span>H1</span>
+</button>
+<button class="px-1.5 py-0.5 rounded text-xs font-semibold text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors flex items-center gap-0.5" title="Subheading">
+<span>H2</span>
+</button>
+<div class="w-px h-4 bg-outline-variant/40 mx-1"></div>
+<!-- Bold, Italic, Code, Link -->
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors font-bold" title="Bold (Ctrl+B)">
+<span class="material-symbols-outlined text-[16px]">format_bold</span>
+</button>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Italic (Ctrl+I)">
+<span class="material-symbols-outlined text-[16px]">format_italic</span>
+</button>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Monospace / Code">
+<span class="material-symbols-outlined text-[16px]">code</span>
+</button>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Insert Link">
+<span class="material-symbols-outlined text-[16px]">link</span>
+</button>
+<div class="w-px h-4 bg-outline-variant/40 mx-1"></div>
+<!-- Lists & Tables -->
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Bullet List">
+<span class="material-symbols-outlined text-[16px]">format_list_bulleted</span>
+</button>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Checklist">
+<span class="material-symbols-outlined text-[16px]">check_box</span>
+</button>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Insert Table">
+<span class="material-symbols-outlined text-[16px]">table_chart</span>
+</button>
+<button class="px-2 py-0.5 rounded text-xs text-primary hover:bg-primary/10 transition-colors flex items-center gap-1 font-medium ml-1" title="Attach File">
+<span class="material-symbols-outlined text-[15px]">attach_file</span>
+<span>Attach</span>
+</button>
+</div>
+<!-- Right Side: Separate Save Status Indicator + Compact Background Work Indicator -->
+<div class="flex items-center gap-2.5">
+<!-- Specific Refinement 3: Compact in-app background-work indicator cleanly separated from note's save status -->
+<div class="flex items-center gap-2 px-2.5 py-1 rounded-full bg-primary/10 border border-primary/30 text-[11px] text-primary shadow-sm" title="Async attachment pipeline active in background">
+<span class="flex h-2 w-2 relative">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+</span>
+<span class="font-medium font-mono">⚡ 1 background task active</span>
+<span class="text-outline-variant">•</span>
+<span class="text-on-surface text-[10px] font-mono font-medium truncate max-w-[190px]">Encrypting demo-video.mp4 (40%)</span>
+</div>
+<!-- Distinct Save Status Indicator -->
+<div class="flex items-center gap-1.5 px-2 py-1 rounded bg-surface-container-low border border-outline-variant/30 text-[11px] text-on-surface-variant select-none">
+<span class="w-2 h-2 rounded-full bg-success inline-block"></span>
+<span>Saved to disk • 14:02</span>
+</div>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Fullscreen Editor">
+<span class="material-symbols-outlined text-[16px]">fullscreen</span>
+</button>
+</div>
+</div>
+<!-- ===================================================================== -->
+<!-- 2. INTERACTIVE NOTE DOCUMENT AREA                                     -->
+<!-- ===================================================================== -->
+<section aria-label="Document Editor" class="flex-1 overflow-y-auto px-8 py-6 relative">
+<div class="max-w-4xl mx-auto space-y-4">
+<!-- Editable Document Title -->
+<div class="group flex items-start gap-2">
+<h1 class="text-2xl md:text-3xl font-display font-bold text-on-surface tracking-tight focus:outline-none focus:ring-1 focus:ring-primary/40 rounded px-1 -mx-1 custom-caret" contenteditable="true" spellcheck="false">
+              Project Chronos: Multi-party Cryptographic Key Custody Architecture
+            </h1>
+</div>
+<!-- Document Metadata & Tags -->
+<div class="flex items-center gap-2 pb-2 text-xs text-on-surface-variant border-b border-outline-variant/30 flex-wrap">
+<span class="flex items-center gap-1 text-[11px] bg-surface-container px-2 py-0.5 rounded border border-outline-variant/30 font-mono">
+<span class="material-symbols-outlined text-[13px] text-primary">key</span>
+              secp256k1-sharded
+            </span>
+<span class="flex items-center gap-1 text-[11px] bg-surface-container px-2 py-0.5 rounded border border-outline-variant/30 font-mono">
+<span class="material-symbols-outlined text-[13px] text-secondary">verified_user</span>
+              3-of-5 Quorum
+            </span>
+<span class="text-outline">•</span>
+<span class="text-[11px] font-mono">Author: SecOps Team (ID: 0x9F...A1)</span>
+<span class="text-outline">•</span>
+<span class="text-[11px] text-success flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">lock_clock</span>
+              Auto-encrypt on save enabled
+            </span>
+</div>
+<!-- Editable Technical Prose with Synthetic Filename references -->
+<div class="space-y-4 text-sm leading-relaxed text-on-surface/90 focus:outline-none custom-caret" contenteditable="true" spellcheck="false">
+<p>
+              This architectural document outlines the sharded custody deployment for Project Chronos. All active attachments below (<span class="font-mono text-xs text-primary bg-primary/10 px-1 py-0.5 rounded">demo-video.mp4</span> and <span class="font-mono text-xs text-secondary bg-secondary/10 px-1 py-0.5 rounded">sample-image.png</span>) are streamed through an asynchronous client-side pipeline executing continuous Shamir Secret Sharing (SSS) before vault serialization. The editing thread remains completely unhindered during real-time streaming operations.
+            </p>
+<h2 class="text-lg font-headline font-semibold text-on-surface mt-4">
+              1. Entropy Generation &amp; Key Derivation
+            </h2>
+<p>
+              Master seed segments are generated using cryptographically secure hardware RNG calls. Each slice is padded with <span class="bg-surface-container px-1 py-0.5 rounded font-mono text-xs text-primary border border-outline-variant/40">HMAC-SHA512</span> before payload bundle consolidation. Note that all attached binaries undergo independent chunk hash verification prior to final committed write.
+            </p>
+<!-- Technical Code Snippet -->
+<div class="bg-surface-dim rounded-lg p-3 font-mono text-xs text-on-surface border border-outline-variant/40 overflow-x-auto select-text" contenteditable="false">
+<div class="flex items-center justify-between pb-1.5 mb-2 border-b border-outline-variant/20 text-on-surface-variant text-[11px]">
+<span class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">terminal</span>
+                  chronos_vault_pipeline.rs
+                </span>
+<span class="text-secondary font-mono">Target: demo-video.mp4</span>
+</div>
+<pre class="text-on-surface-variant"><span class="text-secondary">pub async fn</span> <span class="text-primary">stream_encrypt_attachment</span>(
+    vault_id: <span class="text-warning">&amp;VaultKey</span>,
+    raw_stream: <span class="text-secondary">impl</span> AsyncRead,
+) -&gt; <span class="text-secondary">Result</span>&lt;EncryptedDigest, CryptoError&gt; {
+    <span class="text-outline">// Pipeline runs concurrently without locking GUI or note editing</span>
+    <span class="text-secondary">let</span> cipher = Aes256GcmSiv::new_from_slice(&amp;vault_id.material)?;
+    cipher.process_stream(raw_stream).<span class="text-primary">await</span>
+}</pre>
+</div>
+<h2 class="text-lg font-headline font-semibold text-on-surface mt-4">
+              2. Asynchronous Security Invariants
+            </h2>
+<p>
+              1. At no point may payload decryption occur in unmanaged swap space.<br/>
+              2. Cancelled uploads purge ephemeral encryption buffers instantly from RAM.<br/>
+              3. Integrity mismatches flag the attachment row for user remediation with actionable retry tokens.<br/>
+              4. Background task completion transitions files seamlessly into normal tiles without displaying completion modal dialogs.
+            </p>
+</div>
+</div>
+</section>
+<!-- ===================================================================== -->
+<!-- 3. UNIFIED BOTTOM ATTACHMENT STRIP                                     -->
+<!-- ===================================================================== -->
+<section aria-label="Attachment Processing Pipeline" class="bg-surface-container border-t border-outline-variant/40 shrink-0 select-none shadow-2xl relative z-20">
+<!-- Persistent Attachment Header Bar (Always Visible) -->
+<div class="px-4 py-2 bg-surface-container-high/70 flex items-center justify-between border-b border-outline-variant/30">
+<div class="flex items-center gap-3">
+<!-- Expand/Collapse Chevron -->
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest transition-colors flex items-center justify-center focus:ring-1 focus:ring-primary/50" id="stripToggleBtn" title="Toggle attachment drawer">
+<span class="material-symbols-outlined text-[18px]" id="chevronIcon">keyboard_arrow_down</span>
+</button>
+<!-- Attachment Summary -->
+<div class="flex items-center gap-2 text-xs flex-wrap">
+<span class="font-headline font-semibold text-on-surface flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-primary">attach_file</span>
+                Vault Attachments (2 files)
+              </span>
+<span class="text-outline">•</span>
+<!-- State pills -->
+<span class="text-[11px] text-primary flex items-center gap-1 font-medium bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+                1 Encrypting (demo-video.mp4)
+              </span>
+<span class="text-outline">•</span>
+<span class="text-[11px] text-success flex items-center gap-1 font-medium bg-success/10 px-2 py-0.5 rounded border border-success/20">
+<span class="w-1.5 h-1.5 rounded-full bg-success"></span>
+                1 Saved (sample-image.png)
+              </span>
+<span class="text-outline">•</span>
+<span class="text-[11px] font-mono text-on-surface-variant">Total: 20.5 MB</span>
+</div>
+</div>
+<!-- Right Action: Add Files Button & Quick Status hint -->
+<div class="flex items-center gap-2">
+<span class="text-[10px] text-on-surface-variant font-mono hidden md:inline">Drag files here or</span>
+<button class="px-2.5 py-1 text-xs rounded bg-surface-container-highest hover:bg-surface-bright text-on-surface border border-outline-variant/40 flex items-center gap-1.5 transition-colors active:scale-[0.98] focus:ring-1 focus:ring-primary/50">
+<span class="material-symbols-outlined text-[15px] text-primary">add_circle</span>
+<span class="font-medium">Add Files</span>
+</button>
+</div>
+</div>
+<!-- Attachment Content Container: Bento Unified Drawer -->
+<div class="p-3 bg-surface-container-low max-h-[380px] overflow-y-auto" id="attachmentStripContent">
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
+<!-- --------------------------------------------------------------- -->
+<!-- TILE A (Pending Video): demo-video.mp4 (18.4 MB)                -->
+<!-- State: Encrypting (determinate 7.4 MB / 18.4 MB, 40%)           -->
+<!-- --------------------------------------------------------------- -->
+<div class="lg:col-span-3 bg-surface-container rounded-lg p-3 border border-primary/40 flex flex-col justify-between relative shadow-sm hover:border-primary/70 transition-all group">
+<div class="flex items-start justify-between gap-2 mb-2">
+<div class="flex items-center gap-2.5 min-w-0">
+<div class="w-9 h-9 rounded-lg bg-primary/10 border border-primary/30 flex items-center justify-center text-primary shrink-0 relative">
+<span class="material-symbols-outlined text-[20px]">movie</span>
+<span class="absolute -bottom-1 -right-1 w-2.5 h-2.5 rounded-full bg-primary border-2 border-surface-container animate-pulse"></span>
+</div>
+<div class="min-w-0">
+<h4 class="text-xs font-semibold text-on-surface truncate font-mono" title="demo-video.mp4">
+                  demo-video.mp4
+                </h4>
+<p class="text-[10px] text-on-surface-variant font-mono">18.4 MB</p>
+</div>
+</div>
+<!-- ALWAYS-VISIBLE 'More' overflow control + Dropdown -->
+<div class="relative shrink-0 dropdown-container">
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors focus:ring-1 focus:ring-primary/50" onclick="toggleDropdown('tileADropdown', event)" title="Attachment options">
+<span class="material-symbols-outlined text-[18px]">more_vert</span>
+</button>
+<!-- Accessible Dropdown Menu -->
+<div class="hidden absolute right-0 top-full mt-1 w-44 rounded-lg bg-surface-container-highest border border-outline-variant shadow-2xl py-1 z-30 text-xs" id="tileADropdown">
+<button class="w-full text-left px-3 py-1.5 text-on-surface hover:bg-primary/20 hover:text-primary flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[15px]">description</span>
+<span>Open in Future Notes</span>
+</button>
+<button class="w-full text-left px-3 py-1.5 text-on-surface hover:bg-primary/20 hover:text-primary flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[15px]">open_in_new</span>
+<span>Open in system app</span>
+</button>
+<button class="w-full text-left px-3 py-1.5 text-on-surface hover:bg-primary/20 hover:text-primary flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[15px]">save_as</span>
+<span>Save As...</span>
+</button>
+<div class="h-px bg-outline-variant/40 my-1"></div>
+<button class="w-full text-left px-3 py-1.5 text-error hover:bg-error/10 flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[15px]">delete</span>
+<span>Remove</span>
+</button>
+</div>
+</div>
+</div>
+<!-- State Badge & Pipeline transition indicator -->
+<div class="flex items-center justify-between mb-2">
+<span class="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-primary/20 text-primary border border-primary/30 flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
+                Encrypting
+              </span>
+<!-- Step hint showing automatic transition to Finalizing -->
+<span class="text-[9px] font-mono text-outline flex items-center gap-1" title="Pipeline transitions automatically to Finalizing before becoming normal tile, without popup alerts">
+<span>Next: Finalizing</span>
+<span class="material-symbols-outlined text-[11px]">arrow_forward</span>
+</span>
+</div>
+<!-- Determinate Byte Progress -->
+<div class="space-y-1.5">
+<div class="flex justify-between items-center text-[10px] font-mono text-on-surface-variant">
+<span class="text-primary font-medium">AES-256 stream</span>
+<span class="text-on-surface font-semibold">7.4 MB / 18.4 MB (40%)</span>
+</div>
+<div class="w-full bg-surface-container-highest h-2 rounded-full overflow-hidden border border-outline-variant/30">
+<div class="bg-primary h-full rounded-full animate-progress-stripe transition-all duration-300" style="width: 40%;"></div>
+</div>
+</div>
+<!-- Footer Actions: ETA & Active Cancel Button -->
+<div class="flex items-center justify-between mt-3 pt-2 border-t border-outline-variant/30 text-[11px]">
+<span class="text-[10px] text-outline font-mono flex items-center gap-1">
+<span class="material-symbols-outlined text-[12px]">schedule</span>
+                ETA ~3s
+              </span>
+<button class="px-2 py-0.5 rounded text-[11px] font-medium text-on-surface-variant hover:text-error hover:bg-error/10 flex items-center gap-1 transition-colors border border-outline-variant/30 active:scale-[0.98]" title="Cancel encryption upload">
+<span class="material-symbols-outlined text-[13px]">close</span>
+<span>Cancel</span>
+</button>
+</div>
+</div>
+<!-- --------------------------------------------------------------- -->
+<!-- TILE B (Saved Image): sample-image.png (2.1 MB)                 -->
+<!-- State: Saved 'Encrypted (AES-256)', thumbnail preview icon/chip -->
+<!-- --------------------------------------------------------------- -->
+<div class="lg:col-span-3 bg-surface-container rounded-lg p-3 border border-outline-variant/40 flex flex-col justify-between relative shadow-sm hover:border-success/50 transition-all group">
+<div class="flex items-start justify-between gap-2 mb-2">
+<div class="flex items-center gap-2.5 min-w-0">
+<!-- Thumbnail preview representation with image committed icon -->
+<div class="w-9 h-9 rounded-lg bg-emerald-950/40 border border-success/30 flex items-center justify-center text-success shrink-0 relative">
+<span class="material-symbols-outlined text-[20px]">image</span>
+<span class="absolute -bottom-1 -right-1 text-[8px] bg-success text-surface-dim font-bold rounded px-1 flex items-center gap-0.5">
+<span class="material-symbols-outlined text-[9px]">lock</span> PNG
+                  </span>
+</div>
+<div class="min-w-0">
+<h4 class="text-xs font-semibold text-on-surface truncate font-mono" title="sample-image.png">
+                  sample-image.png
+                </h4>
+<p class="text-[10px] text-on-surface-variant font-mono">2.1 MB</p>
+</div>
+</div>
+<!-- ALWAYS-VISIBLE 'More' overflow control + Dropdown -->
+<div class="relative shrink-0 dropdown-container">
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors focus:ring-1 focus:ring-primary/50" onclick="toggleDropdown('tileBDropdown', event)" title="Attachment options">
+<span class="material-symbols-outlined text-[18px]">more_vert</span>
+</button>
+<!-- Accessible Dropdown Menu -->
+<div class="hidden absolute right-0 top-full mt-1 w-44 rounded-lg bg-surface-container-highest border border-outline-variant shadow-2xl py-1 z-30 text-xs" id="tileBDropdown">
+<button class="w-full text-left px-3 py-1.5 text-on-surface hover:bg-primary/20 hover:text-primary flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[15px]">description</span>
+<span>Open in Future Notes</span>
+</button>
+<button class="w-full text-left px-3 py-1.5 text-on-surface hover:bg-primary/20 hover:text-primary flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[15px]">open_in_new</span>
+<span>Open in system app</span>
+</button>
+<button class="w-full text-left px-3 py-1.5 text-on-surface hover:bg-primary/20 hover:text-primary flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[15px]">save_as</span>
+<span>Save As...</span>
+</button>
+<div class="h-px bg-outline-variant/40 my-1"></div>
+<button class="w-full text-left px-3 py-1.5 text-error hover:bg-error/10 flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[15px]">delete</span>
+<span>Remove</span>
+</button>
+</div>
+</div>
+</div>
+<!-- State & Verification Tags -->
+<div class="space-y-2 mt-1">
+<div class="flex items-center gap-1.5 flex-wrap">
+<span class="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-success/20 text-success border border-success/30 flex items-center gap-1">
+<span class="material-symbols-outlined text-[11px]">lock</span>
+                  Encrypted (AES-256)
+                </span>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-mono text-secondary bg-secondary/10 border border-secondary/20 flex items-center gap-0.5">
+<span class="material-symbols-outlined text-[11px]">verified</span>
+                  Verified
+                </span>
+</div>
+<p class="text-[10px] text-on-surface-variant font-mono truncate">
+                SHA256: 8a4f91...c03b
+              </p>
+</div>
+<!-- Footer: Click to preview interaction hint -->
+<div class="flex items-center justify-between mt-3 pt-2 border-t border-outline-variant/30 text-[11px]">
+<span class="text-[10px] text-outline font-mono">Sync ID: #4409</span>
+<button class="px-2 py-0.5 rounded text-[11px] font-medium text-primary hover:bg-primary/10 flex items-center gap-1 transition-colors">
+<span class="material-symbols-outlined text-[13px]">visibility</span>
+<span>View Image</span>
+<kbd class="text-[9px] font-mono bg-surface-container-high px-1 rounded text-on-surface-variant">Enter</kbd>
+</button>
+</div>
+</div>
+<!-- --------------------------------------------------------------- -->
+<!-- TILE C (Inline Video Viewer / Clicked Saved Tile interaction):  -->
+<!-- Expanded inline preview for demo-video.mp4                      -->
+<!-- --------------------------------------------------------------- -->
+<div class="lg:col-span-6 bg-surface-container-high rounded-lg border-2 border-primary/60 p-3 shadow-lg flex flex-col justify-between relative">
+<!-- Header Strip inside preview tile -->
+<div class="flex items-center justify-between pb-2 mb-2 border-b border-outline-variant/40">
+<div class="flex items-center gap-2 min-w-0">
+<span class="material-symbols-outlined text-[18px] text-primary">play_circle</span>
+<div class="flex items-center gap-1.5 truncate">
+<span class="font-headline text-xs font-semibold text-on-surface font-mono truncate">demo-video.mp4</span>
+<span class="text-[10px] bg-secondary-container text-on-secondary-container px-1.5 py-0.2 rounded font-mono">Inline Viewer</span>
+<span class="text-[10px] text-success flex items-center gap-0.5 font-mono">
+<span class="material-symbols-outlined text-[11px]">lock_open</span> Decrypted in RAM
+                  </span>
+</div>
+</div>
+<!-- Top actions: Esc keyboard hint, ALWAYS-VISIBLE 'More' dropdown, Close '✕' -->
+<div class="flex items-center gap-1 shrink-0">
+<!-- ALWAYS-VISIBLE 'More' overflow control + Dropdown -->
+<div class="relative shrink-0 dropdown-container">
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors focus:ring-1 focus:ring-primary/50" onclick="toggleDropdown('tileCDropdown', event)" title="Attachment options">
+<span class="material-symbols-outlined text-[18px]">more_vert</span>
+</button>
+<!-- Accessible Dropdown Menu -->
+<div class="hidden absolute right-0 top-full mt-1 w-44 rounded-lg bg-surface-container-highest border border-outline-variant shadow-2xl py-1 z-30 text-xs" id="tileCDropdown">
+<button class="w-full text-left px-3 py-1.5 text-on-surface hover:bg-primary/20 hover:text-primary flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[15px]">description</span>
+<span>Open in Future Notes</span>
+</button>
+<button class="w-full text-left px-3 py-1.5 text-on-surface hover:bg-primary/20 hover:text-primary flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[15px]">open_in_new</span>
+<span>Open in system app</span>
+</button>
+<button class="w-full text-left px-3 py-1.5 text-on-surface hover:bg-primary/20 hover:text-primary flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[15px]">save_as</span>
+<span>Save As...</span>
+</button>
+<div class="h-px bg-outline-variant/40 my-1"></div>
+<button class="w-full text-left px-3 py-1.5 text-error hover:bg-error/10 flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[15px]">delete</span>
+<span>Remove</span>
+</button>
+</div>
+</div>
+<!-- Close button with keyboard hint -->
+<button class="px-2 py-0.5 rounded text-xs text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors flex items-center gap-1" title="Close Preview (Esc)">
+<span class="material-symbols-outlined text-[15px]">close</span>
+<span class="font-medium text-[11px]">Close</span>
+<kbd class="text-[9px] font-mono bg-surface-container-lowest px-1 rounded text-on-surface-variant">Esc</kbd>
+</button>
+</div>
+</div>
+<!-- Embedded Video Screen / Stage -->
+<div class="relative w-full h-32 md:h-36 bg-surface-dim rounded-md overflow-hidden flex items-center justify-center border border-outline-variant/30 group/stage">
+<!-- Visual waveform / test frame rendering -->
+<div class="absolute inset-0 bg-gradient-to-tr from-surface-dim via-surface-container-high/40 to-primary/10 flex items-center justify-center">
+<div class="flex items-center gap-1.5 opacity-60">
+<span class="w-1 h-6 bg-primary rounded-full animate-pulse"></span>
+<span class="w-1 h-12 bg-secondary rounded-full animate-pulse" style="animation-delay: 150ms"></span>
+<span class="w-1 h-8 bg-primary rounded-full animate-pulse" style="animation-delay: 300ms"></span>
+<span class="w-1 h-14 bg-primary/80 rounded-full animate-pulse" style="animation-delay: 450ms"></span>
+<span class="w-1 h-10 bg-secondary rounded-full animate-pulse" style="animation-delay: 200ms"></span>
+<span class="w-1 h-5 bg-primary/70 rounded-full animate-pulse" style="animation-delay: 350ms"></span>
+</div>
+</div>
+<!-- Center Play overlay indicator -->
+<div class="z-10 w-10 h-10 rounded-full bg-primary/90 text-surface-dim flex items-center justify-center shadow-lg cursor-pointer hover:scale-105 transition-transform">
+<span class="material-symbols-outlined text-[24px]">play_arrow</span>
+</div>
+<!-- Stream resolution chip -->
+<div class="absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded bg-surface/80 border border-outline-variant/50 text-[10px] font-mono text-on-surface-variant">
+              1080p • 60fps • H.264
+            </div>
+</div>
+<!-- Compact Video Player Control Bar -->
+<div class="mt-2.5 pt-1.5 space-y-1.5">
+<!-- Scrub/seek slider timeline -->
+<div class="flex items-center gap-2">
+<input class="w-full h-1.5 bg-surface-container-highest rounded-lg appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary" max="255" min="0" type="range" value="84"/>
+</div>
+<!-- Bottom Control Row -->
+<div class="flex items-center justify-between text-xs">
+<!-- Left: Play/Pause + Timestamp -->
+<div class="flex items-center gap-2">
+<button class="p-1 rounded text-primary hover:bg-surface-container transition-colors" title="Play / Pause">
+<span class="material-symbols-outlined text-[18px]">play_arrow</span>
+</button>
+<span class="font-mono text-[11px] text-on-surface font-medium">01:24</span>
+<span class="text-outline text-[11px]">/</span>
+<span class="font-mono text-[11px] text-on-surface-variant">04:15</span>
+</div>
+<!-- Right: Volume/Mute + Fullscreen -->
+<div class="flex items-center gap-2.5">
+<!-- Volume slider/mute button -->
+<div class="flex items-center gap-1 text-on-surface-variant hover:text-on-surface">
+<button class="p-0.5 rounded hover:bg-surface-container transition-colors" title="Mute/Unmute">
+<span class="material-symbols-outlined text-[16px]">volume_up</span>
+</button>
+<input class="w-14 h-1 bg-surface-container-highest rounded-lg appearance-none cursor-pointer" max="100" min="0" type="range" value="70"/>
+</div>
+<div class="w-px h-3.5 bg-outline-variant/40"></div>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors" title="Fullscreen">
+<span class="material-symbols-outlined text-[16px]">fullscreen</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Attachment Phase Legend Tray -->
+<div class="px-4 py-1.5 bg-surface-dim border-t border-outline-variant/20 flex items-center justify-between text-[10px] font-mono text-on-surface-variant overflow-x-auto gap-4">
+<div class="flex items-center gap-3">
+<span class="text-outline uppercase tracking-wider text-[9px] font-semibold">Standard Pipeline Phases:</span>
+<div class="flex items-center gap-2">
+<span class="text-outline">[Queued]</span>
+<span class="text-outline-variant">→</span>
+<span class="text-outline">[Preparing]</span>
+<span class="text-outline-variant">→</span>
+<span class="text-secondary font-medium">[Decrypting...]</span>
+<span class="text-outline-variant">→</span>
+<span class="text-primary font-medium">[Encrypting]</span>
+<span class="text-outline-variant">→</span>
+<span class="text-warning font-medium">[Finalizing]</span>
+<span class="text-outline-variant">→</span>
+<span class="text-success font-medium">[Saved Tile]</span>
+</div>
+</div>
+<div class="flex items-center gap-2 shrink-0">
+<span class="text-on-surface-variant">No completion modals • Keyboard navigation active (<kbd class="px-1 rounded bg-surface-container text-[9px]">Esc</kbd> / <kbd class="px-1 rounded bg-surface-container text-[9px]">Enter</kbd>)</span>
+</div>
+</div>
+</section>
+<!-- ========================================================================= -->
+<!-- 4. WINDOWS GENERAL SETTINGS MODAL / POPOVER                               -->
+<!-- Specific Refinement 4: Shows 'Minimize to tray on Close' clearly visible   -->
+<!-- and toggled/enabled (checked switch).                                     -->
+<!-- ========================================================================= -->
+<div class="hidden absolute top-12 right-6 w-96 rounded-xl bg-surface-container-high border border-outline-variant shadow-2xl z-50 p-4 backdrop-blur-md" id="settingsModal">
+<div class="flex items-center justify-between pb-3 border-b border-outline-variant/30">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px] text-primary">desktop_windows</span>
+<h3 class="text-xs font-headline font-bold text-on-surface uppercase tracking-wider">Windows General Settings</h3>
+</div>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest transition-colors" id="closeSettingsBtn">
+<span class="material-symbols-outlined text-[16px]">close</span>
+</button>
+</div>
+<!-- Settings Body -->
+<div class="py-3 space-y-3.5 text-xs">
+<!-- Requested Setting: Minimize to tray on Close (Checked/Enabled) -->
+<div class="flex items-center justify-between gap-3 p-2 rounded-lg bg-surface-container-low border border-outline-variant/40 hover:border-primary/40 transition-colors">
+<div class="flex flex-col pr-2">
+<div class="flex items-center gap-1.5">
+<span class="font-semibold text-on-surface">Minimize to tray on Close</span>
+<span class="px-1 py-0.2 rounded bg-success/20 text-success text-[9px] font-mono">Active</span>
+</div>
+<span class="text-[10px] text-on-surface-variant mt-0.5 leading-snug">
+                Clicking the '✕' close caption minimizes Future Notes to the Windows system tray instead of terminating background encryption tasks.
+              </span>
+</div>
+<!-- Accessible Toggle Switch (Checked) -->
+<label class="relative inline-flex items-center cursor-pointer shrink-0">
+<input checked="" class="sr-only peer" id="trayToggle" type="checkbox"/>
+<div class="w-9 h-5 bg-surface-container-highest peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<!-- Additional Windows Native Settings -->
+<div class="flex items-center justify-between gap-3 p-2 rounded-lg bg-surface-container-low/60 border border-outline-variant/20">
+<div class="flex flex-col">
+<span class="font-medium text-on-surface">Launch at Windows startup</span>
+<span class="text-[10px] text-on-surface-variant">Start minimized in tray on login</span>
+</div>
+<label class="relative inline-flex items-center cursor-pointer shrink-0">
+<input class="sr-only peer" type="checkbox"/>
+<div class="w-9 h-5 bg-surface-container-highest peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<div class="flex items-center justify-between gap-3 p-2 rounded-lg bg-surface-container-low/60 border border-outline-variant/20">
+<div class="flex flex-col">
+<span class="font-medium text-on-surface">Hardware-accelerated cryptography</span>
+<span class="text-[10px] text-on-surface-variant">Utilize AES-NI CPU instructions</span>
+</div>
+<label class="relative inline-flex items-center cursor-pointer shrink-0">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-9 h-5 bg-surface-container-highest peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+</div>
+<div class="pt-2 border-t border-outline-variant/30 flex items-center justify-between text-[11px]">
+<span class="text-on-surface-variant font-mono text-[10px]">Windows v11.0 • Future Notes 2.4</span>
+<button class="px-3 py-1 rounded bg-primary text-surface-dim font-semibold hover:bg-primary/90 transition-colors" id="doneSettingsBtn">
+            Done
+          </button>
+</div>
+</div>
+</main>
+</div>
+<!-- ========================================================================= -->
+<!-- Micro-interactions: Drawer, Dropdowns, Settings Popover                   -->
+<!-- ========================================================================= -->
+<script>
+    // 1. Collapsible Attachment Strip interaction
+    const toggleBtn = document.getElementById('stripToggleBtn');
+    const stripContent = document.getElementById('attachmentStripContent');
+    const chevronIcon = document.getElementById('chevronIcon');
+
+    let isExpanded = true;
+    if (toggleBtn && stripContent && chevronIcon) {
+      toggleBtn.addEventListener('click', () => {
+        isExpanded = !isExpanded;
+        if (isExpanded) {
+          stripContent.style.display = 'block';
+          chevronIcon.textContent = 'keyboard_arrow_down';
+        } else {
+          stripContent.style.display = 'none';
+          chevronIcon.textContent = 'keyboard_arrow_up';
+        }
+      });
+    }
+
+    // 2. Dropdown Toggle Function for Tile More options
+    function toggleDropdown(id, event) {
+      event.stopPropagation();
+      const current = document.getElementById(id);
+      // Close other dropdowns
+      document.querySelectorAll('.dropdown-container > div').forEach(menu => {
+        if (menu.id !== id) {
+          menu.classList.add('hidden');
+        }
+      });
+      if (current) {
+        current.classList.toggle('hidden');
+      }
+    }
+
+    // Close dropdowns on outside click
+    window.addEventListener('click', () => {
+      document.querySelectorAll('.dropdown-container > div').forEach(menu => {
+        menu.classList.add('hidden');
+      });
+    });
+
+    // 3. Settings Popover Toggle
+    const headerSettingsBtn = document.getElementById('headerSettingsBtn');
+    const sidebarSettingsBtn = document.getElementById('sidebarSettingsBtn');
+    const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+    const doneSettingsBtn = document.getElementById('doneSettingsBtn');
+    const settingsModal = document.getElementById('settingsModal');
+
+    function toggleSettingsModal() {
+      if (settingsModal) {
+        settingsModal.classList.toggle('hidden');
+      }
+    }
+
+    if (headerSettingsBtn) headerSettingsBtn.addEventListener('click', toggleSettingsModal);
+    if (sidebarSettingsBtn) sidebarSettingsBtn.addEventListener('click', toggleSettingsModal);
+    if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
+    if (doneSettingsBtn) doneSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
+
+    // 4. Keyboard accessibility: Esc to close settings or preview
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (settingsModal && !settingsModal.classList.contains('hidden')) {
+          settingsModal.classList.add('hidden');
+        }
+        document.querySelectorAll('.dropdown-container > div').forEach(menu => {
+          menu.classList.add('hidden');
+        });
+      }
+    });
+  </script>
+</body></html>

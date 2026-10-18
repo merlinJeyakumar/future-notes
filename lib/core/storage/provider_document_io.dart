@@ -157,6 +157,8 @@ class ProviderDocumentIo {
     LibraryDocument doc,
     BoundedByteSource source, {
     void Function(String, int, int)? onProgress,
+    bool verifyReadback = true,
+    String? expectedHash,
   }) async {
     if (source.length < 0) {
       throw const FormatException('Invalid source length.');
@@ -193,7 +195,7 @@ class ProviderDocumentIo {
         await documents.append(library, doc, bytes, offset: offset);
         conversion.add(bytes);
         offset += bytes.length;
-        onProgress?.call('Publishing encrypted data', offset, source.length);
+        onProgress?.call('Saving encrypted files', offset, source.length);
       }
     }
     conversion.close();
@@ -203,16 +205,25 @@ class ProviderDocumentIo {
         'The source ended before its captured length.',
       );
     }
+    onProgress?.call('Finishing file write', offset, source.length);
     await documents.flush(library, doc);
     final refreshed = await documents.stat(library, doc);
     final expected = ProviderRevision(offset, digest.value!.toString());
-    if (!expected.matches(
-      await revision(
-        refreshed,
-        onProgress: (bytes, total) =>
-            onProgress?.call('Verifying publication', bytes, total),
-      ),
-    )) {
+    if (refreshed.length != offset ||
+        (expectedHash != null && expectedHash != expected.hash)) {
+      throw const LibraryAccessException(
+        'short_write',
+        'Candidate length or streamed checksum changed.',
+      );
+    }
+    if (verifyReadback &&
+        !expected.matches(
+          await revision(
+            refreshed,
+            onProgress: (bytes, total) =>
+                onProgress?.call('Verifying publication', bytes, total),
+          ),
+        )) {
       throw const LibraryAccessException(
         'readback_failed',
         'The staged document failed readback verification.',

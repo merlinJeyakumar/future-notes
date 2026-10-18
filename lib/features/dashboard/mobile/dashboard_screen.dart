@@ -12,6 +12,9 @@ import 'package:file_picker/file_picker.dart';
 import 'sidebar.dart';
 import 'job_notifications.dart';
 import 'note_activity.dart';
+import 'export_progress_dialog.dart';
+import 'work_decision_dialog.dart';
+import '../models/attachment_job.dart';
 import '../widgets/android_attachment_drop_zone.dart';
 import '../widgets/unfinished_work_dialog.dart';
 import 'content_area.dart';
@@ -93,6 +96,20 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
   final _drawerSearchFocus = FocusNode();
   int _navigationRequest = 0;
   bool _phoneEditor = false;
+  final _exportRequests = ValueNotifier<int>(0);
+  final _panelDismissals = ValueNotifier<int>(0);
+  bool get _exportControlsLocked =>
+      _exportRequests.value > 0 || _viewModel.hasActiveExport;
+
+  Future<void> _duringExport(Future<void> Function() action) async {
+    _exportRequests.value++;
+    try {
+      await action();
+    } finally {
+      if (mounted) _exportRequests.value--;
+    }
+  }
+
   final _contentKey = GlobalKey();
   bool get _mobile => widget.mobileLayout ?? true;
 
@@ -101,11 +118,13 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
       : width > 800;
 
   void _showPhoneNotes() {
+    _panelDismissals.value++;
     FocusScope.of(context).unfocus();
     setState(() => _phoneEditor = false);
   }
 
   void _focusEditorAfterNavigation() {
+    if (_exportControlsLocked) return;
     if (!_mobile) {
       _viewModel.focusNode.requestFocus();
       return;
@@ -131,6 +150,14 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
     NoteListUiState inventory,
     bool drawer,
   ) async {
+    _panelDismissals.value++;
+    // Returning to the retained editor is presentation-only. A different note
+    // would replace the session that owns the export, so keep its existing guard.
+    final export = _activeExport();
+    if (export != null && _viewModel.currentContentPath != file.fullPath) {
+      await _showExportProgress(existingJob: export);
+      return;
+    }
     final request = ++_navigationRequest;
     final result = await _viewModel.openListedNote(
       file,
@@ -151,24 +178,31 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
 
   Widget _buildNotesList() => ValueListenableBuilder<NoteListUiState>(
     valueListenable: _viewModel.noteListStateNotifier,
-    builder: (context, inventory, _) => ValueListenableBuilder<int>(
-      valueListenable: _mobileJobs?.notificationCount ?? _noJobNotifications,
-      builder: (context, count, _) => MobileNotesList(
-        listState: inventory,
-        activity: _noteActivity,
-        searchController: _searchController,
-        searchFocusNode: _drawerSearchFocus,
-        onSearchChanged: _viewModel.setSearchQuery,
-        onFileSelected: (file) => _handleFileSelected(file, inventory, false),
-        onNewNote: () => unawaited(_handleNewNote()),
-        onImport: _handleImport,
-        notificationCount: count,
-        onNotifications: _showJobNotifications,
-        onSettings: () => _showMasterSettings(context),
-        onRefresh: _viewModel.loadRecentFiles,
-        onRetrySearch: _viewModel.retrySearch,
-        onDelete: _handleDelete,
-        onExport: _handleExportPack,
+    builder: (context, inventory, _) => ListenableBuilder(
+      listenable: _viewModel.attachmentJobsNotifier,
+      builder: (context, _) => ValueListenableBuilder<int>(
+        valueListenable: _mobileJobs?.notificationCount ?? _noJobNotifications,
+        builder: (context, count, _) => MobileNotesList(
+          listState: inventory,
+          activity: _noteActivity,
+          searchController: _searchController,
+          searchFocusNode: _drawerSearchFocus,
+          onSearchChanged: _viewModel.setSearchQuery,
+          onFileSelected: (file) => _handleFileSelected(file, inventory, false),
+          onNewNote: () => unawaited(_handleNewNote()),
+          onImport: _handleImport,
+          notificationCount: count,
+          activeJobCount: _mobileJobs?.activeCount,
+          onNotifications: _showJobNotifications,
+          onSettings: () => _showMasterSettings(context),
+          onRefresh: _viewModel.loadRecentFiles,
+          onRetrySearch: _viewModel.retrySearch,
+          onDelete: _handleDelete,
+          onExport: _handleExportPack,
+          onExportProgress: _activeExport() == null
+              ? null
+              : () => unawaited(_handleEditorExport()),
+        ),
       ),
     ),
   );
@@ -227,6 +261,17 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
 
   bool _jobNotificationOpen = false;
 
+  AttachmentJobState? _activeExport({String? id}) {
+    for (final state in _viewModel.attachmentJobsNotifier.value) {
+      final job = state.progress.value;
+      if (job.active &&
+          job.operation == AttachmentJobOperation.export &&
+          (id == null || job.id == id))
+        return state;
+    }
+    return null;
+  }
+
   Future<void> _openJobNotification(String id) async {
     final jobs = _mobileJobs;
     if (jobs == null || _jobNotificationOpen) return;
@@ -244,6 +289,12 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
   Future<void> _showJobNotifications({String? selectedId}) async {
     final jobs = _mobileJobs;
     if (jobs == null || _jobNotificationOpen) return;
+    _panelDismissals.value++;
+    final export = selectedId == null ? null : _activeExport(id: selectedId);
+    if (export != null) {
+      await _showExportProgress(existingJob: export);
+      return;
+    }
     _jobNotificationOpen = true;
     String? selected;
     try {
@@ -258,10 +309,18 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
     } finally {
       _jobNotificationOpen = false;
     }
-    if (mounted && selected != null) await _showInterruptedJob(selected);
+    if (mounted && selected != null) {
+      final export = _activeExport(id: selected);
+      if (export != null) {
+        await _showExportProgress(existingJob: export);
+      } else {
+        await _showInterruptedJob(selected);
+      }
+    }
   }
 
   Future<void> _showInterruptedJob(String id) async {
+    _panelDismissals.value++;
     final jobs = _mobileJobs;
     if (jobs == null || _jobNotificationOpen) return;
     await jobs.interrupted;
@@ -294,7 +353,12 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
     final decision = await showAppDialog<DraftDecision>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => DraftDecisionDialog(request: request),
+      builder: (_) => request.kind == DraftDecisionKind.activeAttachments
+          ? MobileWorkDecisionDialog(
+              model: _viewModel,
+              transition: request.transition,
+            )
+          : DraftDecisionDialog(request: request),
     );
     return mounted ? decision ?? DraftDecision.cancel : DraftDecision.cancel;
   }
@@ -398,6 +462,7 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
   }
 
   Future<void> _handleNewNote({bool closeDrawer = false}) async {
+    _panelDismissals.value++;
     final result = await _viewModel.reset();
     if (!mounted || !result.isSuccess) return;
     if (closeDrawer && Navigator.canPop(context)) {
@@ -416,6 +481,8 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
 
   @override
   void dispose() {
+    _exportRequests.dispose();
+    _panelDismissals.dispose();
     _mobileDraft?.dispose();
     _mobileJobs?.dispose();
     _noteActivity?.dispose();
@@ -461,8 +528,96 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
     _viewModel.deleteNote(file.path);
   }
 
+  Future<OperationResult<void>?> _showExportProgress({
+    String? noteTitle,
+    Future<OperationResult<void>> Function()? start,
+    AttachmentJobState? existingJob,
+  }) async {
+    if (_jobNotificationOpen || !mounted) return null;
+    _panelDismissals.value++;
+    _jobNotificationOpen = true;
+    return showMobileExportProgress(
+      context: context,
+      model: _viewModel,
+      noteTitle: noteTitle,
+      start: start,
+      existingJob: existingJob,
+      onHidden: () => _jobNotificationOpen = false,
+    );
+  }
+
+  Future<void> _handleEditorExport() => _duringExport(_exportFromEditor);
+
+  Future<void> _exportFromEditor() async {
+    final export = _activeExport();
+    if (export != null) {
+      await _showExportProgress(existingJob: export);
+      return;
+    }
+    if (!_viewModel.ensureExtendedNoteOperations()) return;
+    final owner = _viewModel.draftSession.generation;
+    if (_viewModel.currentFileName == null) {
+      final save = await showAppDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Save before exporting?'),
+          content: const Text(
+            'Save this new note, then choose its export options.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Save & Export'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted ||
+          save != true ||
+          owner != _viewModel.draftSession.generation)
+        return;
+      final saved = await _viewModel.saveNote(allowEmptyFirstSave: true);
+      if (!mounted ||
+          !saved.isSuccess ||
+          owner != _viewModel.draftSession.generation)
+        return;
+    }
+    final name = _viewModel.currentFileName;
+    final path = _viewModel.currentContentPath;
+    if (name == null || path == null || !mounted) return;
+    await _handleExportPack(
+      RecentFile(
+        path: name,
+        fullPath: path,
+        title: _viewModel.titleController.text,
+      ),
+    );
+  }
+
   Future<void> _handleExportPack(RecentFile file) async {
+    final export = _activeExport();
+    if (export != null) {
+      await _showExportProgress(existingJob: export);
+      return;
+    }
+    // Retain the exported note's editor before the worker pins its session.
+    // Returning from the list then needs no reload, cancellation or second owner.
+    final loaded = await _viewModel.loadNote(file.path);
+    if (!mounted || !loaded.isSuccess) return;
+    await _duringExport(() => _exportPack(file));
+  }
+
+  Future<void> _exportPack(RecentFile file) async {
     if (_viewModel.usesOwnedStorage) {
+      final export = _activeExport();
+      if (export != null) {
+        await _showExportProgress(existingJob: export);
+        return;
+      }
       final review = await _viewModel.captureNoteForExport(file.path);
       if (!mounted) return;
       if (!review.isSuccess) {
@@ -493,13 +648,34 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
         ),
       );
       if (!mounted || options == null) return;
-      final result = await _viewModel.exportNotePack(
-        format: options.format,
-        password: options.password,
-        fileName: file.path,
-        captured: captured,
+      final result = await _showExportProgress(
+        noteTitle: file.title,
+        start: () => _viewModel.exportNotePack(
+          format: options.format,
+          password: options.password,
+          fileName: file.path,
+          captured: captured,
+        ),
       );
-      if (!mounted || result.outcome == OperationOutcome.cancelled) return;
+      if (!mounted ||
+          result == null ||
+          result.outcome == OperationOutcome.cancelled)
+        return;
+      if (_jobNotificationOpen)
+        return; // Result is visible in its retained dialog.
+      if (result.isSuccess && ModalRoute.of(context)?.isCurrent == true) {
+        final ready = _viewModel.attachmentJobsNotifier.value
+            .where(
+              (state) =>
+                  _viewModel.preparedExportForJob(state.progress.value.id) !=
+                  null,
+            )
+            .lastOrNull;
+        if (ready != null) {
+          await _showExportProgress(noteTitle: file.title, existingJob: ready);
+          return;
+        }
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -702,6 +878,7 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
   }
 
   Future<void> _handleImport() async {
+    _panelDismissals.value++;
     if (!_viewModel.ensureExtendedNoteOperations()) return;
     // Close the drawer first on mobile
     if (Navigator.canPop(context)) {
@@ -755,6 +932,7 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
           barrierDismissible: false,
           builder: (_) => NoteImportDialog(
             fileName: file.name,
+            detailedProgress: true,
             jobs: _viewModel.attachmentJobsNotifier,
             cancelJob: _viewModel.cancelAttachmentJob,
             startImport: (resolveConflict) => _viewModel.importNoteFile(
@@ -917,6 +1095,7 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
   }
 
   void _showMasterSettings(BuildContext context) {
+    _panelDismissals.value++;
     showAppDialog<void>(
       context: context,
       builder: (_) => AppSettingsDialog(
@@ -953,6 +1132,7 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
         excluding: _shutdownStarted,
         child: AndroidAttachmentDropZone(
           model: _viewModel,
+          exportRequests: _exportRequests,
           child: _buildDashboard(context),
         ),
       ),
@@ -970,10 +1150,12 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
         const SingleActivator(LogicalKeyboardKey.keyF, control: true):
             _focusSearch,
         const SingleActivator(LogicalKeyboardKey.keyS, control: true): () {
-          if (!_shutdownStarted) _viewModel.saveNote();
+          if (!_shutdownStarted && !_exportControlsLocked)
+            _viewModel.saveNote();
         },
         const SingleActivator(LogicalKeyboardKey.keyN, control: true): () {
-          if (!_shutdownStarted) unawaited(_handleNewNote());
+          if (!_shutdownStarted && !_exportControlsLocked)
+            unawaited(_handleNewNote());
         },
       },
       child: LayoutBuilder(
@@ -987,7 +1169,11 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
                 key: _contentKey,
                 viewModel: _viewModel,
                 jobNotificationCount: _mobileJobs?.notificationCount,
+                activeJobCount: _mobileJobs?.activeCount,
                 onJobNotifications: _showJobNotifications,
+                onExport: _handleEditorExport,
+                exportRequests: _exportRequests,
+                dismissPanels: _panelDismissals,
                 onBack: split ? null : _showPhoneNotes,
               ),
             ),

@@ -6,6 +6,7 @@ import '../models/note_model.dart';
 import '../models/note_list_ui_state.dart';
 import 'file_details_dialog.dart';
 import '../../../core/theme/app_theme.dart';
+import 'app_overflow_menu.dart';
 
 class Sidebar extends StatelessWidget {
   const Sidebar({
@@ -17,6 +18,7 @@ class Sidebar extends StatelessWidget {
     required this.onNewNote,
     this.onImportNote,
     this.onSettings,
+    this.onBackgroundTasks,
     this.onRefresh,
     this.onSearchChanged,
     this.onExportPack,
@@ -33,6 +35,7 @@ class Sidebar extends StatelessWidget {
   final VoidCallback onNewNote;
   final VoidCallback? onImportNote;
   final VoidCallback? onSettings;
+  final VoidCallback? onBackgroundTasks;
   final VoidCallback? onRefresh;
   final ValueChanged<String>? onSearchChanged;
   final ValueChanged<RecentFile>? onExportPack;
@@ -77,6 +80,8 @@ class Sidebar extends StatelessWidget {
                           onPressed: onSettings,
                           icon: const Icon(Icons.settings_outlined),
                         ),
+                      if (onBackgroundTasks != null)
+                        AppOverflowMenu(onBackgroundTasks: onBackgroundTasks!),
                     ],
                   ),
                   const SizedBox(height: 12),

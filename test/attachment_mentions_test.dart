@@ -9,6 +9,7 @@ import 'package:flutter_application_1/core/routing/fnotes_uri.dart';
 import 'package:flutter_application_1/features/dashboard/models/attachment_mention.dart';
 import 'package:flutter_application_1/features/dashboard/models/note_model.dart';
 import 'package:flutter_application_1/features/dashboard/widgets/content_area.dart';
+import 'package:flutter_application_1/features/dashboard/mobile/content_area.dart';
 import 'package:flutter_application_1/main.dart';
 import 'support/editor_harness.dart';
 import 'attachment_strip_test.dart' show FakeOpenCache;
@@ -306,179 +307,201 @@ void main() {
     },
   );
 
-  for (final html in [false, true]) {
-    testWidgets(
-      'caret popup keyboard/mouse, dismissal, metadata only; html=$html',
-      (tester) async {
-        final cache = FakeOpenCache();
-        final h = await EditorHarness.create(attachmentOpenCache: cache);
-        tester.view.physicalSize = const Size(1440, 1000);
-        tester.view.devicePixelRatio = 1;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-        h.seed(
-          'synthetic',
-          h.note(
-            'id',
-            'Text ',
-            attachments: [
-              {'id': 'source-a', 'fileName': 'report.pdf', 'size': 100},
-              {'id': 'source-b', 'fileName': 'report.pdf', 'size': 200},
-              {'id': 'source-c', 'fileName': 'report final.docx', 'size': 300},
-            ],
-          ),
-        );
-        await h.editor.loadNote('synthetic');
-        if (html) await tester.runAsync(h.editor.toggleEditorMode);
-        try {
-          await tester.pumpWidget(
-            MyApp(
-              settings: h.settings,
-              home: Scaffold(
-                body: ListenableBuilder(
-                  listenable: h.editor,
-                  builder: (_, _) => ContentArea(viewModel: h.editor),
+  for (final mobile in [false, true]) {
+    for (final html in [false, true]) {
+      testWidgets(
+        'caret popup keyboard/mouse, dismissal, metadata only; html=$html mobile=$mobile',
+        (tester) async {
+          final cache = FakeOpenCache();
+          final h = await EditorHarness.create(attachmentOpenCache: cache);
+          tester.view.physicalSize = const Size(1440, 1000);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          h.seed(
+            'synthetic',
+            h.note(
+              'id',
+              'Text ',
+              attachments: [
+                {'id': 'source-a', 'fileName': 'report.pdf', 'size': 100},
+                {'id': 'source-b', 'fileName': 'report.pdf', 'size': 200},
+                {
+                  'id': 'source-c',
+                  'fileName': 'report final.docx',
+                  'size': 300,
+                },
+              ],
+            ),
+          );
+          await h.editor.loadNote('synthetic');
+          if (html) await tester.runAsync(h.editor.toggleEditorMode);
+          try {
+            await tester.pumpWidget(
+              MyApp(
+                settings: h.settings,
+                home: Scaffold(
+                  body: ListenableBuilder(
+                    listenable: h.editor,
+                    builder: (_, _) => mobile
+                        ? MobileContentArea(viewModel: h.editor)
+                        : ContentArea(viewModel: h.editor),
+                  ),
                 ),
               ),
-            ),
-          );
-          await tester.pumpAndSettle();
-          final focus = html
-              ? tester.widget<CodeField>(find.byType(CodeField)).focusNode!
-              : h.editor.focusNode;
-          focus.requestFocus();
-          await tester.pumpAndSettle();
-          void type(String text) {
+            );
+            await tester.pumpAndSettle();
+            final focus = html
+                ? tester.widget<CodeField>(find.byType(CodeField)).focusNode!
+                : h.editor.focusNode;
+            focus.requestFocus();
+            await tester.pumpAndSettle();
+            void type(String text) {
+              if (html) {
+                h.editor.htmlController.value = TextEditingValue(
+                  text: text,
+                  selection: TextSelection.collapsed(offset: text.length),
+                );
+              } else {
+                final c = h.editor.quillController;
+                c.replaceText(
+                  0,
+                  c.document.length - 1,
+                  text,
+                  TextSelection.collapsed(offset: text.length),
+                );
+                c.formatText(0, text.length, const LinkAttribute(null));
+              }
+            }
+
+            type('Text @rep');
+            await tester.pumpAndSettle();
+            final popup = find.byKey(
+              const ValueKey('attachment-mention-popup'),
+            );
+            expect(popup, findsOneWidget);
+            expect(
+              find.descendant(of: popup, matching: find.text('report.pdf')),
+              findsNWidgets(2),
+            );
+            expect(focus.hasFocus, isTrue);
+            expect(cache.opens, 0);
+            expect(h.encryption.binaryDecryptCalls, 0);
+            // Exercise the actual pinned editors' composition state, including
+            // a composition-only notification without a document edit.
             if (html) {
-              h.editor.htmlController.value = TextEditingValue(
-                text: text,
-                selection: TextSelection.collapsed(offset: text.length),
+              final value = h.editor.htmlController.value;
+              h.editor.htmlController.value = value.copyWith(
+                composing: const TextRange(start: 6, end: 9),
               );
             } else {
-              final c = h.editor.quillController;
-              c.replaceText(
-                0,
-                c.document.length - 1,
-                text,
-                TextSelection.collapsed(offset: text.length),
-              );
-              c.formatText(0, text.length, const LinkAttribute(null));
+              final state =
+                  tester
+                          .widget<QuillEditor>(find.byType(QuillEditor))
+                          .config
+                          .editorKey!
+                          .currentState!
+                      as QuillRawEditorState;
+              state.composingRange.value = const TextRange(start: 6, end: 9);
             }
-          }
-
-          type('Text @rep');
-          await tester.pumpAndSettle();
-          final popup = find.byKey(const ValueKey('attachment-mention-popup'));
-          expect(popup, findsOneWidget);
-          expect(
-            find.descendant(of: popup, matching: find.text('report.pdf')),
-            findsNWidgets(2),
-          );
-          expect(focus.hasFocus, isTrue);
-          expect(cache.opens, 0);
-          expect(h.encryption.binaryDecryptCalls, 0);
-          // Exercise the actual pinned editors' composition state, including
-          // a composition-only notification without a document edit.
-          if (html) {
-            final value = h.editor.htmlController.value;
-            h.editor.htmlController.value = value.copyWith(
-              composing: const TextRange(start: 6, end: 9),
-            );
-          } else {
-            final state =
-                tester
-                        .widget<QuillEditor>(find.byType(QuillEditor))
-                        .config
-                        .editorKey!
-                        .currentState!
-                    as QuillRawEditorState;
-            state.composingRange.value = const TextRange(start: 6, end: 9);
-          }
-          await tester.pumpAndSettle();
-          expect(popup, findsNothing);
-          if (html) {
-            h.editor.htmlController.value = h.editor.htmlController.value
-                .copyWith(composing: TextRange.empty);
-          } else {
-            final state =
-                tester
-                        .widget<QuillEditor>(find.byType(QuillEditor))
-                        .config
-                        .editorKey!
-                        .currentState!
-                    as QuillRawEditorState;
-            state.composingRange.value = TextRange.empty;
-          }
-          await tester.pumpAndSettle();
-          expect(popup, findsOneWidget);
-          await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-          await tester.pumpAndSettle();
-          expect(popup, findsNothing);
-          expect(focus.hasFocus, isTrue);
-          if (html) {
-            expect(
-              h.editor.htmlController.text,
-              contains('<a href="fnotes://attachment/'),
-            );
-            final inserted = h.editor.htmlController.text;
-            await tester.pump(const Duration(milliseconds: 600));
-            await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-            await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
-            await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
             await tester.pumpAndSettle();
-            expect(h.editor.htmlController.text, 'Text @rep');
-            await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-            await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-            await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
-            await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-            await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+            expect(popup, findsNothing);
+            if (html) {
+              h.editor.htmlController.value = h.editor.htmlController.value
+                  .copyWith(composing: TextRange.empty);
+            } else {
+              final state =
+                  tester
+                          .widget<QuillEditor>(find.byType(QuillEditor))
+                          .config
+                          .editorKey!
+                          .currentState!
+                      as QuillRawEditorState;
+              state.composingRange.value = TextRange.empty;
+            }
             await tester.pumpAndSettle();
-            expect(h.editor.htmlController.text, inserted);
-          } else {
-            expect(
-              h.editor.quillController.document.toDelta().toJson().any(
-                (op) => (op['attributes'] as Map?)?['link'] != null,
+            expect(popup, findsOneWidget);
+            await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+            await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+            await tester.pumpAndSettle();
+            expect(popup, findsNothing);
+            expect(focus.hasFocus, isTrue);
+            if (html) {
+              expect(
+                h.editor.htmlController.text,
+                contains('<a href="fnotes://attachment/'),
+              );
+              final inserted = h.editor.htmlController.text;
+              await tester.pump(const Duration(milliseconds: 600));
+              await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+              await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+              await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+              await tester.pumpAndSettle();
+              expect(h.editor.htmlController.text, 'Text @rep');
+              await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+              await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+              await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+              await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+              await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+              await tester.pumpAndSettle();
+              expect(h.editor.htmlController.text, inserted);
+            } else {
+              expect(
+                h.editor.quillController.document.toDelta().toJson().any(
+                  (op) => (op['attributes'] as Map?)?['link'] != null,
+                ),
+                isTrue,
+              );
+            }
+            type('Text @report final');
+            await tester.pumpAndSettle();
+            expect(popup, findsOneWidget);
+            await tester.tap(
+              find.descendant(
+                of: popup,
+                matching: find.text('report final.docx'),
               ),
-              isTrue,
+              kind: PointerDeviceKind.mouse,
             );
+            await tester.pumpAndSettle();
+            expect(focus.hasFocus, isTrue);
+            type('Text @');
+            await tester.pumpAndSettle();
+            await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+            await tester.pumpAndSettle();
+            h.editor.attachmentCacheNotifier.value++;
+            h.editor.notifyListeners();
+            await tester.pumpAndSettle();
+            expect(popup, findsNothing);
+            type('No query');
+            await tester.pumpAndSettle();
+            type('Text @rep');
+            await tester.pumpAndSettle();
+            expect(popup, findsOneWidget);
+            if (mobile) {
+              await tester.tap(find.byType(TextField).first);
+              await tester.pumpAndSettle();
+              expect(popup, findsNothing);
+              focus.requestFocus();
+              await tester.pumpAndSettle();
+              type('No query');
+              await tester.pumpAndSettle();
+              type('Text @rep');
+              await tester.pumpAndSettle();
+              expect(popup, findsOneWidget);
+            }
+            focus.unfocus();
+            await tester.pumpAndSettle();
+            expect(popup, findsNothing);
+            expect(tester.takeException(), isNull);
+          } finally {
+            await tester.pumpWidget(const SizedBox.shrink());
+            h.disposeEditor();
+            await tester.pump(const Duration(seconds: 3));
+            await tester.runAsync(h.dispose);
           }
-          type('Text @report final');
-          await tester.pumpAndSettle();
-          expect(popup, findsOneWidget);
-          await tester.tap(
-            find.descendant(
-              of: popup,
-              matching: find.text('report final.docx'),
-            ),
-            kind: PointerDeviceKind.mouse,
-          );
-          await tester.pumpAndSettle();
-          expect(focus.hasFocus, isTrue);
-          type('Text @');
-          await tester.pumpAndSettle();
-          await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-          await tester.pumpAndSettle();
-          h.editor.attachmentCacheNotifier.value++;
-          h.editor.notifyListeners();
-          await tester.pumpAndSettle();
-          expect(popup, findsNothing);
-          type('No query');
-          await tester.pumpAndSettle();
-          type('Text @rep');
-          await tester.pumpAndSettle();
-          expect(popup, findsOneWidget);
-          focus.unfocus();
-          await tester.pumpAndSettle();
-          expect(popup, findsNothing);
-          expect(tester.takeException(), isNull);
-        } finally {
-          await tester.pumpWidget(const SizedBox.shrink());
-          h.disposeEditor();
-          await tester.pump(const Duration(seconds: 3));
-          await tester.runAsync(h.dispose);
-        }
-      },
-    );
+        },
+      );
+    }
   }
 }

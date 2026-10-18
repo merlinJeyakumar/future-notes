@@ -46,7 +46,7 @@ class AndroidJobHost(private val context: Context, messenger: BinaryMessenger) {
                     "update" -> {
                         val incoming = call.argument<List<Map<String, Any?>>>("jobs") ?: emptyList()
                         if (incoming.size > 10000 || incoming.any { it["id"] !is String || (it["id"] as String).length > 128 || it["phase"] !is String }) throw IllegalArgumentException()
-                        jobs = incoming.map { mapOf("id" to it["id"], "phase" to it["phase"], "cancellable" to (it["cancellable"] == true), "operation" to it["operation"], "fileName" to it["fileName"], "bytes" to it["bytes"], "total" to it["total"], "recovery" to it["recovery"]) }
+                        jobs = incoming.map { mapOf("id" to it["id"], "phase" to it["phase"], "detail" to (it["detail"] as? String)?.take(256), "cancellable" to (it["cancellable"] == true), "operation" to it["operation"], "fileName" to it["fileName"], "bytes" to it["bytes"], "total" to it["total"], "currentBytes" to it["currentBytes"], "currentTotal" to it["currentTotal"], "recovery" to it["recovery"]) }
                         val phases = jobs.groupingBy { it["phase"] as String }.eachCount()
                         if (phases != lastPhases) {
                             lastPhases = phases
@@ -78,13 +78,15 @@ class AndroidJobHost(private val context: Context, messenger: BinaryMessenger) {
                     }
                     "acknowledgeInterrupted" -> {
                         val ids = call.argument<List<String>>("ids") ?: throw IllegalArgumentException()
-                        val bytes = try { interrupted.openRead().use { if (it.channel.size() > 2 * 1024 * 1024) throw IllegalStateException(); it.readBytes() } } catch (_: java.io.FileNotFoundException) { "[]".toByteArray() }
-                        val old = JSONArray(bytes.toString(Charsets.UTF_8)); val retained = JSONArray()
-                        for (i in 0 until old.length()) { val value = old.getJSONObject(i); if (!ids.contains(value.getString("id"))) retained.put(value) }
-                        val output = interrupted.startWrite()
-                        try { output.write(retained.toString().toByteArray(Charsets.UTF_8)); interrupted.finishWrite(output) } catch (error: Exception) { interrupted.failWrite(output); throw error }
-                        retainedJobs = retainedJobs.filter { it["id"] !in ids }
+                        val safe = ids.filter { id -> jobs.none { it["id"] == id } }
+                        InterruptedJobDismissal.remove(context, safe)
+                        retainedJobs = retainedJobs.filter { it["id"] !in safe }
                         refreshNotifications()
+                        channel.invokeMethod("interruptedJobsChanged", JSONArray(retainedJobs).toString())
+                        result.success(null)
+                    }
+                    "dismissInterruptedNotification" -> {
+                        dismissInterrupted(call.argument<List<String>>("ids") ?: throw IllegalArgumentException())
                         result.success(null)
                     }
                     "takeNotification" -> {
@@ -109,6 +111,13 @@ class AndroidJobHost(private val context: Context, messenger: BinaryMessenger) {
         val output = ledger.startWrite()
         try { output.write(data.toByteArray(Charsets.UTF_8)); ledger.finishWrite(output); lastLedger = data; lastControl = control; lastWrite = now }
         catch (error: Exception) { ledger.failWrite(output); throw error }
+    }
+    fun dismissInterrupted(ids: List<String>) {
+        val safe = ids.filter { id -> jobs.none { it["id"] == id } }
+        InterruptedJobDismissal.hide(context, safe)
+        retainedJobs = retainedJobs.map { if (it["id"] in safe) it + ("notificationDismissed" to true) else it }
+        refreshNotifications()
+        channel.invokeMethod("interruptedJobsChanged", JSONArray(retainedJobs).toString())
     }
     private fun updateService() {
         val intent = Intent(context, AttachmentJobService::class.java)

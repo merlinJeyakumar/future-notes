@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
@@ -5,6 +6,7 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
+import 'package:flutter/services.dart';
 
 import '../../../core/storage/note_reference.dart';
 import '../../../core/storage/streaming_file_cipher.dart';
@@ -13,6 +15,7 @@ import 'encryption_service.dart';
 import 'file_service.dart';
 import 'note_codec.dart';
 import 'pack_service.dart';
+import 'provider_note_files.dart';
 
 class ExistingImportNote {
   const ExistingImportNote(this.reference, this.decoded);
@@ -29,11 +32,21 @@ class NoteImportService {
 
   Future<ExistingImportNote?> find(String id, StorageBinding binding) async {
     ExistingImportNote? found;
-    for (final name in await files.getRecentFiles()) {
+    final provider = files is ProviderNoteFiles
+        ? files as ProviderNoteFiles
+        : null;
+    final candidates = await provider?.discoveryCandidates();
+    final byName = {for (final entry in candidates ?? []) entry.name: entry};
+    for (final name
+        in candidates?.map((e) => e.name) ?? await files.getRecentFiles()) {
       if (name == 'settings.json' || name.startsWith('.future-notes-')) {
         continue;
       }
-      final reference = await files.resolveNote(name);
+      final reference = provider == null
+          ? await files.resolveNote(name)
+          : (await provider.inspectDiscoveryCandidate(
+              byName[name]!,
+            ))?.reference;
       // Legacy attachment-only folders have no note envelope of their own.
       if (reference == null) continue;
       if (!p.equals(reference.binding.root, binding.root) ||
@@ -125,13 +138,63 @@ class NoteImportService {
     Map<String, dynamic> metadata,
     Map<String, StreamingFileSource> attachments, {
     String? cancellationFile,
-  }) =>
-      Isolate.run(() => _fingerprint(metadata, attachments, cancellationFile));
+    FileByteProgress? onProgress,
+  }) async {
+    final port = onProgress == null ? null : ReceivePort();
+    final drained = Completer<void>();
+    final subscription = port?.listen((event) {
+      if (event == null) {
+        if (!drained.isCompleted) drained.complete();
+      } else if (event is (String, int, int)) {
+        onProgress?.call(event.$1, event.$2, event.$3);
+      }
+    });
+    try {
+      final result = await _fingerprintInIsolate(
+        metadata,
+        attachments,
+        cancellationFile,
+        port?.sendPort,
+        Platform.isAndroid ? ServicesBinding.rootIsolateToken : null,
+      );
+      if (port != null) {
+        await drained.future.timeout(
+          const Duration(seconds: 2),
+          onTimeout: () {},
+        );
+      }
+      return result;
+    } finally {
+      await subscription?.cancel();
+      port?.close();
+    }
+  }
+
+  static Future<String> _fingerprintInIsolate(
+    Map<String, dynamic> metadata,
+    Map<String, StreamingFileSource> sources,
+    String? cancel,
+    SendPort? progress,
+    RootIsolateToken? token,
+  ) => Isolate.run(() async {
+    try {
+      // SAF sources are retained native capabilities, not ordinary paths.
+      // Their bounded readers must borrow/check the granted descriptor through
+      // platform channels from this worker before comparing ciphertext bytes.
+      if (token != null) {
+        BackgroundIsolateBinaryMessenger.ensureInitialized(token);
+      }
+      return await _fingerprint(metadata, sources, cancel, progress);
+    } finally {
+      progress?.send(null);
+    }
+  });
 
   static Future<String> _fingerprint(
     Map<String, dynamic> metadata,
     Map<String, StreamingFileSource> sources,
     String? cancellation,
+    SendPort? progress,
   ) async {
     void check() {
       if (cancellation != null && File(cancellation).existsSync()) {
@@ -142,6 +205,8 @@ class NoteImportService {
     final normalized = Map<String, dynamic>.from(metadata);
     final declared = metadata['attachments'] as List? ?? const [];
     final entries = <Map<String, dynamic>>[];
+    final clock = Stopwatch()..start();
+    var last = -200;
     for (var i = 0; i < declared.length; i++) {
       check();
       final entry = declared[i];
@@ -152,25 +217,49 @@ class NoteImportService {
       if (source == null) {
         throw const FormatException('An attachment is unavailable.');
       }
-      final reader = await LegacyFileReader.open(source);
-      final output = _DigestOutput();
-      final input = sha256.startChunkedConversion(output);
-      try {
-        while (reader.remaining > 0) {
-          check();
-          input.add(
-            await reader.read(
-              min(StreamingFileCipher.window, reader.remaining),
-            ),
-          );
+      final receipt = source.receipt;
+      final name = fields['fileName'] as String? ?? 'Attachment ${i + 1}';
+      void report(int bytes) {
+        if (bytes == 0 ||
+            bytes == source.length ||
+            clock.elapsedMilliseconds - last >= 200) {
+          last = clock.elapsedMilliseconds;
+          progress?.send((name, bytes, source.length));
         }
-        input.close();
-      } finally {
-        await reader.close();
       }
+
+      report(0);
+      String payloadHash;
+      if (receipt != null &&
+          source.offset == 0 &&
+          source.length == receipt.length &&
+          source.path == receipt.path &&
+          await receipt.isCurrent()) {
+        payloadHash = receipt.sha256Hex;
+      } else {
+        final reader = await LegacyFileReader.open(source);
+        final output = _DigestOutput();
+        final input = sha256.startChunkedConversion(output);
+        try {
+          while (reader.remaining > 0) {
+            check();
+            input.add(
+              await reader.read(
+                min(StreamingFileCipher.window, reader.remaining),
+              ),
+            );
+            report(source.length - reader.remaining);
+          }
+          input.close();
+        } finally {
+          await reader.close();
+        }
+        payloadHash = output.value.toString();
+      }
+      report(source.length);
       entries.add({
         'metadata': {...fields, 'id': i},
-        'payloadSha256': output.value.toString(),
+        'payloadSha256': payloadHash,
       });
     }
     normalized['attachments'] = entries;

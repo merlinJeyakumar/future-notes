@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'file_operation_progress.dart';
 
 import 'package:path/path.dart' as p;
 
@@ -344,20 +345,46 @@ class OwnedNotePersistence {
     String content, {
     List<PreparedAttachmentFile> attachments = const [],
     CommitByteProgress? onProgress,
+    void Function(FileOperationProgress)? onFileProgress,
   }) => _run(() async {
     final root = await _capturedOwner(reference);
+    final overallTotal = attachments.fold<int>(
+      0,
+      (n, a) => n + a.source.length,
+    );
+    var completed = 0;
+    var fileIndex = 0;
+    PreparedAttachmentFile? activeAttachment;
     Future<OperationResult<StorageRevision>> publish(
       String target,
       StorageRevision expected,
       CommitFileSource source,
     ) {
-      if (onProgress != null && owner is ProgressStorageOwner) {
+      if ((onProgress != null || onFileProgress != null) &&
+          owner is ProgressStorageOwner) {
         return (owner as ProgressStorageOwner).commitWithProgress(
           root,
           target: target,
           expected: expected,
           source: source,
-          onProgress: onProgress,
+          onProgress: (stage, bytes, total) {
+            final active = activeAttachment;
+            onFileProgress?.call(
+              FileOperationProgress(
+                stage: active == null ? 'Finishing import' : stage,
+                fileName: active?.fileName ?? active?.id ?? 'Note details',
+                fileIndex: fileIndex,
+                fileCount: attachments.length,
+                bytes: active == null ? 0 : bytes,
+                total: active == null ? 0 : total,
+                overallBytes:
+                    completed +
+                    (active == null ? 0 : bytes.clamp(0, active.source.length)),
+                overallTotal: overallTotal,
+              ),
+            );
+            onProgress?.call(stage, bytes, total);
+          },
         );
       }
       return owner.commit(
@@ -375,16 +402,24 @@ class OwnedNotePersistence {
     }
     final ids = <String>{};
     for (final attachment in attachments) {
+      activeAttachment = attachment;
+      fileIndex++;
       if (!ids.add(attachment.id)) {
         throw const NotePersistenceFailure(OperationOutcome.rejectedInput);
       }
       final result = await publish(
         attachmentTarget(reference, attachment.id),
         const StorageRevision.missing(),
-        CommitFileSource(attachment.source.path, attachment.source.length),
+        CommitFileSource(
+          attachment.source.path,
+          attachment.source.length,
+          receipt: attachment.source.receipt,
+        ),
       );
       if (!result.isSuccess) throw NotePersistenceFailure(result.outcome);
+      completed += attachment.source.length;
     }
+    activeAttachment = null;
     Directory? operation;
     try {
       final sources = Directory(
@@ -473,9 +508,10 @@ class OwnedNotePersistence {
 
 /// Prepared ciphertext, never plaintext or an in-memory attachment payload.
 class PreparedAttachmentFile {
-  const PreparedAttachmentFile(this.id, this.source);
+  const PreparedAttachmentFile(this.id, this.source, {this.fileName});
   final String id;
   final StreamingFileSource source;
+  final String? fileName;
 }
 
 class NotePersistenceFailure implements Exception {

@@ -63,11 +63,11 @@ class NoteReplacementDialog extends StatelessWidget {
                 style: theme.textTheme.titleSmall,
               ),
               const SizedBox(height: 6),
-              Text(
-                conflict.identical
-                    ? 'The imported version is identical.'
-                    : 'The imported version has different content.',
-              ),
+              Text(switch (conflict.identical) {
+                true => 'The imported version is identical.',
+                false => 'The imported version has different content.',
+                null => 'A note with the same ID is already in this library.',
+              }),
               const SizedBox(height: 12),
               Text(
                 conflict.title,

@@ -72,7 +72,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (documents?.activityResult(requestCode, resultCode, data) != true) {
+        if (files?.activityResult(requestCode, resultCode, data) != true &&
+            documents?.activityResult(requestCode, resultCode, data) != true) {
             super.onActivityResult(requestCode, resultCode, data)
         }
     }

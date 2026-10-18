@@ -64,6 +64,27 @@ Native file services currently use a `UserData` directory under the application 
 - Check that failed saves, failed unlocks, malformed files, and interrupted operations preserve existing content. Do not persist error messages as note content or report a failed write as successful.
 - Validate autosave and file-watcher interactions for overlapping writes, stale updates, and resource cleanup when changing those paths.
 
+## Processing defaults and import behavior
+
+- Apply the same processing policy across supported platforms. Preserve encryption/package compatibility, note and mention identities, recovery guarantees, and the accepted desktop/mobile designs.
+- Do not plan, add, or re-enable extra full-file verification, comparison, or read-back passes unless the user explicitly requests them. If correctness appears to need an extra verification pass, explain the purpose and cost and obtain the user's decision before adding it. Do not silently describe an optional pass as required.
+- Default all optional checks to `false`: source checking, decrypted-output verification, exported-backup validation, and extra verification after large writes. Missing older settings and Reset defaults must also use `false`. Preserve explicitly saved user choices; do not let platform rules or helpers silently override the captured job policy.
+- Perform encryption, decryption, extraction, copying, or packing in the necessary processing pass. Calculate required checksums/CRC during that pass. Avoid separate checksum scans, plaintext intermediates, repeated staging reads, and redundant copies. Keep necessary provider transfers and recovery backups; report them as actual work.
+- Preserve basic safety: valid paths and filenames, format/framing and bounds checks, capacity limits, short-read/write detection, flush/close, ownership and destination conflicts, cancellation, journals, attachment-first publication, and small note-metadata revision checks. Recovery may inspect ambiguous interrupted transactions. These protections do not authorize optional normal-job payload rescans.
+- On package import, use the note ID to detect conflicts and show Duplicate / Back up & Replace / Ignore. Do not compare incoming and existing payloads before showing the choices, or silently skip the dialog because their contents appear identical. Keep necessary incoming-package extraction and format checks.
+- Ignore and Duplicate must not read existing attachment payloads. Back up & Replace must retain the recovery predecessor and check attachment availability without full-file predecessor hashing or a second attachment-revision scan. Keep the note-envelope revision and draft/session guards so conflicting edits do not overwrite the current note.
+- Reuse valid decrypted caches across viewers and note switches until lock, credential changes, removal, or exit revoke them. Reuse prepared exports when source and options are unchanged; invalidate them when their inputs or owning session change. Do not decrypt or repack again merely because the user reopens the same item or requests the same unchanged export.
+
+## Processing messages and results
+
+- Use concise, professional labels that describe the actual operation: Encrypting, Decrypting, Extracting package, Packing export, and Saving encrypted files. Use "Saving encrypted files" for the local provider write instead of "Publishing encrypted data"; do not imply an upload or another encryption pass.
+- Show the current filename, File N of M for batches, changing processed/total bytes, percentage when the total is known, and a progress indicator. Use an indeterminate indicator when the total is unknown. Do not invent progress or display checking/verifying stages when those optional passes are disabled.
+- Present one progress entry per job. Make active work discoverable from its note/file item and Background tasks, and allow hidden progress to reopen for the same job. Progress updates must not steal editor focus or change panel expansion.
+- Keep job execution separate from its dialog. Hide/Back hides active progress without cancelling; cancellation remains an explicit action. Release export editing locks when processing ends, while retaining an already-open terminal result until the user closes it.
+- When a mobile export is ready, offer separate platform-native Save and Share actions with a meaningful, safe filename based on the note title. Keep the result dialog available after either action or native-picker cancellation until the user explicitly dismisses it.
+
+These runtime processing defaults do not waive the development validation requirements below. Do not repeat successful development checks without a new change, failure, or unresolved concern that justifies the rerun.
+
 ## Design workflow
 
 Use the Stitch Design plugin for design work and prefer the Stitch Pro model. If the plugin or preferred model is unavailable, report that limitation before using an alternative. Follow any explicit user planning-only or approval boundary before editing application UI, uploading design assets, or building.

@@ -57,6 +57,35 @@ void main() {
   Future<Directory> operation(String name) =>
       Directory(p.join(run.path, name)).create();
   for (final format in ExportFormat.values) {
+    test(
+      '${format.name} password framing preserves metadata larger than a cipher window',
+      () async {
+        final fields = {
+          ...metadata(),
+          'unknownLarge': 'x' * (2 * 1024 * 1024 + 17),
+        };
+        final out = p.join(run.path, 'large-${format.name}');
+        final write = await operation('large-write-${format.name}');
+        final receipt = await StreamingPackService().exportPackage(
+          metadata: fields,
+          attachments: await sources(),
+          format: format,
+          destination: out,
+          operationDirectory: write.path,
+          password: 'synthetic-archive',
+        );
+        expect(receipt.readbackBytes, 0);
+        final read = await operation('large-read-${format.name}');
+        final restored = await StreamingPackService().importPackage(
+          source: out,
+          operationDirectory: read.path,
+          password: 'synthetic-archive',
+        );
+        expect(restored.note.metadata, fields);
+      },
+    );
+  }
+  for (final format in ExportFormat.values) {
     for (final password in <String?>[null, '', 'synthetic-archive-password']) {
       test(
         '${format.name} file-backed round trip with archive password $password',
@@ -66,6 +95,7 @@ void main() {
           final out = File(p.join(run.path, 'package'));
           final write = await operation('write');
           final read = await operation('read');
+          final progress = <PackageExportProgress>[];
           await StreamingPackService().exportPackage(
             metadata: fields,
             attachments: input,
@@ -73,11 +103,75 @@ void main() {
             destination: out.path,
             operationDirectory: write.path,
             password: password,
+            onProgress: progress.add,
           );
+          expect(progress, isNotEmpty);
+          expect(
+            progress.every(
+              (event) => event.bytes >= 0 && event.bytes <= event.total,
+            ),
+            isTrue,
+          );
+          final written = progress.where(
+            (event) => event.phase == PackageExportPhase.writing,
+          );
+          expect(
+            written.any(
+              (event) => event.bytes > 0 && event.bytes == event.total,
+            ),
+            isTrue,
+          );
+          expect(progress.any((event) => event.fileName == 'same.txt'), isTrue);
+          if (password?.isNotEmpty == true) {
+            expect(
+              progress.any(
+                (event) => event.phase == PackageExportPhase.encrypting,
+              ),
+              isTrue,
+            );
+            expect(
+              progress.any(
+                (event) =>
+                    event.phase == PackageExportPhase.verifyingEncryption,
+              ),
+              isFalse,
+            );
+          }
+          final importProgress = <PackageImportProgress>[];
+          var finished = false;
           final decoded = await StreamingPackService().importPackage(
             source: out.path,
             operationDirectory: read.path,
             password: password,
+            onProgress: (event) {
+              expect(finished, isFalse);
+              importProgress.add(event);
+            },
+          );
+          finished = true;
+          expect(importProgress, isNotEmpty);
+          expect(
+            importProgress.every(
+              (e) =>
+                  e.bytes >= 0 &&
+                  e.bytes <= e.total &&
+                  e.fileIndex > 0 &&
+                  e.fileIndex <= e.fileCount,
+            ),
+            isTrue,
+          );
+          expect(importProgress.any((e) => e.bytes == 0), isTrue);
+          expect(
+            importProgress.any((e) => e.bytes > 0 && e.bytes == e.total),
+            isTrue,
+          );
+          expect(
+            importProgress.any((e) => e.fileName.contains('same.txt')),
+            isTrue,
+          );
+          expect(
+            importProgress.any((e) => e.phase == PackageImportPhase.decrypting),
+            password?.isNotEmpty == true,
           );
           expect(decoded.note.metadata, fields);
           for (final id in input.keys) {
@@ -98,6 +192,135 @@ void main() {
       );
     }
   }
+  for (final format in ExportFormat.values) {
+    test(
+      '${format.name} explicit write verification retains checked export path',
+      () async {
+        final input = await sources();
+        final out = p.join(run.path, 'checked-${format.name}');
+        final events = <PackageExportProgress>[];
+        final receipt = await StreamingPackService().exportPackage(
+          metadata: metadata(),
+          attachments: input,
+          format: format,
+          destination: out,
+          operationDirectory: (await operation(
+            'checked-${format.name}-write',
+          )).path,
+          password: 'synthetic-password',
+          verifyWrites: true,
+          onProgress: events.add,
+        );
+        expect(receipt.verifyReadback, isTrue);
+        expect(receipt.readbackBytes, greaterThan(receipt.length));
+        expect(receipt.intermediateWriteBytes, greaterThan(0));
+        expect(
+          events.any((e) => e.phase == PackageExportPhase.verifyingEncryption),
+          isTrue,
+        );
+        final decoded = await StreamingPackService().importPackage(
+          source: out,
+          operationDirectory: (await operation(
+            'checked-${format.name}-read',
+          )).path,
+          password: 'synthetic-password',
+          verifyWrites: true,
+        );
+        expect(decoded.note.metadata, metadata());
+        expect(
+          decoded.attachments.values.every((s) => s.receipt!.verifyReadback),
+          isTrue,
+        );
+      },
+    );
+  }
+  test(
+    'packing progress can cancel the worker without emitting completion',
+    () async {
+      final input = await sources();
+      final first = File(input['first']!.path);
+      // Opaque attachment bytes are copied without decryption by the pack writer.
+      await first.open(mode: FileMode.append).then((handle) async {
+        try {
+          await handle.truncate(64 * 1024 * 1024);
+        } finally {
+          await handle.close();
+        }
+      });
+      input['first'] = StreamingFileSource(first.path, await first.length());
+      final cancellation = File(p.join(run.path, 'cancel-packing'));
+      final progress = <PackageExportProgress>[];
+      await expectLater(
+        StreamingPackService().exportPackage(
+          metadata: metadata(),
+          attachments: input,
+          format: ExportFormat.binary,
+          destination: p.join(run.path, 'cancelled-package'),
+          operationDirectory: (await operation('cancel-write')).path,
+          cancellationFile: cancellation.path,
+          onProgress: (event) {
+            progress.add(event);
+            if (event.phase == PackageExportPhase.packing &&
+                !cancellation.existsSync()) {
+              cancellation.writeAsStringSync('cancel');
+            }
+          },
+        ),
+        throwsA(isA<FileJobCancelled>()),
+      );
+      expect(progress, isNotEmpty);
+      expect(
+        progress.any((event) => event.phase == PackageExportPhase.writing),
+        isFalse,
+      );
+      expect(await first.length(), 64 * 1024 * 1024);
+    },
+  );
+  test(
+    'DEFLATE extraction reports byte progress without changing payloads',
+    () async {
+      final fields = metadata();
+      final input = await sources();
+      final zip = Archive()
+        ..addFile(ArchiveFile.string('note.json', jsonEncode(fields)))
+        ..addFile(
+          ArchiveFile.string(
+            'metadata.json',
+            jsonEncode({'first': 'first.med', 'second': 'second.med'}),
+          ),
+        );
+      for (final entry in input.entries) {
+        zip.addFile(
+          ArchiveFile(
+            'attachments/${entry.key}.med',
+            entry.value.length,
+            await File(entry.value.path).readAsBytes(),
+          ),
+        );
+      }
+      final file = await File(
+        p.join(run.path, 'compressed.zip'),
+      ).writeAsBytes(ZipEncoder().encode(zip));
+      final progress = <PackageImportProgress>[];
+      final restored = await StreamingPackService().importPackage(
+        source: file.path,
+        operationDirectory: (await operation('deflate-read')).path,
+        onProgress: progress.add,
+      );
+      expect(
+        progress.where((e) => e.fileName == 'note.json').last.bytes,
+        utf8.encode(jsonEncode(fields)).length,
+      );
+      expect(restored.note.metadata, fields);
+      for (final entry in input.entries) {
+        expect(
+          await File(restored.attachments[entry.key]!.path).readAsBytes(),
+          await File(entry.value.path).readAsBytes(),
+        );
+      }
+    },
+  );
+
   test('ZIP64 keeps duplicate display filenames distinct', () async {
     final input = await sources();
     final fields = metadata(duplicateNames: true);

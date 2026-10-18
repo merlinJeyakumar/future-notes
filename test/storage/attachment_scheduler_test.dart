@@ -21,7 +21,7 @@ SystemCapacity capacity({
 
 void main() {
   test(
-    'mobile export scans default off and independently respect saved preferences; desktop stays checked',
+    'export scans default off and independently respect saved preferences on every backend',
     () {
       for (final metadata in [null, <String, Object>{}]) {
         final defaults = AttachmentPerformance.fromJson(metadata);
@@ -30,9 +30,13 @@ void main() {
           verifyOutput: false,
         ));
         expect(defaults.exportChecks(mobile: false), (
-          checkSource: true,
-          verifyOutput: true,
+          checkSource: false,
+          verifyOutput: false,
         ));
+        expect(defaults.validateExportedBackup, isFalse);
+        expect(defaults.validateBackupExport(mobile: true), isFalse);
+        expect(defaults.validateBackupExport(mobile: false), isFalse);
+        expect(defaults.verifyLargeFileWrites, isFalse);
       }
       for (final check in [false, true]) {
         for (final verify in [false, true]) {
@@ -46,9 +50,22 @@ void main() {
             verifyOutput: verify,
           ));
           expect(reopened.exportChecks(mobile: false), (
-            checkSource: true,
-            verifyOutput: true,
+            checkSource: check,
+            verifyOutput: verify,
           ));
+          final backup = reopened.copyWith(validateExportedBackup: true);
+          expect(AttachmentPerformance.fromJson(backup.toJson()), backup);
+          expect(backup.validateBackupExport(mobile: true), isTrue);
+          expect(
+            backup.copyWith(memoryMiB: 256).validateExportedBackup,
+            isTrue,
+          );
+          expect(
+            backup
+                .copyWith(validateExportedBackup: false)
+                .validateBackupExport(mobile: true),
+            isFalse,
+          );
         }
       }
     },
@@ -65,6 +82,8 @@ void main() {
       {'maxParallel': '4'},
       {'checkBeforeOpen': 'false'},
       {'verifyAfterOpen': 1},
+      {'validateExportedBackup': 'false'},
+      {'verifyLargeFileWrites': 'false'},
     ]) {
       expect(() => AttachmentPerformance.fromJson(json), throwsFormatException);
     }
@@ -73,6 +92,8 @@ void main() {
       memoryMiB: 256,
       checkBeforeOpen: true,
       verifyAfterOpen: true,
+      validateExportedBackup: true,
+      verifyLargeFileWrites: true,
     );
     expect(AttachmentPerformance.fromJson(profile.toJson()), profile);
   });

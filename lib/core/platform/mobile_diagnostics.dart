@@ -16,7 +16,8 @@ enum MobileDiagnostic {
   jobRecordFailed('JOB_RECORD_FAILED'),
   jobChannelFailed('JOB_CHANNEL_FAILED'),
   jobPhase('DART_JOB_PHASE'),
-  viewerFailed('VIEWER_FAILED');
+  viewerFailed('VIEWER_FAILED'),
+  discoveryFailed('DISCOVERY_FAILED');
 
   const MobileDiagnostic(this.wireName);
   final String wireName;

@@ -1,6 +1,7 @@
 import '../../../core/theme/app_motion.dart';
 import '../../../core/theme/app_dialog.dart';
 import '../models/save_ui_state.dart';
+import '../models/attachment_job.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
@@ -12,6 +13,8 @@ import 'attachment_progress.dart';
 import 'attachment_mentions.dart';
 import 'attachment_preview.dart';
 import 'expanding_formatting_bar.dart';
+import 'editor_panels.dart';
+import 'job_notifications.dart';
 import '../../../core/routing/fnotes_uri.dart';
 import '../models/note_model.dart';
 import '../widgets/password_dialog.dart';
@@ -44,17 +47,64 @@ class MobileContentArea extends StatefulWidget {
     required this.viewModel,
     this.onBack,
     this.jobNotificationCount,
+    this.activeJobCount,
     this.onJobNotifications,
+    this.onExport,
+    this.exportRequests,
+    this.dismissPanels,
   });
   final VoidCallback? onBack;
   final ValueListenable<int>? jobNotificationCount;
+  final ValueListenable<int>? activeJobCount;
   final VoidCallback? onJobNotifications;
+  final Future<void> Function()? onExport;
+  final ValueListenable<int>? exportRequests;
+  final Listenable? dismissPanels;
 
   @override
   State<MobileContentArea> createState() => _MobileContentAreaState();
 }
 
 class _MobileContentAreaState extends State<MobileContentArea> {
+  bool _exporting = false;
+  bool _readOnlyBeforeExport = false;
+
+  void _restoreExportReadOnly() {
+    viewModel.quillController.readOnly =
+        _readOnlyBeforeExport ||
+        viewModel.isLibraryCutover ||
+        viewModel.isImportCutover ||
+        viewModel.isDeletingCurrent;
+  }
+
+  void _exportChanged() => _syncExportState();
+
+  void _syncExportState({bool rebuild = true}) {
+    final active =
+        (widget.exportRequests?.value ?? 0) > 0 || viewModel.hasActiveExport;
+    if (active == _exporting) return;
+    if (active) {
+      _readOnlyBeforeExport = viewModel.quillController.readOnly;
+      viewModel.quillController.readOnly = true;
+      _focusNode.unfocus();
+      _htmlFocusNode.unfocus();
+    } else {
+      _restoreExportReadOnly();
+    }
+    _exporting = active;
+    if (rebuild && mounted) setState(() {});
+  }
+
+  Widget _exportDisabled(Widget child) => ExcludeFocus(
+    excluding: _exporting,
+    child: ExcludeSemantics(
+      excluding: _exporting,
+      child: IgnorePointer(
+        ignoring: _exporting,
+        child: Opacity(opacity: _exporting ? .45 : 1, child: child),
+      ),
+    ),
+  );
   static const _touch = true;
   late final AttachmentEmbedBuilder _embedBuilder;
   late final QuillEditorConfig _editorConfig;
@@ -62,15 +112,51 @@ class _MobileContentAreaState extends State<MobileContentArea> {
   late final ScrollController _scrollController;
   final _unlockFocusNode = FocusNode(debugLabel: 'Note unlock password');
   final _htmlFocusNode = FocusNode(debugLabel: 'HTML source');
-  final _attachmentCollapseRequests = ValueNotifier<int>(0);
+  final _panels = MobileEditorPanels();
+  Object? _panelOwner;
+  Object? _watchedDocument;
+  StreamSubscription? _bodyChanges;
+  String _htmlText = '';
   final _richEditorKey = GlobalKey<EditorState>();
   final _htmlEditorKey = GlobalKey();
 
-  void _collapseAttachments() => _attachmentCollapseRequests.value++;
+  void _collapseAttachments() => _panels.collapse();
+
+  void _syncPanels() {
+    final owner = (
+      viewModel.draftSession.generation,
+      viewModel.currentContentPath,
+      viewModel.draftSession.credentialGeneration,
+      viewModel.isLocked,
+      viewModel.editorMode,
+    );
+    if (_panelOwner != owner) {
+      _panelOwner = owner;
+      _panels.collapse();
+    }
+    final document = viewModel.quillController.document;
+    if (!identical(document, _watchedDocument)) {
+      _bodyChanges?.cancel();
+      _watchedDocument = document;
+      _bodyChanges = viewModel.quillController.changes.listen((change) {
+        if (change.source == ChangeSource.local &&
+            _focusNode.hasFocus &&
+            change.change.toList().any((op) => op.isInsert || op.isDelete)) {
+          _panels.collapse();
+        }
+      });
+    }
+  }
+
+  void _htmlChanged() {
+    final text = viewModel.htmlController.text;
+    if (text != _htmlText && _htmlFocusNode.hasFocus) _panels.collapse();
+    _htmlText = text;
+  }
 
   void _onEditorFocus() {
     if (_focusNode.hasFocus || _htmlFocusNode.hasFocus) {
-      _collapseAttachments();
+      _panels.editorFocused();
     }
   }
 
@@ -88,6 +174,12 @@ class _MobileContentAreaState extends State<MobileContentArea> {
     _scrollController = viewModel.scrollController;
     _focusNode.addListener(_onEditorFocus);
     _htmlFocusNode.addListener(_onEditorFocus);
+    viewModel.addListener(_syncPanels);
+    viewModel.quillController.addListener(_syncPanels);
+    viewModel.htmlController.addListener(_htmlChanged);
+    _htmlText = viewModel.htmlController.text;
+    _syncPanels();
+    widget.dismissPanels?.addListener(_collapseAttachments);
 
     _editorConfig = QuillEditorConfig(
       editorKey: _richEditorKey,
@@ -99,6 +191,7 @@ class _MobileContentAreaState extends State<MobileContentArea> {
           EdgeInsets.zero, // The input area supplies the single writing inset.
       embedBuilders: [_embedBuilder],
       onLaunchUrl: (url) {
+        if (_exporting) return;
         if (FnotesTarget.isInternal(url)) {
           final result = viewModel.resolveInternalLink(url);
           if (result.isSuccess) {
@@ -123,13 +216,38 @@ class _MobileContentAreaState extends State<MobileContentArea> {
       enableInteractiveSelection: true,
       enableSelectionToolbar: true,
     );
+    viewModel.attachmentJobsNotifier.addListener(_exportChanged);
+    widget.exportRequests?.addListener(_exportChanged);
+    _syncExportState(rebuild: false);
+  }
+
+  @override
+  void didUpdateWidget(covariant MobileContentArea oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dismissPanels != widget.dismissPanels) {
+      oldWidget.dismissPanels?.removeListener(_collapseAttachments);
+      widget.dismissPanels?.addListener(_collapseAttachments);
+    }
+    if (oldWidget.exportRequests != widget.exportRequests) {
+      oldWidget.exportRequests?.removeListener(_exportChanged);
+      widget.exportRequests?.addListener(_exportChanged);
+      _syncExportState(rebuild: false);
+    }
   }
 
   @override
   void dispose() {
+    viewModel.attachmentJobsNotifier.removeListener(_exportChanged);
+    widget.exportRequests?.removeListener(_exportChanged);
+    if (_exporting) _restoreExportReadOnly();
     _focusNode.removeListener(_onEditorFocus);
     _htmlFocusNode.removeListener(_onEditorFocus);
-    _attachmentCollapseRequests.dispose();
+    viewModel.removeListener(_syncPanels);
+    viewModel.quillController.removeListener(_syncPanels);
+    viewModel.htmlController.removeListener(_htmlChanged);
+    _bodyChanges?.cancel();
+    widget.dismissPanels?.removeListener(_collapseAttachments);
+    _panels.dispose();
     _unlockFocusNode.dispose();
     _htmlFocusNode.dispose();
     super.dispose();
@@ -154,7 +272,15 @@ class _MobileContentAreaState extends State<MobileContentArea> {
                 ValueListenableBuilder<bool>(
                   valueListenable: viewModel.isLockedNotifier,
                   builder: (context, isLocked, child) {
-                    return _buildTopStrip(context, isMobile);
+                    return Listener(
+                      onPointerDown: (_) => _panels.collapse(),
+                      child: Focus(
+                        onFocusChange: (focused) {
+                          if (focused) _panels.collapse();
+                        },
+                        child: _buildTopStrip(context, isMobile),
+                      ),
+                    );
                   },
                 ),
 
@@ -165,27 +291,30 @@ class _MobileContentAreaState extends State<MobileContentArea> {
                     if (isLocked || viewModel.isHtmlMode) {
                       return const SizedBox.shrink();
                     }
-                    return IgnorePointer(
-                      ignoring: viewModel.isLibraryCutover,
-                      child: Padding(
-                        padding: EdgeInsets.only(
-                          left: 16,
-                          right: 16,
-                          top: 0,
-                          bottom: 4,
-                        ),
-                        child: MobileFormattingBar(
-                          key: ValueKey((
-                            viewModel.draftSession.generation,
-                            viewModel.currentContentPath,
-                          )),
-                          surfaceColor: colors.toolbarIsland,
-                          outlineColor: colors.divider.withValues(alpha: .3),
-                          restoreEditorFocus: _restoreEditorFocus,
-                          expandedChild: _buildFormattingControls(
-                            expanded: true,
+                    return _exportDisabled(
+                      IgnorePointer(
+                        ignoring: viewModel.isLibraryCutover,
+                        child: Padding(
+                          padding: EdgeInsets.only(
+                            left: 16,
+                            right: 16,
+                            top: 0,
+                            bottom: 4,
                           ),
-                          child: _buildFormattingControls(),
+                          child: MobileFormattingBar(
+                            panels: _panels,
+                            key: ValueKey((
+                              viewModel.draftSession.generation,
+                              viewModel.currentContentPath,
+                            )),
+                            surfaceColor: colors.toolbarIsland,
+                            outlineColor: colors.divider.withValues(alpha: .3),
+                            restoreEditorFocus: _restoreEditorFocus,
+                            expandedChild: _buildFormattingControls(
+                              expanded: true,
+                            ),
+                            child: _buildFormattingControls(),
+                          ),
                         ),
                       ),
                     );
@@ -206,19 +335,27 @@ class _MobileContentAreaState extends State<MobileContentArea> {
                     ),
                     enabled: !viewModel.isLocked,
                     child: Listener(
-                      onPointerDown: (_) => _collapseAttachments(),
+                      onPointerUp: (_) => _collapseAttachments(),
                       child: AttachmentMentions(
+                        enabled: !_exporting,
                         model: viewModel,
                         richKey: _richEditorKey,
                         htmlKey: _htmlEditorKey,
                         htmlFocus: _htmlFocusNode,
-                        child: _buildInputArea(context, isMobile: isMobile),
+                        child: ExcludeFocus(
+                          excluding: _exporting && !viewModel.isLocked,
+                          child: _buildInputArea(context, isMobile: isMobile),
+                        ),
                       ),
                     ),
                   ),
                 ),
 
-                AttachmentJobPanel(viewModel: viewModel, auxiliaryOnly: true),
+                AttachmentJobPanel(
+                  viewModel: viewModel,
+                  auxiliaryOnly: true,
+                  excludedOperations: const {AttachmentJobOperation.export},
+                ),
                 MobileAttachmentProgress(model: viewModel),
                 ValueListenableBuilder(
                   valueListenable: viewModel.pendingDeletionsNotifier,
@@ -232,8 +369,10 @@ class _MobileContentAreaState extends State<MobileContentArea> {
                               child: Text('Permanent deletion is incomplete.'),
                             ),
                             TextButton(
-                              onPressed: () =>
-                                  viewModel.deleteReviewedNote(reference),
+                              onPressed: _exporting
+                                  ? null
+                                  : () =>
+                                        viewModel.deleteReviewedNote(reference),
                               child: const Text('Retry cleanup'),
                             ),
                           ],
@@ -250,9 +389,15 @@ class _MobileContentAreaState extends State<MobileContentArea> {
                     return ValueListenableBuilder<List<AttachmentModel>>(
                       valueListenable: viewModel.attachmentsNotifier,
                       builder: (context, attachments, child) {
-                        return AttachmentStrip(
-                          viewModel: viewModel,
-                          collapseRequests: _attachmentCollapseRequests,
+                        return _exportDisabled(
+                          MobilePanelRegion(
+                            panels: _panels,
+                            panel: MobileEditorPanel.attachments,
+                            child: AttachmentStrip(
+                              viewModel: viewModel,
+                              panels: _panels,
+                            ),
+                          ),
                         );
                       },
                     );
@@ -282,21 +427,6 @@ class _MobileContentAreaState extends State<MobileContentArea> {
                   icon: const Icon(Icons.arrow_back),
                 ),
               Expanded(child: _buildHeaderTitle()),
-              if (widget.jobNotificationCount != null &&
-                  widget.onJobNotifications != null)
-                ValueListenableBuilder<int>(
-                  valueListenable: widget.jobNotificationCount!,
-                  builder: (context, count, _) => count == 0
-                      ? const SizedBox.shrink()
-                      : IconButton(
-                          tooltip: '$count job notifications',
-                          onPressed: widget.onJobNotifications,
-                          icon: Badge.count(
-                            count: count,
-                            child: const Icon(Icons.notifications_outlined),
-                          ),
-                        ),
-                ),
               IconButton(
                 tooltip: 'Note actions',
                 icon: const Icon(Icons.more_vert),
@@ -339,6 +469,7 @@ class _MobileContentAreaState extends State<MobileContentArea> {
             : TextField(
                 controller: viewModel.titleController,
                 readOnly:
+                    _exporting ||
                     viewModel.isLibraryCutover ||
                     viewModel.isImportCutover ||
                     viewModel.isDeletingCurrent ||
@@ -373,13 +504,15 @@ class _MobileContentAreaState extends State<MobileContentArea> {
           _buildSubtleIconButton(
             Icons.attach_file_rounded,
             'Attach file',
-            onPressed: viewModel.pickAttachment,
+            onPressed: _exporting ? null : viewModel.pickAttachment,
           ),
         if (viewModel.isLocked || viewModel.isPasswordSet)
           _buildSubtleIconButton(
             viewModel.isLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
             viewModel.isLocked ? 'Unlock' : 'Lock File',
-            onPressed: () => _handleLockAction(context),
+            onPressed: _exporting && !viewModel.isLocked
+                ? null
+                : () => _handleLockAction(context),
             isActive: true,
           ),
         if (!viewModel.isLocked) _buildSaveButton(),
@@ -391,7 +524,7 @@ class _MobileContentAreaState extends State<MobileContentArea> {
   Widget _buildSubtleIconButton(
     IconData icon,
     String tooltip, {
-    required VoidCallback onPressed,
+    required VoidCallback? onPressed,
     bool isActive = false,
     Color? color,
   }) {
@@ -402,7 +535,9 @@ class _MobileContentAreaState extends State<MobileContentArea> {
       icon: Icon(
         icon,
         size: 20,
-        color: color ?? (isActive ? colors.accent : colors.subtleGray),
+        color: onPressed == null
+            ? colors.subtleGray.withValues(alpha: .4)
+            : color ?? (isActive ? colors.accent : colors.subtleGray),
       ),
     );
   }
@@ -419,7 +554,8 @@ class _MobileContentAreaState extends State<MobileContentArea> {
       color: colors.accent,
       disabledColor: colors.subtleGray.withValues(alpha: .45),
       onPressed:
-          viewModel.isBusy ||
+          _exporting ||
+              viewModel.isBusy ||
               !state.hasChanges ||
               state.phase == SavePhase.saving ||
               !viewModel.draftSession.canWrite
@@ -710,11 +846,29 @@ class _MobileContentAreaState extends State<MobileContentArea> {
                       selected: viewModel.editorMode == mode,
                       child: TextButton(
                         onPressed:
-                            converting ||
+                            _exporting ||
+                                converting ||
                                 viewModel.isImportCutover ||
                                 !viewModel.draftSession.canWrite
                             ? null
-                            : () => viewModel.setEditorMode(mode),
+                            : () async {
+                                final generation =
+                                    viewModel.draftSession.generation;
+                                final result = await viewModel.setEditorMode(
+                                  mode,
+                                );
+                                if (mounted &&
+                                    result.isSuccess &&
+                                    !_exporting &&
+                                    mode == EditorMode.html &&
+                                    viewModel.isHtmlMode &&
+                                    viewModel.draftSession.generation ==
+                                        generation) {
+                                  await viewModel.formatHtml(
+                                    expandTextBlocks: true,
+                                  );
+                                }
+                              },
                         style: TextButton.styleFrom(
                           foregroundColor: viewModel.editorMode == mode
                               ? colors.accent
@@ -797,13 +951,14 @@ class _MobileContentAreaState extends State<MobileContentArea> {
 
   void _restoreEditorFocus() {
     if (!mounted ||
+        _exporting ||
         viewModel.isLocked ||
         viewModel.isHtmlMode ||
         viewModel.isImportCutover ||
         !viewModel.draftSession.canWrite) {
       return;
     }
-    _focusNode.requestFocus();
+    _panels.restoreFocus(_focusNode.requestFocus);
   }
 
   QuillToolbarColorButtonOptions _getColorButtonOptions() {
@@ -886,12 +1041,20 @@ class _MobileContentAreaState extends State<MobileContentArea> {
         key: ValueKey(viewModel.draftSession.generation),
         focusNode: _unlockFocusNode,
         onUnlock: (password) async {
-          final unlocked = await viewModel.unlockNote(password);
+          final unlocked = await viewModel.unlockNote(
+            password,
+            readOnlyExport: _exporting,
+          );
           if (unlocked && mounted) {
+            if (_exporting) {
+              _readOnlyBeforeExport = !viewModel.draftSession.canWrite;
+              viewModel.quillController.readOnly = true;
+            }
             final generation = viewModel.draftSession.generation;
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted &&
                   !viewModel.isLocked &&
+                  !_exporting &&
                   generation == viewModel.draftSession.generation) {
                 _focusNode.requestFocus();
               }
@@ -915,14 +1078,17 @@ class _MobileContentAreaState extends State<MobileContentArea> {
                     valueListenable: viewModel.isConvertingNotifier,
                     builder: (context, converting, _) => TextButton.icon(
                       onPressed:
-                          converting ||
+                          _exporting ||
+                              converting ||
                               !viewModel.draftSession.canWrite ||
                               viewModel.isLibraryCutover ||
                               viewModel.isImportCutover ||
                               viewModel.isDeletingCurrent
                           ? null
                           : () async {
-                              await viewModel.formatHtml();
+                              await viewModel.formatHtml(
+                                expandTextBlocks: true,
+                              );
                               if (mounted &&
                                   viewModel.isHtmlMode &&
                                   !viewModel.isLocked) {
@@ -949,18 +1115,23 @@ class _MobileContentAreaState extends State<MobileContentArea> {
                         key: _htmlEditorKey,
                         controller: viewModel.htmlController,
                         focusNode: _htmlFocusNode,
+                        wrap: false,
+                        horizontalScroll: true,
+                        keyboardType: TextInputType.multiline,
+                        smartQuotesType: SmartQuotesType.disabled,
                         readOnly:
+                            _exporting ||
                             viewModel.isLibraryCutover ||
                             viewModel.isImportCutover ||
                             viewModel.isDeletingCurrent ||
                             !viewModel.draftSession.canWrite,
                         textStyle: TextStyle(
-                          fontFamily: 'Consolas',
+                          fontFamily: 'monospace',
                           fontFamilyFallback: const [
                             'Courier New',
                             'monospace',
                           ],
-                          fontSize: 14,
+                          fontSize: 12,
                           height: 1.5,
                           color: colors.textPrimary,
                         ),
@@ -969,12 +1140,14 @@ class _MobileContentAreaState extends State<MobileContentArea> {
                         minLines: 30,
                         background: colors.background,
                         lineNumberStyle: LineNumberStyle(
+                          width: 32,
+                          margin: 8,
                           background: colors.background,
                           textStyle: TextStyle(
                             color: colors.subtleGray,
                             fontSize: 12,
                             height: 1.5,
-                            fontFamily: 'Consolas',
+                            fontFamily: 'monospace',
                           ),
                         ),
                       ),
@@ -998,141 +1171,79 @@ class _MobileContentAreaState extends State<MobileContentArea> {
     if (!viewModel.ensureExtendedNoteOperations()) return;
     showAppDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: colors.toolbarIsland,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Note actions',
-              style: TextStyle(color: colors.textPrimary, fontSize: 13.824),
-            ),
-            if (viewModel.currentFileName != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  viewModel.currentFileName!,
-                  style: TextStyle(
-                    color: colors.textSecondary,
-                    fontSize: 9.504,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+      builder: (context) => ListenableBuilder(
+        listenable: Listenable.merge([
+          viewModel.attachmentJobsNotifier,
+          if (widget.exportRequests != null) widget.exportRequests!,
+        ]),
+        builder: (context, _) => AlertDialog(
+          scrollable: true,
+          backgroundColor: colors.toolbarIsland,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Note actions',
+                style: TextStyle(color: colors.textPrimary, fontSize: 13.824),
               ),
-            Divider(color: colors.divider),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Change/Set Password
-            _buildSettingsTile(
-              icon: viewModel.isPasswordSet
-                  ? Icons.lock_reset_rounded
-                  : Icons.lock_outline_rounded,
-              title: viewModel.isPasswordSet
-                  ? 'Change Password'
-                  : 'Set Password',
-              onTap: () async {
-                // Close settings menu first
-                Navigator.pop(context);
-
-                // Use State's mounted check and context for remaining operations
-                if (!mounted) return;
-                final stateContext = this.context;
-
-                if (viewModel.isPasswordSet) {
-                  // First, verify the current password
-                  final currentPassword = await _showPasswordDialog(
-                    stateContext,
-                    mode: PasswordMode.unlock,
-                  );
-                  if (currentPassword == null || currentPassword.isEmpty)
-                    return;
-
-                  // Verify the current password
-                  final verified = viewModel.verifyPassword(currentPassword);
-                  if (!verified) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(stateContext).showSnackBar(
-                        const SnackBar(
-                          content: Text('Incorrect current password.'),
-                          backgroundColor: Colors.red,
-                        ),
-                      );
-                    }
-                    return;
-                  }
-
-                  // Now ask for the new password
-                  if (!mounted) return;
-                  final newPassword = await _showPasswordDialog(
-                    stateContext,
-                    mode: PasswordMode.set,
-                  );
-                  if (newPassword == null || newPassword.isEmpty) return;
-
-                  // Legacy operations retain their existing modal; owned
-                  // preparation uses the nonblocking per-file/batch channels.
-                  if (!mounted) return;
-                  if (!viewModel.usesOwnedStorage)
-                    showAppDialog(
-                      context: stateContext,
-                      barrierDismissible: false,
-                      builder: (ctx) => _ProgressDialog(viewModel: viewModel),
-                    );
-
-                  final result = await viewModel.changePasswordResult(
-                    newPassword,
-                    oldPassword: currentPassword,
-                  );
-
-                  // Close progress dialog using root navigator
-                  if (mounted && !viewModel.usesOwnedStorage) {
-                    Navigator.of(stateContext, rootNavigator: true).pop();
-                  }
-
-                  if (mounted) {
-                    ScaffoldMessenger.of(stateContext).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          result.isSuccess
-                              ? 'Password changed successfully'
-                              : result.message ?? 'Password change failed.',
-                        ),
-                        backgroundColor: result.isSuccess
-                            ? Colors.green
-                            : Colors.red,
+              if (viewModel.currentFileName != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    viewModel.currentFileName!,
+                    style: TextStyle(
+                      color: colors.textSecondary,
+                      fontSize: 9.504,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              Divider(color: colors.divider),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.pending_actions),
+                title: const Text('Background tasks'),
+                onTap: () {
+                  Navigator.pop(context);
+                  if (widget.onJobNotifications != null) {
+                    widget.onJobNotifications!();
+                  } else {
+                    showAppDialog<void>(
+                      context: this.context,
+                      builder: (_) => BackgroundTasksDialog(
+                        model: viewModel,
+                        selectExportJobs: false,
                       ),
                     );
                   }
-                } else {
-                  final password = await _showPasswordDialog(
-                    stateContext,
-                    mode: PasswordMode.set,
-                  );
-                  if (password != null && password.isNotEmpty) {
-                    final saved = await viewModel.setPassword(password);
-                    if (mounted &&
-                        saved.isSuccess &&
-                        (!viewModel.usesOwnedStorage ||
-                            !viewModel.draftSession.isPersisted)) {
-                      _promptSave(this.context);
-                    }
-                  }
-                }
-              },
-            ),
-
-            // Remove Password (only if set)
-            if (viewModel.isPasswordSet)
+                },
+              ),
+              if (widget.onExport != null)
+                _buildSettingsTile(
+                  icon: Icons.ios_share_rounded,
+                  title: 'Export',
+                  onTap: () {
+                    Navigator.pop(context);
+                    unawaited(widget.onExport!());
+                  },
+                ),
+              // Change/Set Password
               _buildSettingsTile(
-                icon: Icons.lock_open_rounded,
-                title: 'Remove Password',
-                textColor: Colors.orangeAccent,
-                iconColor: Colors.orangeAccent,
+                icon: viewModel.isPasswordSet
+                    ? Icons.lock_reset_rounded
+                    : Icons.lock_outline_rounded,
+                title: viewModel.isPasswordSet
+                    ? 'Change Password'
+                    : 'Set Password',
+                enabled: !_exporting,
                 onTap: () async {
                   // Close settings menu first
                   Navigator.pop(context);
@@ -1141,83 +1252,184 @@ class _MobileContentAreaState extends State<MobileContentArea> {
                   if (!mounted) return;
                   final stateContext = this.context;
 
-                  // Prompt for password verification before removing
-                  final password = await _showPasswordDialog(
-                    stateContext,
-                    mode: PasswordMode.unlock,
-                  );
-                  if (password == null || password.isEmpty) return;
+                  if (viewModel.isPasswordSet) {
+                    // First, verify the current password
+                    final currentPassword = await _showPasswordDialog(
+                      stateContext,
+                      mode: PasswordMode.unlock,
+                    );
+                    if (currentPassword == null || currentPassword.isEmpty)
+                      return;
 
-                  // Verify the password first
-                  final verified = viewModel.verifyPassword(password);
-                  if (!verified) {
+                    // Verify the current password
+                    final verified = viewModel.verifyPassword(currentPassword);
+                    if (!verified) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(stateContext).showSnackBar(
+                          const SnackBar(
+                            content: Text('Incorrect current password.'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                      return;
+                    }
+
+                    // Now ask for the new password
+                    if (!mounted) return;
+                    final newPassword = await _showPasswordDialog(
+                      stateContext,
+                      mode: PasswordMode.set,
+                    );
+                    if (newPassword == null || newPassword.isEmpty) return;
+
+                    // Legacy operations retain their existing modal; owned
+                    // preparation uses the nonblocking per-file/batch channels.
+                    if (!mounted) return;
+                    if (!viewModel.usesOwnedStorage)
+                      showAppDialog(
+                        context: stateContext,
+                        barrierDismissible: false,
+                        builder: (ctx) => _ProgressDialog(viewModel: viewModel),
+                      );
+
+                    final result = await viewModel.changePasswordResult(
+                      newPassword,
+                      oldPassword: currentPassword,
+                    );
+
+                    // Close progress dialog using root navigator
+                    if (mounted && !viewModel.usesOwnedStorage) {
+                      Navigator.of(stateContext, rootNavigator: true).pop();
+                    }
+
                     if (mounted) {
                       ScaffoldMessenger.of(stateContext).showSnackBar(
-                        const SnackBar(
-                          content: Text('Incorrect password.'),
-                          backgroundColor: Colors.red,
+                        SnackBar(
+                          content: Text(
+                            result.isSuccess
+                                ? 'Password changed successfully'
+                                : result.message ?? 'Password change failed.',
+                          ),
+                          backgroundColor: result.isSuccess
+                              ? Colors.green
+                              : Colors.red,
                         ),
                       );
                     }
-                    return;
-                  }
-
-                  // Show progress dialog
-                  if (!mounted) return;
-                  if (!viewModel.usesOwnedStorage)
-                    showAppDialog(
-                      context: stateContext,
-                      barrierDismissible: false,
-                      builder: (ctx) => _ProgressDialog(viewModel: viewModel),
+                  } else {
+                    final password = await _showPasswordDialog(
+                      stateContext,
+                      mode: PasswordMode.set,
                     );
-
-                  final success = await viewModel.removePassword(
-                    password: password,
-                  );
-
-                  // Close progress dialog using root navigator
-                  if (mounted && !viewModel.usesOwnedStorage) {
-                    Navigator.of(stateContext, rootNavigator: true).pop();
-                  }
-
-                  if (mounted) {
-                    ScaffoldMessenger.of(stateContext).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          success
-                              ? 'Password removed. Content decrypted.'
-                              : 'Failed to remove password.',
-                        ),
-                        backgroundColor: success ? Colors.green : Colors.red,
-                      ),
-                    );
+                    if (password != null && password.isNotEmpty) {
+                      final saved = await viewModel.setPassword(password);
+                      if (mounted &&
+                          saved.isSuccess &&
+                          (!viewModel.usesOwnedStorage ||
+                              !viewModel.draftSession.isPersisted)) {
+                        _promptSave(this.context);
+                      }
+                    }
                   }
                 },
               ),
 
-            // Spacer and Divider before Delete
-            const SizedBox(height: 16),
-            Divider(color: colors.divider),
+              // Remove Password (only if set)
+              if (viewModel.isPasswordSet)
+                _buildSettingsTile(
+                  icon: Icons.lock_open_rounded,
+                  title: 'Remove Password',
+                  enabled: !_exporting,
+                  textColor: Colors.orangeAccent,
+                  iconColor: Colors.orangeAccent,
+                  onTap: () async {
+                    // Close settings menu first
+                    Navigator.pop(context);
 
-            // Delete File
-            _buildSettingsTile(
-              icon: Icons.delete_outline_rounded,
-              title: 'Delete File',
-              textColor: Colors.redAccent,
-              iconColor: Colors.redAccent,
-              onTap: () {
-                Navigator.pop(context);
-                _confirmDelete(context);
-              },
+                    // Use State's mounted check and context for remaining operations
+                    if (!mounted) return;
+                    final stateContext = this.context;
+
+                    // Prompt for password verification before removing
+                    final password = await _showPasswordDialog(
+                      stateContext,
+                      mode: PasswordMode.unlock,
+                    );
+                    if (password == null || password.isEmpty) return;
+
+                    // Verify the password first
+                    final verified = viewModel.verifyPassword(password);
+                    if (!verified) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(stateContext).showSnackBar(
+                          const SnackBar(
+                            content: Text('Incorrect password.'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                      return;
+                    }
+
+                    // Show progress dialog
+                    if (!mounted) return;
+                    if (!viewModel.usesOwnedStorage)
+                      showAppDialog(
+                        context: stateContext,
+                        barrierDismissible: false,
+                        builder: (ctx) => _ProgressDialog(viewModel: viewModel),
+                      );
+
+                    final success = await viewModel.removePassword(
+                      password: password,
+                    );
+
+                    // Close progress dialog using root navigator
+                    if (mounted && !viewModel.usesOwnedStorage) {
+                      Navigator.of(stateContext, rootNavigator: true).pop();
+                    }
+
+                    if (mounted) {
+                      ScaffoldMessenger.of(stateContext).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            success
+                                ? 'Password removed. Content decrypted.'
+                                : 'Failed to remove password.',
+                          ),
+                          backgroundColor: success ? Colors.green : Colors.red,
+                        ),
+                      );
+                    }
+                  },
+                ),
+
+              // Spacer and Divider before Delete
+              const SizedBox(height: 16),
+              Divider(color: colors.divider),
+
+              // Delete File
+              _buildSettingsTile(
+                icon: Icons.delete_outline_rounded,
+                title: 'Delete File',
+                enabled: !_exporting,
+                textColor: Colors.redAccent,
+                iconColor: Colors.redAccent,
+                onTap: () {
+                  Navigator.pop(context);
+                  _confirmDelete(context);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Close', style: TextStyle(color: colors.subtleGray)),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Close', style: TextStyle(color: colors.subtleGray)),
-          ),
-        ],
       ),
     );
   }
@@ -1228,14 +1440,25 @@ class _MobileContentAreaState extends State<MobileContentArea> {
     required VoidCallback onTap,
     Color? textColor,
     Color? iconColor,
+    bool enabled = true,
   }) {
     return ListTile(
-      leading: Icon(icon, color: iconColor ?? colors.textPrimary),
+      leading: Icon(
+        icon,
+        color: enabled
+            ? iconColor ?? colors.textPrimary
+            : colors.subtleGray.withValues(alpha: .4),
+      ),
       title: Text(
         title,
-        style: TextStyle(color: textColor ?? colors.textPrimary),
+        style: TextStyle(
+          color: enabled
+              ? textColor ?? colors.textPrimary
+              : colors.subtleGray.withValues(alpha: .4),
+        ),
       ),
-      onTap: onTap,
+      enabled: enabled,
+      onTap: enabled ? onTap : null,
     );
   }
 

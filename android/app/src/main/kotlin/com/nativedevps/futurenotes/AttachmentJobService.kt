@@ -9,6 +9,7 @@ import android.os.IBinder
 /** Holds the existing runtime only. Never launches a second Flutter engine. */
 class AttachmentJobService : Service() {
     private var wake: android.os.PowerManager.WakeLock? = null
+    private var foregroundCount: Int? = null
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!running) MobileDiagnostics.record(MobileDiagnostics.Event.SERVICE_STARTED)
@@ -17,10 +18,12 @@ class AttachmentJobService : Service() {
         if (intent?.action == CANCEL) host.cancelSafeJobs()
         if (intent?.action == CANCEL_JOB) host.cancelJob(intent.getStringExtra(JobNotifications.JOB_ID))
         if (host.jobs.isEmpty()) { stopSelf(); return START_NOT_STICKY }
-        val summary = host.foregroundNotification()
-        if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION, summary, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        else startForeground(NOTIFICATION, summary)
-        host.refreshNotifications()
+        if (foregroundCount != host.jobs.size) {
+            val summary = host.foregroundNotification()
+            if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION, summary, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            else startForeground(NOTIFICATION, summary)
+            foregroundCount = host.jobs.size
+        }
         if (wake == null) wake = getSystemService(android.os.PowerManager::class.java).newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "$packageName:attachments").apply { setReferenceCounted(false) }
         // Bounded lease, renewed only by the existing active-job heartbeat.
         wake?.acquire(60_000L)
@@ -35,7 +38,7 @@ class AttachmentJobService : Service() {
     override fun onDestroy() {
         MobileDiagnostics.record(MobileDiagnostics.Event.SERVICE_STOPPED)
         if (wake?.isHeld == true) wake?.release()
-        wake = null; running = false
+        wake = null; running = false; foregroundCount = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         (application as FutureNotesApplication).jobHostOrNull()?.refreshNotifications()
         super.onDestroy()

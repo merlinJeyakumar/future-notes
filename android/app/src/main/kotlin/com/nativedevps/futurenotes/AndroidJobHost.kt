@@ -34,6 +34,8 @@ class AndroidJobHost(private val context: Context, messenger: BinaryMessenger) {
     private var pressureTier = 0
     private var lastLimit = -1
     private var lastPhases: Map<String, Int> = emptyMap()
+    private var lastServiceStart = 0L
+    private var serviceCount = -1
     var jobs: List<Map<String, Any?>> = emptyList()
         private set
     fun attach(host: Activity) { activity = host }
@@ -121,9 +123,16 @@ class AndroidJobHost(private val context: Context, messenger: BinaryMessenger) {
     }
     private fun updateService() {
         val intent = Intent(context, AttachmentJobService::class.java)
-        if (jobs.isEmpty()) context.stopService(intent)
-        else if (Build.VERSION.SDK_INT >= 26 && !AttachmentJobService.running) context.startForegroundService(intent)
-        else context.startService(intent)
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (jobs.isEmpty()) {
+            if (serviceCount != -1 || AttachmentJobService.running) context.stopService(intent)
+            serviceCount = -1
+        } else if (!AttachmentJobService.running || serviceCount != jobs.size || now - lastServiceStart >= 20_000L) {
+            if (Build.VERSION.SDK_INT >= 26 && !AttachmentJobService.running) context.startForegroundService(intent)
+            else context.startService(intent)
+            serviceCount = jobs.size
+            lastServiceStart = now
+        }
         refreshNotifications()
     }
     fun refreshNotifications() { notifications.sync(jobs, retainedJobs) }
@@ -143,6 +152,7 @@ class AndroidJobHost(private val context: Context, messenger: BinaryMessenger) {
             MobileDiagnostics.record(MobileDiagnostics.Event.CANCEL_REQUESTED, "individual" to 1)
             channel.invokeMethod("cancelJob", mapOf("id" to id))
         }
+        refreshNotifications() // Remove stale actions when the job has already settled.
     }
     fun permissionResult(request: Int, results: IntArray): Boolean {
         if (request != REQUEST_NOTIFICATION) return false

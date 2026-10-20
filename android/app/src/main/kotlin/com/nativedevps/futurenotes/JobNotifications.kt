@@ -8,10 +8,33 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 
 /** Per-job UI only. Job ownership and all mutations remain in the Dart coordinator. */
 class JobNotifications(private val context: Context) {
     private val manager = context.getSystemService(NotificationManager::class.java)
+    private val handler = Handler(Looper.getMainLooper())
+    private val updates = NotificationUpdateQueue<Pair<Map<String, Any?>, Boolean>>()
+    private var scheduled = false
+    private var lastPost = -UPDATE_INTERVAL
+    private var interruptedSummaryIds: Set<String>? = null
+    private val publishNext = object : Runnable {
+        override fun run() {
+            scheduled = false
+            val (id, record) = updates.take() ?: return
+            postJob(id, record.first, record.second)
+            lastPost = SystemClock.elapsedRealtime()
+            scheduleUpdate()
+        }
+    }
+
+    private fun scheduleUpdate() {
+        if (scheduled || !updates.hasPending) return
+        scheduled = true
+        handler.postDelayed(publishNext, (UPDATE_INTERVAL - (SystemClock.elapsedRealtime() - lastPost)).coerceAtLeast(0))
+    }
 
     private fun builder(): Notification.Builder {
         if (Build.VERSION.SDK_INT >= 26) {
@@ -64,51 +87,63 @@ class JobNotifications(private val context: Context) {
                 manager.cancel(notification.tag, CHILD)
             }
         }
-        for ((id, entry) in records) {
-            val (job, running) = entry
-            val title = (job["fileName"] as? String)?.take(256)?.takeIf { it.isNotBlank() } ?: "Attachment operation"
-            val detail = (job["detail"] as? String)?.take(256)?.takeIf { it.isNotBlank() }
-            val notification = builder().setContentTitle(title)
-                .setContentText(if (running) "${operation(job["operation"])} · ${detail ?: phase(job["phase"])}" else "Interrupted · Tap to review recovery")
-                .setContentIntent(open(id)).setOngoing(running).setAutoCancel(false)
-            if (running) {
-                val total = (job["total"] as? Number)?.toLong()?.coerceAtLeast(0) ?: 0L
-                val done = (job["bytes"] as? Number)?.toLong()?.coerceAtLeast(0) ?: 0L
-                val fileTotal = (job["currentTotal"] as? Number)?.toLong() ?: 0L
-                val fileDone = (job["currentBytes"] as? Number)?.toLong() ?: 0L
-                if (fileTotal > 0 && total > 0) {
-                    fun metric(bytes: Long, size: Long): String {
-                        val percent = (bytes.toDouble() / size * 100).coerceIn(0.0, 100.0).toInt()
-                        return "${android.text.format.Formatter.formatShortFileSize(context, bytes)} / ${android.text.format.Formatter.formatShortFileSize(context, size)} · $percent%"
-                    }
-                    notification.setStyle(Notification.BigTextStyle().bigText(
-                        "${detail ?: "Saving encrypted files"}\nCurrent file: ${metric(fileDone, fileTotal)}\nOverall saving: ${metric(done, total)}"))
-                }
-                notification.setProgress(1000, if (total > 0) ((done.toDouble() / total).coerceIn(0.0, 1.0) * 1000).toInt() else 0, total == 0L)
-                if (job["cancellable"] == true) {
-                    val intent = Intent(context, AttachmentJobService::class.java).setAction(AttachmentJobService.CANCEL_JOB)
-                        .setData(Uri.Builder().scheme("future-notes-job").authority("cancel").appendPath(id).build())
-                        .putExtra(JOB_ID, id)
-                    val cancel = PendingIntent.getService(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-                    notification.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancel)
-                }
-            } else {
-                val dismissal = dismiss(listOf(id))
-                notification.setDeleteIntent(dismissal)
-                    .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dismiss", dismissal)
-            }
-            try { manager.notify(TAG + id, CHILD, notification.build()) }
-            catch (_: SecurityException) { /* Per-job in-app access remains available. */ }
-        }
+        updates.replace(records)
+        if (!updates.hasPending) {
+            handler.removeCallbacks(publishNext)
+            scheduled = false
+        } else scheduleUpdate()
         if (active.isEmpty()) {
-            if (records.isEmpty()) manager.cancel(SUMMARY)
-            else try { manager.notify(SUMMARY, builder()
-                .setContentTitle(context.applicationInfo.loadLabel(context.packageManager))
-                .setContentText("${records.size} interrupted task(s)")
-                .setGroupSummary(true).setOngoing(false).setContentIntent(open())
-                .setDeleteIntent(dismiss(records.keys.toList())).build()) }
-            catch (_: SecurityException) { /* Notification permission is optional for recovery access. */ }
+            if (records.isEmpty()) {
+                manager.cancel(SUMMARY)
+                interruptedSummaryIds = null
+            } else if (interruptedSummaryIds != records.keys || manager.activeNotifications.none { it.id == SUMMARY && it.tag == null }) {
+                try {
+                    manager.notify(SUMMARY, builder()
+                        .setContentTitle(context.applicationInfo.loadLabel(context.packageManager))
+                        .setContentText("${records.size} interrupted task(s)")
+                        .setGroupSummary(true).setOngoing(false).setContentIntent(open())
+                        .setDeleteIntent(dismiss(records.keys.toList())).build())
+                    interruptedSummaryIds = records.keys.toSet()
+                } catch (_: SecurityException) { /* Recovery remains available in the app. */ }
+            }
+        } else interruptedSummaryIds = null
+    }
+
+    private fun postJob(id: String, job: Map<String, Any?>, running: Boolean) {
+        val title = (job["fileName"] as? String)?.take(256)?.takeIf { it.isNotBlank() } ?: "Attachment operation"
+        val detail = (job["detail"] as? String)?.take(256)?.takeIf { it.isNotBlank() }
+        val notification = builder().setContentTitle(title)
+            .setContentText(if (running) "${operation(job["operation"])} · ${detail ?: phase(job["phase"])}" else "Interrupted · Tap to review recovery")
+            .setContentIntent(open(id)).setOngoing(running).setAutoCancel(false)
+        if (running) {
+            val total = (job["total"] as? Number)?.toLong()?.coerceAtLeast(0) ?: 0L
+            val done = (job["bytes"] as? Number)?.toLong()?.coerceAtLeast(0) ?: 0L
+            val fileTotal = (job["currentTotal"] as? Number)?.toLong() ?: 0L
+            val fileDone = (job["currentBytes"] as? Number)?.toLong() ?: 0L
+            if (total > 0) {
+                fun metric(bytes: Long, size: Long): String {
+                    val percent = (bytes.toDouble() / size * 100).coerceIn(0.0, 100.0).toInt()
+                    return "${android.text.format.Formatter.formatShortFileSize(context, bytes)} / ${android.text.format.Formatter.formatShortFileSize(context, size)} · $percent%"
+                }
+                val current = if (fileTotal > 0) "\nCurrent file: ${metric(fileDone, fileTotal)}" else ""
+                notification.setStyle(Notification.BigTextStyle().bigText(
+                    "${operation(job["operation"])} · ${detail ?: phase(job["phase"])}$current\nOverall: ${metric(done, total)}"))
+            }
+            notification.setProgress(1000, if (total > 0) ((done.toDouble() / total).coerceIn(0.0, 1.0) * 1000).toInt() else 0, total == 0L)
+            if (job["cancellable"] == true) {
+                val intent = Intent(context, AttachmentJobService::class.java).setAction(AttachmentJobService.CANCEL_JOB)
+                    .setData(Uri.Builder().scheme("future-notes-job").authority("cancel").appendPath(id).build())
+                    .putExtra(JOB_ID, id)
+                val cancel = PendingIntent.getService(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                notification.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancel)
+            }
+        } else {
+            val dismissal = dismiss(listOf(id))
+            notification.setDeleteIntent(dismissal)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dismiss", dismissal)
         }
+        try { manager.notify(TAG + id, CHILD, notification.build()) }
+        catch (_: SecurityException) { /* Per-job in-app access remains available. */ }
     }
 
     private fun operation(value: Any?): String = when (value) {
@@ -121,6 +156,7 @@ class JobNotifications(private val context: Context) {
         "finalizing" -> "Finishing safely"; "cancelling" -> "Cancelling"; else -> "Processing"
     }
     companion object {
+        private const val UPDATE_INTERVAL = 500L
         const val CHANNEL = "future-notes-jobs"
         const val GROUP = "future-notes-work"
         const val TAG = "future-notes-job:"

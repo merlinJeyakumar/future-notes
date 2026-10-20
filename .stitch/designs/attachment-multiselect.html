@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Future Notes - Desktop Attachment Multi-Selection &amp; Batch Management Specification</title>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Public Sans & JetBrains Mono Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&amp;family=Public+Sans:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            canvas: "#0B0F17",
+            surface: {
+              DEFAULT: "#131A26",
+              container: "#1A2333",
+              "container-low": "#101622",
+              "container-high": "#222D40",
+              "container-highest": "#2D3A52"
+            },
+            outline: {
+              DEFAULT: "#2A374A",
+              variant: "#1F2937"
+            },
+            primary: {
+              DEFAULT: "#4299E1",
+              container: "#1E3A5F",
+              "on-container": "#BFDBFE"
+            },
+            secondary: {
+              DEFAULT: "#94A3B8",
+              container: "#1E293B",
+              "on-secondary-container": "#E2E8F0"
+            },
+            destructive: {
+              DEFAULT: "#EF4444",
+              container: "#450A0A",
+              "on-container": "#FCA5A5"
+            },
+            success: {
+              DEFAULT: "#10B981",
+              container: "#064E3B",
+              "on-container": "#A7F3D0"
+            },
+            warning: {
+              DEFAULT: "#F59E0B",
+              container: "#451A03",
+              "on-container": "#FDE68A"
+            },
+            "on-surface": "#F1F5F9",
+            "on-surface-variant": "#94A3B8"
+          },
+          borderRadius: {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          fontFamily: {
+            headline: ["Public Sans", "sans-serif"],
+            display: ["Public Sans", "sans-serif"],
+            body: ["Public Sans", "sans-serif"],
+            label: ["Public Sans", "sans-serif"],
+            mono: ["JetBrains Mono", "monospace"]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-family: 'Material Symbols Outlined';
+      font-weight: normal;
+      font-style: normal;
+      font-size: 20px;
+      line-height: 1;
+      letter-spacing: normal;
+      text-transform: none;
+      display: inline-block;
+      white-space: nowrap;
+      word-wrap: normal;
+      direction: ltr;
+      -webkit-font-feature-settings: 'liga';
+      -webkit-font-smoothing: antialiased;
+    }
+    /* Custom scrollbar for dark canvas */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0B0F17;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #2A374A;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #4299E1;
+    }
+  </style>
+</head>
+<body class="bg-canvas text-on-surface font-body antialiased min-h-screen pb-20 selection:bg-primary-container selection:text-primary-on-container">
+<!-- TOP BRAND APP BAR (Shared Components JSON Anchor) -->
+<header class="bg-surface-container border-b border-outline-variant/30 flex justify-between items-center w-full px-4 py-2 sticky top-0 z-50 backdrop-blur">
+<div class="flex items-center gap-3">
+<div class="w-7 h-7 rounded bg-primary flex items-center justify-center text-canvas font-bold text-xs">
+        FN
+      </div>
+<span class="font-display text-sm font-semibold tracking-tight text-on-surface">Future Notes</span>
+<span class="text-outline text-xs">/</span>
+<span class="text-xs font-mono px-2 py-0.5 rounded bg-surface-container-high text-primary border border-primary/20">SPEC-ENG-449</span>
+<span class="text-xs text-on-surface-variant font-medium hidden sm:inline">Desktop Multi-Selection &amp; Batch Management</span>
+</div>
+<!-- Search bar on left / middle as per JSON spec -->
+<div class="hidden md:flex items-center gap-2 bg-surface-container-low px-3 py-1 rounded border border-outline-variant/40 text-xs text-on-surface-variant w-72">
+<span class="material-symbols-outlined text-sm text-on-surface-variant">search</span>
+<span>Search attachments &amp; notes...</span>
+<span class="ml-auto font-mono text-[10px] bg-surface-container-high px-1.5 py-0.5 rounded border border-outline/30">Ctrl+K</span>
+</div>
+<!-- Trailing Icon Actions as declared in TopNavBar JSON -->
+<div class="flex items-center gap-1.5">
+<div class="flex items-center bg-surface-container-low p-0.5 rounded border border-outline-variant/40">
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 transition-colors" title="lock_reset">
+<span class="material-symbols-outlined text-[18px]">lock_reset</span>
+</button>
+<button class="p-1 rounded text-primary hover:bg-surface-container-high/60 transition-colors" title="sync">
+<span class="material-symbols-outlined text-[18px]">sync</span>
+</button>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 transition-colors" title="settings">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+</button>
+</div>
+<div class="h-4 w-px bg-outline/40 mx-1"></div>
+<!-- Window controls from JSON -->
+<div class="flex items-center gap-1">
+<button class="p-1 text-on-surface-variant hover:text-on-surface" title="minimize">
+<span class="material-symbols-outlined text-[16px]">minimize</span>
+</button>
+<button class="p-1 text-on-surface-variant hover:text-on-surface" title="crop_square">
+<span class="material-symbols-outlined text-[16px]">crop_square</span>
+</button>
+<button class="p-1 text-on-surface-variant hover:text-destructive" title="close">
+<span class="material-symbols-outlined text-[16px]">close</span>
+</button>
+</div>
+</div>
+</header>
+<!-- SPECIFICATION CANVAS WRAPPER -->
+<main class="max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+<!-- HERO HEADER & TELEMETRY BADGE -->
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-8 border-b border-outline/30">
+<div>
+<div class="flex items-center gap-2 mb-2">
+<span class="px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider bg-primary/10 text-primary border border-primary/20 rounded">
+            Material 3 Desktop Standard
+          </span>
+<span class="px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider bg-success/10 text-success border border-success/20 rounded">
+            v2.4 Finalized
+          </span>
+<span class="text-xs text-on-surface-variant font-mono">Doc: FN-SPEC-ATTACH-2025</span>
+</div>
+<h1 class="text-2xl sm:text-3xl font-display font-bold text-on-surface tracking-tight">
+          Desktop Attachment Multi-Selection &amp; Batch Management Specification
+        </h1>
+<p class="text-sm text-on-surface-variant mt-1.5 max-w-3xl leading-relaxed">
+          Canonical implementation guidelines for desktop modal interactions: indeterminate search scopes, range selections, deduplication via immutable short ID, and non-blocking in-flight batch safeguards.
+        </p>
+</div>
+<div class="flex items-center gap-3">
+<div class="bg-surface-container border border-outline/40 rounded-lg p-2.5 flex items-center gap-4 text-xs font-mono">
+<div>
+<span class="text-on-surface-variant block text-[10px] uppercase">Input Contract</span>
+<span class="text-primary font-medium">Ctrl/Cmd + Shift + Click</span>
+</div>
+<div class="h-6 w-px bg-outline/40"></div>
+<div>
+<span class="text-on-surface-variant block text-[10px] uppercase">Identity Key</span>
+<span class="text-warning font-medium">Entity Short ID (#fXX)</span>
+</div>
+<div class="h-6 w-px bg-outline/40"></div>
+<div>
+<span class="text-on-surface-variant block text-[10px] uppercase">Batch Thread</span>
+<span class="text-success font-medium">Non-blocking isolate</span>
+</div>
+</div>
+</div>
+</div>
+<!-- COMPARATIVE THREE-FRAME ARCHITECTURE -->
+<div class="mt-8 space-y-12">
+<!-- ================= FRAME 1: MULTI-SELECTION ACTIVE ================= -->
+<section class="space-y-3">
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+<div class="flex items-center gap-2.5">
+<span class="w-6 h-6 rounded-full bg-primary/20 text-primary font-mono text-xs font-bold flex items-center justify-center border border-primary/30">01</span>
+<h2 class="text-base font-display font-semibold tracking-tight text-on-surface">
+              FRAME 1: DESKTOP ATTACHMENT GALLERY — MULTI-SELECTION ACTIVE
+            </h2>
+<span class="text-xs px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant border border-outline/30 font-mono">Default View</span>
+</div>
+<p class="text-xs text-on-surface-variant">Active selection state demonstrating duplicate filename deduplication via ID and processing locks.</p>
+</div>
+<!-- Dimmed background simulation representing 'Project notes' editor -->
+<div class="relative rounded-xl border border-outline bg-surface-container-low p-4 sm:p-6 shadow-2xl overflow-hidden">
+<!-- Background editor mockup behind modal backdrop -->
+<div class="absolute inset-0 opacity-15 pointer-events-none p-8 font-mono text-xs space-y-3 select-none">
+<div class="text-lg font-bold text-on-surface"># Project notes: Core Vault Architecture</div>
+<p>Vault synchronization routine completes on epoch cycle 849. Local SQLite handles cache index.</p>
+<div class="h-32 bg-surface rounded border border-outline/20 p-4">
+              -- In-flight note payload stream encrypted via XChaCha20-Poly1305 --
+            </div>
+</div>
+<!-- Dimming Scrim Overlay -->
+<div class="absolute inset-0 bg-canvas/75 backdrop-blur-[2px]"></div>
+<!-- THE AUTHENTIC MODAL DIALOG CONTAINER -->
+<div class="relative z-10 max-w-4xl mx-auto bg-surface border border-outline rounded-xl shadow-2xl overflow-hidden flex flex-col">
+<!-- DIALOG HEADER -->
+<div class="bg-surface-container px-5 py-3 border-b border-outline/40 flex flex-wrap items-center justify-between gap-3">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-primary text-[22px]">inventory_2</span>
+<span class="font-display font-semibold text-sm text-on-surface">All attachments</span>
+<span class="px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-surface-container-high text-on-surface-variant border border-outline/30">
+                  4 files
+                </span>
+</div>
+<!-- Trailing Header Controls -->
+<div class="flex items-center gap-2">
+<!-- Native Add Attachments -->
+<button class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest border border-outline/50 text-xs font-medium text-on-surface transition-colors active:scale-[0.98]">
+<span class="material-symbols-outlined text-primary text-base">add</span>
+<span>Add attachments</span>
+</button>
+<!-- Explicit Select Mode Toggle Button (Active Pressed State) -->
+<button class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-primary-container text-primary-on-container border border-primary/50 text-xs font-semibold shadow-inner transition-colors">
+<span class="material-symbols-outlined text-base" style="font-variation-settings: 'FILL' 1;">check_box</span>
+<span>Select mode</span>
+</button>
+<div class="h-4 w-px bg-outline/40 mx-1"></div>
+<span class="text-[11px] font-mono text-on-surface-variant hidden sm:inline">Esc to close</span>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Close dialog">
+<span class="material-symbols-outlined text-lg">close</span>
+</button>
+</div>
+</div>
+<!-- SUB-HEADER TOOLBAR -->
+<div class="bg-surface px-5 py-2.5 border-b border-outline/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+<!-- Search Filenames Input -->
+<div class="relative flex-1 min-w-[220px] max-w-sm">
+<span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant text-base">search</span>
+<input class="w-full bg-surface-container-low border border-outline/50 rounded-lg pl-8 pr-7 py-1 text-xs text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" placeholder="Search filenames..." type="text"/>
+<button class="absolute right-2 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface">
+<span class="material-symbols-outlined text-xs">cancel</span>
+</button>
+</div>
+<!-- Select All Check Toggle -->
+<div class="flex items-center gap-3">
+<label class="flex items-center gap-2 cursor-pointer text-on-surface font-medium select-none">
+<input checked="" class="rounded border-outline text-primary focus:ring-primary focus:ring-offset-0 bg-surface-container-low h-4 w-4" type="checkbox"/>
+<span>Select all (4 visible)</span>
+</label>
+<span class="text-[11px] text-on-surface-variant font-mono bg-surface-container-low px-2 py-0.5 rounded border border-outline/30 hidden md:inline">
+                  Ctrl+A selects visible
+                </span>
+</div>
+</div>
+<!-- ATTACHMENT GRID (Synthetic Items) -->
+<div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-3.5 bg-surface-container-low/40 min-h-[310px]">
+<!-- CARD 1: Selected State (PDF) -->
+<div class="relative rounded-lg p-3.5 bg-surface-container border-2 border-primary shadow-sm flex flex-col justify-between transition-all">
+<div class="flex items-start justify-between gap-2">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded bg-primary/20 text-primary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-lg">picture_as_pdf</span>
+</div>
+<div>
+<div class="flex items-center gap-1.5">
+<span class="font-medium text-xs text-on-surface truncate max-w-[140px] sm:max-w-[170px]" title="Project overview.pdf">Project overview.pdf</span>
+<span class="font-mono text-[10px] px-1 py-0.2 bg-primary-container text-primary-on-container rounded font-semibold border border-primary/40">#f01</span>
+</div>
+<div class="text-[11px] text-on-surface-variant mt-0.5">1.2 MB · PDF · Oct 24</div>
+</div>
+</div>
+<!-- Checked Indicator -->
+<div class="w-5 h-5 rounded bg-primary text-canvas flex items-center justify-center">
+<span class="material-symbols-outlined text-sm font-bold">check</span>
+</div>
+</div>
+<div class="mt-4 pt-2.5 border-t border-outline/30 flex items-center justify-between text-xs">
+<button class="text-primary hover:underline flex items-center gap-1 text-[11px]">
+<span class="material-symbols-outlined text-xs">open_in_new</span>
+<span>Open file</span>
+</button>
+<button class="text-on-surface-variant hover:text-on-surface p-1">
+<span class="material-symbols-outlined text-sm">more_vert</span>
+</button>
+</div>
+</div>
+<!-- CARD 2: Duplicate Filename Disambiguation (#f08) -->
+<div class="relative rounded-lg p-3.5 bg-surface-container border-2 border-primary shadow-sm flex flex-col justify-between transition-all">
+<div class="flex items-start justify-between gap-2">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded bg-primary/20 text-primary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-lg">picture_as_pdf</span>
+</div>
+<div>
+<div class="flex items-center gap-1.5">
+<span class="font-medium text-xs text-on-surface truncate max-w-[140px] sm:max-w-[170px]" title="Project overview.pdf">Project overview.pdf</span>
+<!-- Distinct short ID badge disambiguation -->
+<span class="font-mono text-[10px] px-1 py-0.2 bg-warning/20 text-warning rounded font-bold border border-warning/40">#f08</span>
+</div>
+<div class="text-[11px] text-on-surface-variant mt-0.5">2.4 MB · PDF · Nov 02 (Duplicate)</div>
+</div>
+</div>
+<!-- Checked Indicator -->
+<div class="w-5 h-5 rounded bg-primary text-canvas flex items-center justify-center">
+<span class="material-symbols-outlined text-sm font-bold">check</span>
+</div>
+</div>
+<div class="mt-4 pt-2.5 border-t border-outline/30 flex items-center justify-between text-xs">
+<button class="text-primary hover:underline flex items-center gap-1 text-[11px]">
+<span class="material-symbols-outlined text-xs">open_in_new</span>
+<span>Open file</span>
+</button>
+<button class="text-on-surface-variant hover:text-on-surface p-1">
+<span class="material-symbols-outlined text-sm">more_vert</span>
+</button>
+</div>
+</div>
+<!-- CARD 3: Unselected Normal Card (MP4) -->
+<div class="relative rounded-lg p-3.5 bg-surface-container border border-outline/50 hover:border-outline flex flex-col justify-between transition-all">
+<div class="flex items-start justify-between gap-2">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded bg-surface-container-high text-on-surface-variant flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-lg">videocam</span>
+</div>
+<div>
+<div class="flex items-center gap-1.5">
+<span class="font-medium text-xs text-on-surface truncate max-w-[140px] sm:max-w-[170px]">Workshop recording.mp4</span>
+<span class="font-mono text-[10px] px-1 py-0.2 bg-surface-container-high text-on-surface-variant rounded border border-outline/30">#m42</span>
+</div>
+<div class="text-[11px] text-on-surface-variant mt-0.5">708 MB · MP4 · Oct 19</div>
+</div>
+</div>
+<!-- Empty Checkbox -->
+<div class="w-5 h-5 rounded border border-outline/80 bg-surface-container-low flex items-center justify-center"></div>
+</div>
+<div class="mt-4 pt-2.5 border-t border-outline/30 flex items-center justify-between text-xs">
+<button class="text-on-surface-variant hover:text-on-surface flex items-center gap-1 text-[11px]">
+<span class="material-symbols-outlined text-xs">play_arrow</span>
+<span>Preview</span>
+</button>
+<button class="text-on-surface-variant hover:text-on-surface p-1">
+<span class="material-symbols-outlined text-sm">more_vert</span>
+</button>
+</div>
+</div>
+<!-- CARD 4: In-Flight Processing / Pending Card (Cannot be selected) -->
+<div class="relative rounded-lg p-3.5 bg-surface-container/70 border border-outline/40 flex flex-col justify-between">
+<div>
+<div class="flex items-start justify-between gap-2">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded bg-warning/15 text-warning flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-lg">folder_zip</span>
+</div>
+<div>
+<div class="flex items-center gap-1.5">
+<span class="font-medium text-xs text-on-surface truncate max-w-[140px]">archive-export.zip</span>
+<span class="font-mono text-[10px] px-1 py-0.2 bg-surface-container-high text-on-surface-variant rounded border border-outline/30">#z99</span>
+</div>
+<div class="flex items-center gap-2 mt-1">
+<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-warning/20 text-warning font-semibold">
+                            Encrypting 42%
+                          </span>
+<span class="text-[10px] font-mono text-on-surface-variant">420 MiB / 1.0 GiB</span>
+</div>
+</div>
+</div>
+<!-- Explicitly Disabled Checkbox with Lock -->
+<div class="flex items-center" title="Pending/processing attachments cannot be selected">
+<div class="w-5 h-5 rounded border border-outline/30 bg-surface-container-highest/50 flex items-center justify-center cursor-not-allowed">
+<span class="material-symbols-outlined text-xs text-on-surface-variant/70">lock</span>
+</div>
+</div>
+</div>
+<!-- Determinate progress bar -->
+<div class="w-full bg-surface-container-high h-1.5 rounded-full mt-3 overflow-hidden">
+<div class="bg-warning h-full rounded-full transition-all" style="width: 42%;"></div>
+</div>
+</div>
+<div class="mt-3 pt-2 border-t border-outline/20 flex items-center justify-between text-[11px]">
+<span class="text-on-surface-variant font-mono text-[10px]">Processing payload...</span>
+<button class="text-destructive hover:underline text-[11px] font-medium">Cancel job</button>
+</div>
+</div>
+</div>
+<!-- MULTI-SELECTION ACTION FOOTER BAR (Docked) -->
+<div class="bg-surface-container px-5 py-3 border-t border-outline flex flex-wrap items-center justify-between gap-3">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+<span class="text-xs font-semibold text-on-surface">2 attachments selected</span>
+<span class="text-xs text-on-surface-variant font-mono">(Total 3.6 MB)</span>
+</div>
+<div class="flex items-center gap-2.5">
+<!-- Deselect All pill / shortcut -->
+<button class="px-2.5 py-1.5 rounded-lg text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors flex items-center gap-1.5">
+<span>Deselect all</span>
+<span class="font-mono text-[10px] px-1 bg-surface-container rounded border border-outline/40">Esc</span>
+</button>
+<!-- Save Selected Button -->
+<button class="px-3 py-1.5 rounded-lg border border-primary text-primary hover:bg-primary/10 text-xs font-medium flex items-center gap-1.5 transition-colors">
+<span class="material-symbols-outlined text-sm">download</span>
+<span>Save selected (2)</span>
+</button>
+<!-- Remove Selected Button (Destructive with Inline Confirmation Affordance) -->
+<div class="flex items-center gap-1.5">
+<button class="px-3 py-1.5 rounded-lg bg-destructive hover:bg-destructive/90 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors">
+<span class="material-symbols-outlined text-sm">delete</span>
+<span>Remove selected (2)</span>
+</button>
+<span class="hidden md:inline-block text-[11px] font-mono px-2 py-1 bg-destructive/15 text-destructive border border-destructive/30 rounded">
+                    Confirm prompt active on click
+                  </span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- ================= FRAME 2: SEARCH-FILTERED SELECTION ================= -->
+<section class="space-y-3">
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+<div class="flex items-center gap-2.5">
+<span class="w-6 h-6 rounded-full bg-primary/20 text-primary font-mono text-xs font-bold flex items-center justify-center border border-primary/30">02</span>
+<h2 class="text-base font-display font-semibold tracking-tight text-on-surface">
+              FRAME 2: SEARCH-FILTERED SELECTION &amp; CONTIGUOUS RANGE LOGIC
+            </h2>
+<span class="text-xs px-2 py-0.5 rounded bg-warning/15 text-warning border border-warning/30 font-mono">Query Scoped: "overview"</span>
+</div>
+<p class="text-xs text-on-surface-variant">Demonstrating persistent hidden selections when filters are applied without deselecting prior items.</p>
+</div>
+<div class="relative rounded-xl border border-outline bg-surface-container-low p-4 sm:p-6 shadow-2xl overflow-hidden">
+<!-- THE MODAL DIALOG IN SEARCH FILTERED STATE -->
+<div class="relative z-10 max-w-4xl mx-auto bg-surface border border-outline rounded-xl shadow-2xl overflow-hidden flex flex-col">
+<!-- HEADER -->
+<div class="bg-surface-container px-5 py-3 border-b border-outline/40 flex flex-wrap items-center justify-between gap-3">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-primary text-[22px]">inventory_2</span>
+<span class="font-display font-semibold text-sm text-on-surface">All attachments</span>
+<span class="px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-surface-container-high text-on-surface-variant border border-outline/30">
+                  4 total
+                </span>
+</div>
+<div class="flex items-center gap-2">
+<button class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-surface-container-high border border-outline/50 text-xs font-medium text-on-surface opacity-80">
+<span class="material-symbols-outlined text-primary text-base">add</span>
+<span>Add attachments</span>
+</button>
+<button class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-primary-container text-primary-on-container border border-primary/50 text-xs font-semibold">
+<span class="material-symbols-outlined text-base">check_box</span>
+<span>Select mode</span>
+</button>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface" title="Close dialog">
+<span class="material-symbols-outlined text-lg">close</span>
+</button>
+</div>
+</div>
+<!-- TOOLBAR WITH ACTIVE QUERY -->
+<div class="bg-surface px-5 py-2.5 border-b border-outline/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+<!-- Active Search Input Filled With "overview" -->
+<div class="relative flex-1 min-w-[220px] max-w-sm">
+<span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-primary text-base">search</span>
+<input class="w-full bg-surface-container-low border border-primary rounded-lg pl-8 pr-7 py-1 text-xs text-on-surface font-medium focus:outline-none focus:ring-1 focus:ring-primary" type="text" value="overview"/>
+<button class="absolute right-2 top-1/2 -translate-y-1/2 text-on-surface hover:text-primary">
+<span class="material-symbols-outlined text-xs">cancel</span>
+</button>
+</div>
+<!-- Indeterminate / Scoped Select Toggle -->
+<div class="flex items-center gap-3">
+<label class="flex items-center gap-2 cursor-pointer text-on-surface font-medium select-none">
+<!-- Indeterminate / All visible checked -->
+<div class="w-4 h-4 rounded bg-primary flex items-center justify-center text-canvas">
+<span class="material-symbols-outlined text-xs font-bold">check</span>
+</div>
+<span>Select all visible (2)</span>
+</label>
+<span class="text-[11px] text-on-surface-variant font-mono bg-surface-container-low px-2 py-0.5 rounded border border-outline/30 hidden sm:inline">
+                  Affects 2 visible items
+                </span>
+</div>
+</div>
+<!-- CONTEXTUAL NOTIFICATION BANNER (Crucial UX Indicator) -->
+<div class="bg-surface-container-high/80 px-5 py-2 border-b border-outline/40 flex items-center justify-between text-xs">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-base">filter_alt</span>
+<span class="text-on-surface">Showing <strong class="text-primary">2 matching files</strong></span>
+<span class="text-outline">·</span>
+<span class="text-on-surface-variant">1 file hidden from query remains selected</span>
+</div>
+<button class="text-primary hover:underline font-mono text-[11px]">Clear filter</button>
+</div>
+<!-- FILTERED GRID DISPLAYING DISAMBIGUATED ENTITIES -->
+<div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-3.5 bg-surface-container-low/40">
+<!-- Match 1: #f01 -->
+<div class="relative rounded-lg p-3.5 bg-surface-container border-2 border-primary shadow-sm flex flex-col justify-between">
+<div class="flex items-start justify-between gap-2">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded bg-primary/20 text-primary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-lg">picture_as_pdf</span>
+</div>
+<div>
+<div class="flex items-center gap-1.5">
+<span class="font-medium text-xs text-on-surface truncate max-w-[150px]">Project <span class="bg-primary/30 text-white px-0.5 rounded">overview</span>.pdf</span>
+<span class="font-mono text-[10px] px-1 py-0.2 bg-primary-container text-primary-on-container rounded font-semibold border border-primary/40">#f01</span>
+</div>
+<div class="text-[11px] text-on-surface-variant mt-0.5">1.2 MB · PDF · Oct 24</div>
+</div>
+</div>
+<div class="w-5 h-5 rounded bg-primary text-canvas flex items-center justify-center">
+<span class="material-symbols-outlined text-sm font-bold">check</span>
+</div>
+</div>
+<div class="mt-4 pt-2.5 border-t border-outline/30 flex items-center justify-between text-xs">
+<span class="text-[11px] font-mono text-success flex items-center gap-1">
+<span class="material-symbols-outlined text-xs">verified</span> Visible &amp; Selected
+                  </span>
+<button class="text-primary hover:underline text-[11px]">Open</button>
+</div>
+</div>
+<!-- Match 2: #f08 (Duplicate Filename clearly distinguished) -->
+<div class="relative rounded-lg p-3.5 bg-surface-container border-2 border-primary shadow-sm flex flex-col justify-between">
+<div class="flex items-start justify-between gap-2">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded bg-primary/20 text-primary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-lg">picture_as_pdf</span>
+</div>
+<div>
+<div class="flex items-center gap-1.5">
+<span class="font-medium text-xs text-on-surface truncate max-w-[150px]">Project <span class="bg-primary/30 text-white px-0.5 rounded">overview</span>.pdf</span>
+<span class="font-mono text-[10px] px-1 py-0.2 bg-warning/20 text-warning rounded font-bold border border-warning/40">#f08</span>
+</div>
+<div class="text-[11px] text-on-surface-variant mt-0.5">2.4 MB · PDF · Nov 02 (Duplicate)</div>
+</div>
+</div>
+<div class="w-5 h-5 rounded bg-primary text-canvas flex items-center justify-center">
+<span class="material-symbols-outlined text-sm font-bold">check</span>
+</div>
+</div>
+<div class="mt-4 pt-2.5 border-t border-outline/30 flex items-center justify-between text-xs">
+<span class="text-[11px] font-mono text-success flex items-center gap-1">
+<span class="material-symbols-outlined text-xs">verified</span> Visible &amp; Selected
+                  </span>
+<button class="text-primary hover:underline text-[11px]">Open</button>
+</div>
+</div>
+</div>
+<!-- FOOTER WITH PERSISTENT TELEMETRY (Reflects hidden item selection) -->
+<div class="bg-surface-container px-5 py-3 border-t border-outline flex flex-wrap items-center justify-between gap-3">
+<div class="flex items-center gap-2 text-xs">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span class="font-semibold text-on-surface">3 attachments selected</span>
+<span class="text-warning font-mono bg-warning/10 px-1.5 py-0.5 rounded border border-warning/30 text-[11px]">
+                  (1 hidden by query)
+                </span>
+<span class="text-on-surface-variant font-mono text-[11px]">· Total 711.6 MB</span>
+</div>
+<div class="flex items-center gap-2.5">
+<button class="px-2.5 py-1.5 rounded-lg text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors">
+                  Deselect all (3)
+                </button>
+<button class="px-3 py-1.5 rounded-lg border border-primary text-primary hover:bg-primary/10 text-xs font-medium flex items-center gap-1.5">
+<span class="material-symbols-outlined text-sm">download</span>
+<span>Save selected (3)</span>
+</button>
+<button class="px-3 py-1.5 rounded-lg bg-destructive text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm">
+<span class="material-symbols-outlined text-sm">delete</span>
+<span>Remove selected (3)</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- ================= FRAME 3: ADD ATTACHMENTS & PARALLEL BATCH HUD ================= -->
+<section class="space-y-3">
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+<div class="flex items-center gap-2.5">
+<span class="w-6 h-6 rounded-full bg-primary/20 text-primary font-mono text-xs font-bold flex items-center justify-center border border-primary/30">03</span>
+<h2 class="text-base font-display font-semibold tracking-tight text-on-surface">
+              FRAME 3: ADD ATTACHMENTS &amp; PARALLEL BATCH PROGRESS HUD
+            </h2>
+<span class="text-xs px-2 py-0.5 rounded bg-success/15 text-success border border-success/30 font-mono">Real-time Stream</span>
+</div>
+<p class="text-xs text-on-surface-variant">Docked batch transfer pipeline: non-blocking native picker integration &amp; job cancelability.</p>
+</div>
+<div class="relative rounded-xl border border-outline bg-surface-container-low p-4 sm:p-6 shadow-2xl overflow-hidden">
+<div class="relative z-10 max-w-4xl mx-auto bg-surface border border-outline rounded-xl shadow-2xl overflow-hidden flex flex-col">
+<!-- DIALOG HEADER WITH 'ADD ATTACHMENTS' HIGHLIGHTED -->
+<div class="bg-surface-container px-5 py-3 border-b border-outline/40 flex flex-wrap items-center justify-between gap-3">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-primary text-[22px]">inventory_2</span>
+<span class="font-display font-semibold text-sm text-on-surface">All attachments</span>
+<span class="px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-surface-container-high text-on-surface-variant border border-outline/30">
+                  4 committed
+                </span>
+</div>
+<div class="flex items-center gap-2">
+<!-- Native File Picker Pressed/Active Representation -->
+<div class="relative">
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-canvas font-semibold text-xs shadow-md ring-2 ring-primary/40">
+<span class="material-symbols-outlined text-base font-bold">add</span>
+<span>Add attachments</span>
+</button>
+<span class="absolute -bottom-5 right-0 text-[10px] font-mono text-primary-on-container bg-primary-container px-1 rounded whitespace-nowrap">
+                    OS Native Picker Launched
+                  </span>
+</div>
+<button class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-surface-container-high border border-outline/50 text-xs font-medium text-on-surface">
+<span class="material-symbols-outlined text-base">check_box_outline_blank</span>
+<span>Select</span>
+</button>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface ml-2" title="Close dialog">
+<span class="material-symbols-outlined text-lg">close</span>
+</button>
+</div>
+</div>
+<!-- IN-DIALOG DOCKED BATCH TRANSFER PANEL (Dedicated Parallel HUD) -->
+<div class="bg-surface-container-low p-5 space-y-4">
+<!-- Header of Batch Transfer -->
+<div class="flex flex-wrap items-center justify-between gap-2 border-b border-outline/30 pb-3">
+<div class="flex items-center gap-2.5">
+<div class="w-6 h-6 rounded bg-primary/20 text-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-sm">cloud_upload</span>
+</div>
+<div>
+<h3 class="text-xs font-semibold text-on-surface">Adding 3 files from device</h3>
+<p class="text-[11px] text-on-surface-variant font-mono">Stage: Encrypting in parallel isolates · Non-blocking workspace</p>
+</div>
+</div>
+<!-- Global Cancel Batch Button (from TopNavBar actions in JSON) -->
+<button class="px-2.5 py-1 rounded bg-destructive/15 text-destructive hover:bg-destructive/25 border border-destructive/30 text-xs font-medium flex items-center gap-1 transition-colors">
+<span class="material-symbols-outlined text-xs">cancel</span>
+<span>Cancel Batch</span>
+</button>
+</div>
+<!-- SEPARATE JOB PROGRESS STREAMS -->
+<div class="space-y-3">
+<!-- Stream 1: Encrypting 64% -->
+<div class="bg-surface-container rounded-lg p-3 border border-outline/40">
+<div class="flex items-center justify-between text-xs mb-1.5">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-base">slideshow</span>
+<span class="font-medium text-on-surface text-xs font-mono">presentation_final.pptx</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-primary/20 text-primary font-semibold">
+                        Encrypting
+                      </span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-mono text-xs text-on-surface">64% <span class="text-on-surface-variant">(32 MiB / 50 MiB)</span></span>
+<button class="text-on-surface-variant hover:text-destructive text-xs p-0.5" title="Cancel this file">
+<span class="material-symbols-outlined text-sm">close</span>
+</button>
+</div>
+</div>
+<div class="w-full bg-surface-container-high h-2 rounded-full overflow-hidden">
+<div class="bg-primary h-full rounded-full transition-all" style="width: 64%;"></div>
+</div>
+</div>
+<!-- Stream 2: Hashing & Staging 18% -->
+<div class="bg-surface-container rounded-lg p-3 border border-outline/40">
+<div class="flex items-center justify-between text-xs mb-1.5">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-warning text-base">table_chart</span>
+<span class="font-medium text-on-surface text-xs font-mono">telemetry_dump.csv</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-warning/20 text-warning font-semibold">
+                        Hashing &amp; Staging
+                      </span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-mono text-xs text-on-surface">18% <span class="text-on-surface-variant">(1.8 MiB / 10 MiB)</span></span>
+<button class="text-on-surface-variant hover:text-destructive text-xs p-0.5" title="Cancel this file">
+<span class="material-symbols-outlined text-sm">close</span>
+</button>
+</div>
+</div>
+<div class="w-full bg-surface-container-high h-2 rounded-full overflow-hidden">
+<div class="bg-warning h-full rounded-full transition-all" style="width: 18%;"></div>
+</div>
+</div>
+<!-- Stream 3: Queued -->
+<div class="bg-surface-container/60 rounded-lg p-3 border border-outline/30">
+<div class="flex items-center justify-between text-xs">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-on-surface-variant text-base">image</span>
+<span class="font-medium text-on-surface text-xs font-mono">architecture_diagram.png</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-surface-container-high text-on-surface-variant">
+                        Queued
+                      </span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-mono text-[11px] text-on-surface-variant">Pending next pipeline slot</span>
+<button class="text-on-surface-variant hover:text-destructive text-xs p-0.5" title="Cancel this file">
+<span class="material-symbols-outlined text-sm">close</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Non-blocking confirmation note -->
+<div class="flex items-center gap-2 pt-2 text-[11px] text-on-surface-variant font-mono">
+<span class="material-symbols-outlined text-success text-sm">check_circle</span>
+<span>Background workers active · You can continue typing in the note editor without delay.</span>
+</div>
+</div>
+<!-- FOOTER STATUS -->
+<div class="bg-surface-container px-5 py-2.5 border-t border-outline flex items-center justify-between text-xs">
+<span class="text-on-surface-variant">Batch storage pool: 2.1 GiB remaining</span>
+<span class="text-primary font-mono text-[11px]">Hardware AES-NI acceleration active</span>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- ================= ARCHITECTURAL DIRECTIVES & SPECIFICATION CARDS ================= -->
+<section class="mt-16 pt-10 border-t border-outline/40">
+<div class="mb-8">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-xl">account_tree</span>
+<h2 class="text-xl font-display font-bold text-on-surface tracking-tight">
+            Architectural Directives &amp; Engineering Rules
+          </h2>
+</div>
+<p class="text-sm text-on-surface-variant mt-1">
+          Formal contracts governing keyboard interactions, disambiguation invariants, and thread boundary management.
+        </p>
+</div>
+<!-- Bento Grid Specification Directives -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+<!-- DIRECTIVE CARD 1: KEYBOARD & FOCUS CONTRACT -->
+<div class="bg-surface border border-outline/60 rounded-xl p-5 flex flex-col justify-between hover:border-primary/50 transition-colors">
+<div>
+<div class="w-8 h-8 rounded-lg bg-primary/15 text-primary flex items-center justify-center mb-3">
+<span class="material-symbols-outlined text-lg">keyboard</span>
+</div>
+<h3 class="font-display font-semibold text-sm text-on-surface mb-2">1. Keyboard &amp; Focus Contract</h3>
+<ul class="space-y-2 text-xs text-on-surface-variant leading-relaxed">
+<li class="flex items-start gap-1.5">
+<span class="text-primary font-mono text-[11px]">•</span>
+<span><strong class="text-on-surface font-mono">Ctrl/Cmd+Click:</strong> Toggles discrete individual entity in/out of active set.</span>
+</li>
+<li class="flex items-start gap-1.5">
+<span class="text-primary font-mono text-[11px]">•</span>
+<span><strong class="text-on-surface font-mono">Shift+Click:</strong> Contiguous range selection across visible grid index from last focused anchor.</span>
+</li>
+<li class="flex items-start gap-1.5">
+<span class="text-primary font-mono text-[11px]">•</span>
+<span><strong class="text-on-surface font-mono">Ctrl/Cmd+A:</strong> Selects visible eligible items only when gallery has focus; input search retains standard text editing.</span>
+</li>
+<li class="flex items-start gap-1.5">
+<span class="text-primary font-mono text-[11px]">•</span>
+<span><strong class="text-on-surface font-mono">Escape 2-Stage:</strong> First stroke purges selection set; second stroke dismisses dialog window.</span>
+</li>
+</ul>
+</div>
+<div class="mt-4 pt-3 border-t border-outline/30 font-mono text-[10px] text-primary">
+            FOCUS_TARGET: GalleryItemGrid
+          </div>
+</div>
+<!-- DIRECTIVE CARD 2: DEDUPLICATION & SHORT ID -->
+<div class="bg-surface border border-outline/60 rounded-xl p-5 flex flex-col justify-between hover:border-warning/50 transition-colors">
+<div>
+<div class="w-8 h-8 rounded-lg bg-warning/15 text-warning flex items-center justify-center mb-3">
+<span class="material-symbols-outlined text-lg">tag</span>
+</div>
+<h3 class="font-display font-semibold text-sm text-on-surface mb-2">2. Entity Disambiguation</h3>
+<ul class="space-y-2 text-xs text-on-surface-variant leading-relaxed">
+<li class="flex items-start gap-1.5">
+<span class="text-warning font-mono text-[11px]">•</span>
+<span><strong class="text-on-surface">Immutable Short IDs:</strong> Files are uniquely identified by hex short IDs (<span class="font-mono text-warning">#f01</span>, <span class="font-mono text-warning">#f08</span>).</span>
+</li>
+<li class="flex items-start gap-1.5">
+<span class="text-warning font-mono text-[11px]">•</span>
+<span><strong class="text-on-surface">Zero Name Collision:</strong> Two identical filenames like <span class="font-mono">"Project overview.pdf"</span> coexist without overwrite risk.</span>
+</li>
+<li class="flex items-start gap-1.5">
+<span class="text-warning font-mono text-[11px]">•</span>
+<span><strong class="text-on-surface">State Mapping:</strong> Selection sets store array of IDs: <code class="text-[10px] bg-surface-container-high px-1 py-0.5 rounded text-warning">['#f01', '#f08']</code> never string filenames.</span>
+</li>
+</ul>
+</div>
+<div class="mt-4 pt-3 border-t border-outline/30 font-mono text-[10px] text-warning">
+            PRIMARY_KEY: vault_item_uuid
+          </div>
+</div>
+<!-- DIRECTIVE CARD 3: IN-FLIGHT JOBS & DESTRUCTIVE SAFETY -->
+<div class="bg-surface border border-outline/60 rounded-xl p-5 flex flex-col justify-between hover:border-destructive/50 transition-colors">
+<div>
+<div class="w-8 h-8 rounded-lg bg-destructive/15 text-destructive flex items-center justify-center mb-3">
+<span class="material-symbols-outlined text-lg">security</span>
+</div>
+<h3 class="font-display font-semibold text-sm text-on-surface mb-2">3. Pending &amp; Destructive Safety</h3>
+<ul class="space-y-2 text-xs text-on-surface-variant leading-relaxed">
+<li class="flex items-start gap-1.5">
+<span class="text-destructive font-mono text-[11px]">•</span>
+<span><strong class="text-on-surface">In-flight Exclusion:</strong> Items with stage <span class="font-mono text-destructive">STAGE_ENCRYPTING</span> are disabled from selection sets to avert chunk corruption.</span>
+</li>
+<li class="flex items-start gap-1.5">
+<span class="text-destructive font-mono text-[11px]">•</span>
+<span><strong class="text-on-surface">Locked Checkbox:</strong> Hover on disabled item presents tooltip: <em>"Pending attachments cannot be selected"</em>.</span>
+</li>
+<li class="flex items-start gap-1.5">
+<span class="text-destructive font-mono text-[11px]">•</span>
+<span><strong class="text-on-surface">Explicit Confirmation:</strong> "Remove selected" requires secondary inline tap verifying count before deleting SQLite records.</span>
+</li>
+</ul>
+</div>
+<div class="mt-4 pt-3 border-t border-outline/30 font-mono text-[10px] text-destructive">
+            GUARD: assertNotPending(item)
+          </div>
+</div>
+<!-- DIRECTIVE CARD 4: MOBILE COUNTERPART PARITY -->
+<div class="bg-surface border border-outline/60 rounded-xl p-5 flex flex-col justify-between hover:border-success/50 transition-colors">
+<div>
+<div class="w-8 h-8 rounded-lg bg-success/15 text-success flex items-center justify-center mb-3">
+<span class="material-symbols-outlined text-lg">devices</span>
+</div>
+<h3 class="font-display font-semibold text-sm text-on-surface mb-2">4. Platform Ergonomics &amp; Parity</h3>
+<ul class="space-y-2 text-xs text-on-surface-variant leading-relaxed">
+<li class="flex items-start gap-1.5">
+<span class="text-success font-mono text-[11px]">•</span>
+<span><strong class="text-on-surface">Desktop First:</strong> Direct click on checkboxes, continuous marquee drag selection, and multi-key modifiers.</span>
+</li>
+<li class="flex items-start gap-1.5">
+<span class="text-success font-mono text-[11px]">•</span>
+<span><strong class="text-on-surface">Mobile Bridge:</strong> Maps 1:1 to Flutter mobile long-press bottom modal sheet while leveraging desktop pointer accuracy.</span>
+</li>
+<li class="flex items-start gap-1.5">
+<span class="text-success font-mono text-[11px]">•</span>
+<span><strong class="text-on-surface">Native File-Picker:</strong> Add button invokes OS native multi-file dialogue without re-implementing OS chrome.</span>
+</li>
+</ul>
+</div>
+<div class="mt-4 pt-3 border-t border-outline/30 font-mono text-[10px] text-success">
+            PARITY: Flutter MultiSelectController
+          </div>
+</div>
+</div>
+</section>
+<!-- FOOTER TELEMETRY STATUS BAR -->
+<footer class="mt-16 pt-6 pb-6 border-t border-outline/30 flex flex-wrap items-center justify-between text-xs text-on-surface-variant">
+<div class="flex items-center gap-3">
+<span class="font-display font-semibold text-on-surface">Future Notes Engineering</span>
+<span class="text-outline">·</span>
+<span>Material 3 Desktop Design Standards</span>
+<span class="text-outline">·</span>
+<span class="font-mono text-[11px]">Git Commit: b49c71a</span>
+</div>
+<div class="flex items-center gap-2 mt-2 sm:mt-0 font-mono text-[11px]">
+<span class="inline-block w-2 h-2 rounded-full bg-success"></span>
+<span>All 4 specifications validated against desktop test suites</span>
+</div>
+</footer>
+</main>
+</body></html>

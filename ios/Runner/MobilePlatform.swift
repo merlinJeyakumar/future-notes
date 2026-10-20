@@ -15,6 +15,7 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
   private var channels: [FlutterMethodChannel] = []
   private var picker: FlutterResult?
   private var pickingFolder = false
+  private var pickingMultiple = false
   private var exportingFile = false
   private var roots: [String: URL] = [:]
   private var entries: [String: (String, URL)] = [:]
@@ -136,33 +137,49 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
     if let value = leases[lease], value.0 == owner { value.2.closeFile(); if value.3 { value.1.stopAccessingSecurityScopedResource() }; leases.removeValue(forKey: lease) }
   }
   private func documentCall(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
-    if call.method == "selectLocalFolder" || call.method == "pickFile" {
+    if call.method == "selectLocalFolder" || call.method == "pickFile" || call.method == "pickFiles" {
       guard picker == nil, let host = host else { result(FlutterError(code: "picker_busy", message: "Finish the current picker first.", details: nil)); return }
       picker = result; pickingFolder = call.method == "selectLocalFolder"
+      pickingMultiple = call.method == "pickFiles"
       let controller = UIDocumentPickerViewController(documentTypes: [pickingFolder ? "public.folder" : "public.item"], in: .open)
-      controller.delegate = self; controller.allowsMultipleSelection = false; host.present(controller, animated: true); return
+      controller.delegate = self; controller.allowsMultipleSelection = pickingMultiple; host.present(controller, animated: true); return
     }
     queue.async { self.reply(result) { try self.documentWork(call) } }
   }
   func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
     let result = picker; let exporting = exportingFile
-    picker = nil; exportingFile = false; result?(exporting ? false : nil)
+    picker = nil; exportingFile = false; pickingMultiple = false; result?(exporting ? false : nil)
   }
   func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
     guard let result = picker else { return }; picker = nil
     if exportingFile { exportingFile = false; result(!urls.isEmpty); return }
     let folder = pickingFolder
+    let multiple = pickingMultiple
+    pickingMultiple = false
     queue.async {
       self.reply(result) {
-        guard urls.count == 1, let url = urls.first, url.isFileURL, url.startAccessingSecurityScopedResource() else { throw self.failure("Access was not granted.") }
         if folder {
+          guard urls.count == 1, let url = urls.first, url.isFileURL, url.startAccessingSecurityScopedResource() else { throw self.failure("Access was not granted.") }
           defer { url.stopAccessingSecurityScopedResource() }
           let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isUbiquitousItemKey, .volumeIsLocalKey])
           guard values.isDirectory == true, values.isUbiquitousItem != true, values.volumeIsLocal == true else { throw self.failure("Select a local-device folder.") }
           return try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil).base64EncodedString()
         }
-        do { return try self.source(url, owner: "picked", scoped: true) }
-        catch { url.stopAccessingSecurityScopedResource(); throw error }
+        guard !urls.isEmpty, multiple || urls.count == 1 else { throw self.failure("Choose attachment files.") }
+        var opened: [[String: Any]] = []
+        var seen = Set<URL>()
+        do {
+          for url in urls where seen.insert(url.standardizedFileURL).inserted {
+            guard url.isFileURL, url.startAccessingSecurityScopedResource() else { throw self.failure("Access was not granted.") }
+            do { opened.append(try self.source(url, owner: "picked", scoped: true)) }
+            catch { url.stopAccessingSecurityScopedResource(); throw error }
+          }
+          if multiple { return opened }
+          return opened[0]
+        } catch {
+          for value in opened { if let lease = value["lease"] as? String { self.closeLease(lease, owner: "picked") } }
+          throw error
+        }
       }
     }
   }

@@ -57,6 +57,11 @@ abstract interface class PickedSourceOwner {
   Future<void> releasePickedSource(String path);
 }
 
+/// Attachment intake is multi-file; note import and recovery pickers stay single.
+abstract interface class AttachmentFilePicker {
+  Future<FilePickerResult?> pickAttachments();
+}
+
 abstract interface class PickedSourceRecovery {
   Map<String, Object?>? pickedSourceIdentity(String path);
   Future<PlatformFile> reopenPickedSource(Map<String, Object?> identity);
@@ -119,6 +124,7 @@ abstract class IFileService {
 class FileService
     implements
         IFileService,
+        AttachmentFilePicker,
         LibraryFileService,
         NoteMutationPolicy,
         TransactionalNoteFiles,
@@ -438,6 +444,10 @@ class FileService
       allowedExtensions: allowedExtensions,
     );
   }
+
+  @override
+  Future<FilePickerResult?> pickAttachments() =>
+      FilePicker.platform.pickFiles(allowMultiple: true, type: FileType.any);
 
   @override
   Future<String> saveAttachment(Uint8List data, String noteId) async {

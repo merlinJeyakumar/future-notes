@@ -251,6 +251,8 @@ class MemoryNoteFiles implements IFileService, AttachmentMetadataReader {
   MemoryNoteFiles(this.libraryRoot);
 
   String libraryRoot;
+  @override
+  Future<String> getUserDataPath() async => libraryRoot;
   final contents = <String, String>{};
   final formats = <String, NoteStorageFormat>{};
   final attachmentContents = <String, Uint8List>{};

@@ -30,6 +30,7 @@ import 'file_service.dart';
 class ProviderNoteFiles
     implements
         IFileService,
+        AttachmentFilePicker,
         TransactionalNoteFiles,
         NoteMutationPolicy,
         NoteMetadataReader,
@@ -651,6 +652,33 @@ class ProviderNoteFiles
     return FilePickerResult([
       PlatformFile(name: name, path: path, size: selected['length'] as int),
     ]);
+  }
+
+  @override
+  Future<FilePickerResult?> pickAttachments() async {
+    const channel = MethodChannel('future_notes/documents');
+    final sources = await channel.invokeListMethod<Object?>('pickFiles');
+    if (sources == null || sources.isEmpty) return null;
+    final adopted = <PlatformFile>[];
+    try {
+      for (final source in sources) {
+        adopted.add(
+          adoptDroppedSource(Map<Object?, Object?>.from(source as Map)),
+        );
+      }
+      return FilePickerResult(adopted);
+    } catch (_) {
+      for (final source in sources) {
+        if (source is Map && source['lease'] is String) {
+          final path = source['path'];
+          if (path is String) _picked.remove(path);
+          await channel.invokeMethod<void>('closePickedSource', {
+            'lease': source['lease'],
+          });
+        }
+      }
+      rethrow;
+    }
   }
 
   @override

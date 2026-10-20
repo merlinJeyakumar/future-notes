@@ -31,6 +31,7 @@ class LocalDocuments(context: Context, messenger: BinaryMessenger) {
     private val main = Handler(Looper.getMainLooper())
     private val channel = MethodChannel(messenger, "future_notes/documents")
     private var picker: MethodChannel.Result? = null
+    private var pickingMultiple = false
     private val sources = mutableMapOf<String, Pair<String, ParcelFileDescriptor>>()
     // A staged transfer keeps its granted handle until flush instead of
     // reopening the provider for every 1 MiB message. All access is serialized.
@@ -66,13 +67,15 @@ class LocalDocuments(context: Context, messenger: BinaryMessenger) {
     init { channel.setMethodCallHandler(::handle) }
 
     private fun handle(call: MethodCall, result: MethodChannel.Result) {
-        if (call.method == "pickFile") {
+        if (call.method == "pickFile" || call.method == "pickFiles") {
             val host = activity
             if (host == null || picker != null) { result.error("picker_busy", "Open the app and finish its current picker first.", null); return }
             picker = result
+            pickingMultiple = call.method == "pickFiles"
             host.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "*/*"
+                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, pickingMultiple)
                 putExtra(Intent.EXTRA_LOCAL_ONLY, true)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             }, REQUEST_FILE)
@@ -113,18 +116,29 @@ class LocalDocuments(context: Context, messenger: BinaryMessenger) {
         if (request != REQUEST_FOLDER && request != REQUEST_FILE) return false
         val result = picker ?: return true
         picker = null
-        if (status != Activity.RESULT_OK || data?.data == null) {
+        val multiple = pickingMultiple
+        pickingMultiple = false
+        if (status != Activity.RESULT_OK || data == null) {
             result.success(null)
             return true
         }
         if (request == REQUEST_FILE) {
-            val uri = data.data!!
+            val uris = if (multiple && data.clipData != null) {
+                val clip = data.clipData!!
+                (0 until clip.itemCount).map { clip.getItemAt(it).uri }.distinct()
+            } else listOfNotNull(data.data)
+            if (uris.isEmpty()) { result.success(null); return true }
             executor.execute {
                 var descriptor: ParcelFileDescriptor? = null
+                val opened = mutableListOf<Map<String, Any>>()
+                val retained = mutableSetOf<Uri>()
                 try {
+                  for (uri in uris) {
                     if (uri.scheme != "content") throw DocumentFailure("unsupported_document", "Select a native document.")
                     if (data.flags and Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION != 0) {
+                        val alreadyRetained = resolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
                         resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        if (!alreadyRetained) retained.add(uri)
                     }
                     val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
                         if (!it.moveToFirst()) throw DocumentFailure("missing_document", "The selected file is unavailable.")
@@ -138,16 +152,28 @@ class LocalDocuments(context: Context, messenger: BinaryMessenger) {
                     sources[lease] = Pair("picked", descriptor)
                     pickedUris[lease] = uri
                     descriptor = null
-                    main.post { result.success(source) }
+                    opened.add(source)
+                  }
+                  main.post { result.success(if (multiple) opened else opened.single()) }
                 } catch (_: Exception) {
                     descriptor?.close()
-                    main.post { result.error("pick_failed", "The selected file could not be opened as a seekable native source.", null) }
+                    for (source in opened) {
+                        val lease = source["lease"] as String
+                        sources.remove(lease)?.second?.close()
+                        pickedUris.remove(lease)
+                    }
+                    for (uri in retained) {
+                        if (pickedUris.values.none { it == uri }) {
+                            try { resolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
+                        }
+                    }
+                    main.post { result.error("pick_failed", "The selected files could not be opened as seekable native sources. Choose on-device or SD-card files.", null) }
                 }
             }
             return true
         }
         try {
-            val tree = data.data!!
+            val tree = data.data ?: throw DocumentFailure("missing_grant", "Select a library folder.")
             requireLocal(tree)
             val required = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             if (data.flags and required != required) throw DocumentFailure("missing_grant", "Read and write folder access is required.")

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import '../../../core/storage/file_operation_progress.dart';
 import '../../../core/platform/android_native_cipher.dart';
 import 'package:flutter/foundation.dart';
@@ -1073,14 +1074,32 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
+  bool _attachmentPickerOpen = false;
   Future<void> pickAttachment() async {
-    if (_dropBatchActive) return;
-    if (_usesOwnedMutations) {
-      return _libraryTask(_pickOwnedAttachment, null);
+    if (_dropBatchActive || _attachmentPickerOpen) return;
+    _attachmentPickerOpen = true;
+    try {
+      if (_usesOwnedMutations) {
+        await _libraryTask(_pickOwnedAttachment, null);
+      } else if (ensureExtendedNoteOperations()) {
+        await _libraryTask(_pickAttachment, null);
+      }
+    } catch (_) {
+      _reportResult(
+        const OperationResult.failure(
+          OperationOutcome.ioFailure,
+          'The selected files could not be opened. Try choosing them again.',
+        ),
+      );
+    } finally {
+      _attachmentPickerOpen = false;
     }
-    if (!ensureExtendedNoteOperations()) return;
-    return _libraryTask(_pickAttachment, null);
   }
+
+  Future<FilePickerResult?> _pickAttachmentFiles() =>
+      _fileService is AttachmentFilePicker
+      ? (_fileService as AttachmentFilePicker).pickAttachments()
+      : _fileService.pickFile();
 
   Future<T> _libraryTask<T>(Future<T> Function() action, T rejected) async {
     if (_disposed || _librarySwitching || _deleting) return rejected;
@@ -1107,9 +1126,14 @@ class ContentViewModel extends BaseViewModel {
       }
       if (!(await saveNote(allowEmptyFirstSave: true)).isSuccess) return;
     }
-    final selection = await _fileService.pickFile();
+    final credentials = _session.credentialGeneration;
+    final selection = await _pickAttachmentFiles();
     if (selection == null) return;
-    if (_disposed || owner != _session.generation) {
+    if (_disposed ||
+        owner != _session.generation ||
+        _isLocked ||
+        credentials != _session.credentialGeneration ||
+        !_session.canWrite) {
       if (_fileService is PickedSourceOwner) {
         for (final source in selection.files) {
           if (source.path != null)
@@ -1120,18 +1144,22 @@ class ContentViewModel extends BaseViewModel {
       }
       return;
     }
-    final selected = selection.files.single;
-    final path = selected.path;
-    if (path == null) return;
-    // Allow another selection immediately while admitted files prepare.
-    unawaited(
-      addOwnedAttachment(path, selected.name).then(_reportResult).whenComplete(
-        () async {
+    // Admission creates one existing scheduler job per file; no payload is read
+    // by selection. Each platform lease lives until its own job finishes.
+    final admitted = <String>{};
+    for (final selected in selection.files) {
+      final path = selected.path;
+      if (path == null || !admitted.add(path)) continue;
+      unawaited(
+        addOwnedAttachment(
+          path,
+          selected.name,
+        ).then(_reportResult).whenComplete(() async {
           if (_fileService is PickedSourceOwner)
             await (_fileService as PickedSourceOwner).releasePickedSource(path);
-        },
-      ),
-    );
+        }),
+      );
+    }
   }
 
   AttachmentJobState _newAttachmentJob(
@@ -1926,15 +1954,23 @@ class ContentViewModel extends BaseViewModel {
       final saved = await saveNote();
       if (!saved.isSuccess || _disposed || owner != _session.generation) return;
     }
-    final result = await _fileService.pickFile(allowedExtensions: null);
-    if (_disposed || owner != _session.generation || _isLocked) return;
+    final credentials = _session.credentialGeneration;
+    final result = await _pickAttachmentFiles();
+    if (_disposed ||
+        owner != _session.generation ||
+        _isLocked ||
+        credentials != _session.credentialGeneration)
+      return;
 
-    if (result != null && result.files.single.path != null) {
+    if (result == null) return;
+    for (final selected in result.files) {
+      if (_disposed || owner != _session.generation || _isLocked) return;
+      if (selected.path == null) continue;
       // Don't block UI with setBusy
 
-      final path = result.files.single.path!;
+      final path = selected.path!;
       final originalFile = File(path);
-      final fileName = result.files.single.name;
+      final fileName = selected.name;
       final tempId = const Uuid().v4();
       final ext = fileName.split('.').last.toLowerCase();
 
@@ -1972,7 +2008,7 @@ class ContentViewModel extends BaseViewModel {
           attachmentsNotifier.value = List.from(_attachments);
           // notifyListeners();
           print("File too large > 10GB");
-          return;
+          continue;
         }
 
         // 3. Compress
@@ -2058,7 +2094,121 @@ class ContentViewModel extends BaseViewModel {
   Future<OperationResult<void>> exportAttachments(
     Iterable<String> ids, {
     required AttachmentBatchExport output,
-  }) => _trackOwnedJob(_exportOwnedAttachments(ids.toSet(), output));
+  }) => _trackOwnedJob(
+    _usesOwnedMutations
+        ? _exportOwnedAttachments(ids.toSet(), output)
+        : _exportLegacyAttachments(ids.toSet(), output),
+  );
+
+  Future<OperationResult<void>> _exportLegacyAttachments(
+    Set<String> ids,
+    AttachmentBatchExport output,
+  ) async {
+    if (ids.isEmpty ||
+        _disposed ||
+        _isLocked ||
+        _bulkAttachmentJob ||
+        hasAttachmentJobs ||
+        !supportsExtendedNoteOperations ||
+        !ids.every((id) => _attachments.any((a) => a.id == id))) {
+      return _cancelledResult();
+    }
+    final owner = _session.generation;
+    final credentials = _session.credentialGeneration;
+    final selected = _attachments.where((a) => ids.contains(a.id)).toList();
+    final allocated = <String>[];
+    _bulkAttachmentJob = true;
+    final job = _newAttachmentJob(
+      const Uuid().v4(),
+      '${selected.length} attachments',
+      batch: true,
+      attachmentIds: selected.map((a) => a.id).toList(),
+      operation: AttachmentJobOperation.export,
+    );
+    bool current() =>
+        !_disposed &&
+        !_isLocked &&
+        owner == _session.generation &&
+        credentials == _session.credentialGeneration &&
+        !_cancelledAttachmentJobs.contains(job.progress.value.id);
+    OperationResult<void> result = _cancelledResult();
+    try {
+      for (var i = 0; i < selected.length; i++) {
+        if (!current()) throw const FileJobCancelled();
+        final attachment = selected[i];
+        final detail =
+            'File ${i + 1} of ${selected.length} · ${attachment.fileName}';
+        _jobPhase(
+          job,
+          AttachmentJobPhase.decrypting,
+          detail: detail,
+          originalAttachmentId: attachment.id,
+        );
+        final bytes = await readAttachment(attachment.id);
+        if (!current()) throw const FileJobCancelled();
+        if (bytes == null)
+          throw const FormatException('Attachment unavailable.');
+        final destination = await output.destination(attachment.fileName);
+        allocated.add(destination);
+        await _verifyExportDestination(destination);
+        final file = File(destination);
+        await file.create(exclusive: true);
+        final sink = await file.open(mode: FileMode.writeOnly);
+        try {
+          for (var offset = 0; offset < bytes.length; offset += 65536) {
+            if (!current()) throw const FileJobCancelled();
+            final end = math.min(offset + 65536, bytes.length);
+            await sink.writeFrom(bytes, offset, end);
+            _jobPhase(
+              job,
+              AttachmentJobPhase.decrypting,
+              bytes: end,
+              total: bytes.length,
+              detail: '$detail · Saving attachment',
+            );
+          }
+          await sink.flush();
+          if (await sink.length() != bytes.length) {
+            throw const FileSystemException('Incomplete attachment write.');
+          }
+        } finally {
+          await sink.close();
+        }
+      }
+      if (current() &&
+          _tryBeginFinalization([job]) &&
+          await output.publish(List.unmodifiable(allocated))) {
+        result = const OperationResult.success();
+      }
+    } on FileJobCancelled {
+      result = _cancelledResult();
+    } catch (_) {
+      result = const OperationResult.failure(
+        OperationOutcome.ioFailure,
+        'Selected attachments could not be exported. The originals were retained.',
+      );
+    } finally {
+      try {
+        await output.cleanup(allocated);
+      } catch (_) {
+        result = const OperationResult.failure(
+          OperationOutcome.ioFailure,
+          'Export temporary-file cleanup needs retry. The originals were retained.',
+        );
+      }
+      _bulkAttachmentJob = false;
+      _jobPhase(
+        job,
+        result.isSuccess
+            ? AttachmentJobPhase.completed
+            : result.outcome == OperationOutcome.cancelled
+            ? AttachmentJobPhase.cancelled
+            : AttachmentJobPhase.failed,
+        error: result.message,
+      );
+    }
+    return _reportResult(result);
+  }
 
   Future<OperationResult<void>> _exportOwnedAttachments(
     Set<String> ids,

@@ -10,11 +10,13 @@ class MobileFormattingBar extends StatefulWidget {
     required this.child,
     required this.expandedChild,
     required this.restoreEditorFocus,
+    this.collapsedChild,
     this.surfaceColor,
     this.outlineColor,
     this.panels,
   });
   final Widget child;
+  final Widget? collapsedChild;
   final Widget expandedChild;
   final VoidCallback restoreEditorFocus;
   final Color? surfaceColor;
@@ -55,7 +57,16 @@ class _MobileFormattingBarState extends State<MobileFormattingBar> {
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
           child: Row(
             children: [
-              Expanded(child: widget.child),
+              Expanded(
+                child: SingleChildScrollView(
+                  key: const ValueKey('formatting-horizontal-scroll'),
+                  primary: false,
+                  scrollDirection: Axis.horizontal,
+                  child: _expanded
+                      ? widget.child
+                      : widget.collapsedChild ?? widget.child,
+                ),
+              ),
               SizedBox(
                 height: 20,
                 child: VerticalDivider(

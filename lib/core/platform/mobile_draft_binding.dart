@@ -36,6 +36,17 @@ class MobileDraftBinding with WidgetsBindingObserver {
   bool _again = false;
   int _epoch = 0;
   Completer<void>? _writeDone;
+  Object? _observedDraft;
+  Object? _flushedDraft;
+
+  Object get _draftIdentity => (
+    model.draftSession.generation,
+    model.draftSession.editRevision,
+    model.draftSession.persistedRevision,
+    model.draftSession.credentialGeneration,
+    model.draftSession.access,
+    model.editorMode,
+  );
   Future<void> _restore() async {
     try {
       final encoded = await _channel.invokeMethod<String>('read', {
@@ -127,7 +138,10 @@ class MobileDraftBinding with WidgetsBindingObserver {
   }
 
   void _changed() {
-    if (_closed) return;
+    if (_closed || !_ready) return;
+    final identity = _draftIdentity;
+    if (_observedDraft == identity) return;
+    _observedDraft = identity;
     _epoch++;
     _timer?.cancel();
     if (_ready)
@@ -146,7 +160,9 @@ class MobileDraftBinding with WidgetsBindingObserver {
     _writing = true;
     _writeDone = Completer<void>();
     final epoch = _epoch;
+    final identity = _draftIdentity;
     try {
+      if (_flushedDraft == identity) return;
       final draft = await model.capturePrivateRecoveryDraft();
       if (_closed || epoch != _epoch) return;
       if (draft == null) {
@@ -157,6 +173,7 @@ class MobileDraftBinding with WidgetsBindingObserver {
           'json': jsonEncode(draft),
         });
       }
+      _flushedDraft = identity;
     } catch (_) {
       // Retain the previous authenticated recovery generation on write failure.
       MobileDiagnostics.record(MobileDiagnostic.draftWriteFailed);

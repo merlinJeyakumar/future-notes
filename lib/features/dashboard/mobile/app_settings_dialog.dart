@@ -140,31 +140,6 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
                       },
               ),
             ),
-            ListTile(
-              title: const Text('File compression'),
-              subtitle: DropdownButton<CompressionLevel>(
-                value: settings.compressionLevel,
-                isExpanded: true,
-                items: CompressionLevel.values
-                    .map(
-                      (level) => DropdownMenuItem(
-                        value: level,
-                        child: Text(level.name),
-                      ),
-                    )
-                    .toList(),
-                onChanged: _pending.contains('compression')
-                    ? null
-                    : (value) {
-                        if (value != null) {
-                          _write(
-                            'compression',
-                            () => settings.setCompressionLevel(value),
-                          );
-                        }
-                      },
-              ),
-            ),
             if (!kIsWeb) ...[
               const Divider(),
               _attachmentPerformance(),

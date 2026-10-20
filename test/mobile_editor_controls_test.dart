@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_quill/flutter_quill.dart' show ChangeSource;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:code_text_field/code_text_field.dart';
 import 'package:flutter_application_1/features/dashboard/models/attachment_job.dart';
@@ -11,6 +12,74 @@ import 'package:flutter_application_1/main.dart';
 import 'support/editor_harness.dart';
 
 void main() {
+  testWidgets(
+    'mobile compact tools swipe without moving disclosure or editor selection',
+    (tester) async {
+      final h = await EditorHarness.create();
+      h.seed('demo', h.note('demo', 'Synthetic writing'));
+      await h.editor.loadNote('demo');
+      final controller = h.editor.quillController;
+      final document = controller.document;
+      try {
+        await tester.pumpWidget(
+          MyApp(
+            settings: h.settings,
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 340,
+                  child: MobileContentArea(viewModel: h.editor),
+                ),
+              ),
+            ),
+          ),
+        );
+        h.editor.focusNode.requestFocus();
+        controller.updateSelection(
+          const TextSelection(baseOffset: 0, extentOffset: 9),
+          ChangeSource.local,
+        );
+        await tester.pumpAndSettle();
+        final scroll = find.byKey(
+          const ValueKey('formatting-horizontal-scroll'),
+        );
+        final toggle = find.byKey(const ValueKey('formatting-touch-toggle'));
+        final toggleRect = tester.getRect(toggle);
+        final card = find.byKey(const ValueKey('formatting-card'));
+        final height = tester.getSize(card).height;
+        final scrollState = tester.state<ScrollableState>(
+          find.descendant(of: scroll, matching: find.byType(Scrollable)).first,
+        );
+        expect(scrollState.position.maxScrollExtent, greaterThan(600));
+        await tester.drag(scroll, const Offset(-900, 0));
+        await tester.pumpAndSettle();
+        expect(scrollState.position.pixels, greaterThan(0));
+        expect(tester.getRect(toggle), toggleRect);
+        expect(tester.getSize(card).height, height);
+        expect(h.editor.focusNode.hasFocus, isTrue);
+        expect(
+          controller.selection,
+          const TextSelection(baseOffset: 0, extentOffset: 9),
+        );
+        expect(identical(controller.document, document), isTrue);
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Collapse formatting tools'), findsOneWidget);
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        expect(tester.getSize(card).height, height);
+        expect(
+          controller.selection,
+          const TextSelection(baseOffset: 0, extentOffset: 9),
+        );
+        expect(tester.takeException(), isNull);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.runAsync(h.dispose);
+      }
+    },
+  );
   for (final html in [false, true]) {
     for (final terminal in [
       AttachmentJobPhase.completed,
@@ -375,7 +444,11 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('Tool 19'),
         120,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: find
+            .byWidgetPredicate(
+              (widget) => widget is Scrollable && widget.axis == Axis.vertical,
+            )
+            .first,
       );
       expect(find.text('Tool 19').hitTestable(), findsOneWidget);
       await tester.tap(toggle);

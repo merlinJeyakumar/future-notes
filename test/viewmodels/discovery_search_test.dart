@@ -15,6 +15,39 @@ import '../support/editor_harness.dart';
 import '../support/validation_directory.dart';
 
 void main() {
+  testWidgets(
+    'provider hints stay quiet and identical rows do not restart search',
+    (tester) async {
+      final f = _Fixture(metadata: true);
+      addTearDown(f.close);
+      await tester.pump();
+      f.publish(['Alpha']);
+      await tester.pump();
+      f.editor.setSearchQuery('Alpha');
+      await tester.pump(const Duration(milliseconds: 300));
+      f.filters.single.result.complete(f.filters.single.files);
+      await tester.pump();
+      final rows = f.editor.recentFiles;
+      final filters = f.filters.length;
+      f.files.hints.add(null);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+      expect(f.reader.requests.length, 2);
+      expect(f.editor.noteListStateNotifier.value.updating, false);
+      f.reader.publish(rows);
+      await tester.pump();
+      expect(f.editor.noteListStateNotifier.value.updating, false);
+      expect(f.filters.length, filters);
+      final forced = (f.reader as _MetadataReader).forced;
+      await f.editor.loadRecentFiles();
+      expect(f.editor.noteListStateNotifier.value.isScanning, true);
+      expect((f.reader as _MetadataReader).forced, forced + 1);
+      f.reader.publish(rows);
+      await tester.pump();
+      expect(f.editor.noteListStateNotifier.value.isScanning, false);
+      f.disposeEditor();
+    },
+  );
   void searchTest(
     String name,
     Future<void> Function(WidgetTester, _Fixture) body,
@@ -401,7 +434,7 @@ class _FilterJob {
 }
 
 class _Fixture {
-  _Fixture() {
+  _Fixture({bool metadata = false}) {
     run = Directory.systemTemp.createTempSync('future-notes-validation-');
     environment = StorageEnvironment.validation(
       validationRoot: run.path,
@@ -410,7 +443,7 @@ class _Fixture {
     );
     settings = _Settings(environment);
     files = _Files(environment.dataRoot!);
-    reader = _Reader(environment);
+    reader = metadata ? _MetadataReader(environment) : _Reader(environment);
     editor = ContentViewModel(
       fileService: files,
       encryptionService: SyntheticCipher(),
@@ -448,6 +481,7 @@ class _Fixture {
 
   Future<void> close() async {
     disposeEditor();
+    await files.hints.close();
     settings.themeModeNotifier.dispose();
     await deleteValidationRun(run);
   }
@@ -463,12 +497,20 @@ class _Settings extends SettingsService {
 
 class _Files extends MemoryNoteFiles {
   _Files(super.libraryRoot);
+  final hints = StreamController<void>.broadcast();
   final pathResults = <Future<String>>[];
   @override
   Future<String> getUserDataPath() =>
       pathResults.isEmpty ? Future.value(libraryRoot) : pathResults.removeAt(0);
   @override
-  Stream<void> watchRecentFiles() => const Stream<void>.empty();
+  Stream<void> watchRecentFiles() => hints.stream;
+}
+
+class _MetadataReader extends _Reader implements MetadataLibraryDiscovery {
+  _MetadataReader(super.environment);
+  int forced = 0;
+  @override
+  void invalidateMetadataCache() => forced++;
 }
 
 class _Reader extends BackgroundService {

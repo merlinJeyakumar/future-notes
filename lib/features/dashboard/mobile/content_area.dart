@@ -14,6 +14,7 @@ import 'attachment_mentions.dart';
 import 'attachment_preview.dart';
 import 'expanding_formatting_bar.dart';
 import 'editor_panels.dart';
+import 'selection_toolbar.dart';
 import 'job_notifications.dart';
 import '../../../core/routing/fnotes_uri.dart';
 import '../models/note_model.dart';
@@ -65,7 +66,25 @@ class MobileContentArea extends StatefulWidget {
   State<MobileContentArea> createState() => _MobileContentAreaState();
 }
 
-class _MobileContentAreaState extends State<MobileContentArea> {
+class _MobileContentAreaState extends State<MobileContentArea>
+    with WidgetsBindingObserver {
+  bool _keyboardVisible = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _keyboardVisible = View.of(context).viewInsets.bottom > 0;
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (!mounted) return;
+    // Scaffold removes the consumed bottom inset from its body MediaQuery.
+    // Observe the owning view, so both Rich text and HTML use the real IME.
+    final visible = View.of(context).viewInsets.bottom > 0;
+    if (visible != _keyboardVisible) setState(() => _keyboardVisible = visible);
+  }
+
   bool _exporting = false;
   bool _readOnlyBeforeExport = false;
 
@@ -113,6 +132,7 @@ class _MobileContentAreaState extends State<MobileContentArea> {
   final _unlockFocusNode = FocusNode(debugLabel: 'Note unlock password');
   final _htmlFocusNode = FocusNode(debugLabel: 'HTML source');
   final _panels = MobileEditorPanels();
+  final _editorViewportKey = GlobalKey(debugLabel: 'mobile-editor-viewport');
   Object? _panelOwner;
   Object? _watchedDocument;
   StreamSubscription? _bodyChanges;
@@ -168,6 +188,7 @@ class _MobileContentAreaState extends State<MobileContentArea> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _embedBuilder = AttachmentEmbedBuilder(viewModel);
     // Cache local references to avoid property access in build/config
     _focusNode = viewModel.focusNode;
@@ -215,6 +236,12 @@ class _MobileContentAreaState extends State<MobileContentArea> {
       // Optimization: Disable some heavy features if not needed
       enableInteractiveSelection: true,
       enableSelectionToolbar: true,
+      contextMenuBuilder: (context, state) => MobileSelectionToolbar(
+        viewportKey: _editorViewportKey,
+        anchors: state.contextMenuAnchors,
+        buttonItems: state.contextMenuButtonItems,
+        layoutChanges: _panels,
+      ),
     );
     viewModel.attachmentJobsNotifier.addListener(_exportChanged);
     widget.exportRequests?.addListener(_exportChanged);
@@ -237,6 +264,7 @@ class _MobileContentAreaState extends State<MobileContentArea> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     viewModel.attachmentJobsNotifier.removeListener(_exportChanged);
     widget.exportRequests?.removeListener(_exportChanged);
     if (_exporting) _restoreExportReadOnly();
@@ -314,6 +342,9 @@ class _MobileContentAreaState extends State<MobileContentArea> {
                               expanded: true,
                             ),
                             child: _buildFormattingControls(),
+                            collapsedChild: _buildFormattingControls(
+                              scrollable: true,
+                            ),
                           ),
                         ),
                       ),
@@ -351,57 +382,72 @@ class _MobileContentAreaState extends State<MobileContentArea> {
                   ),
                 ),
 
-                AttachmentJobPanel(
-                  viewModel: viewModel,
-                  auxiliaryOnly: true,
-                  excludedOperations: const {AttachmentJobOperation.export},
-                ),
-                MobileAttachmentProgress(model: viewModel),
-                ValueListenableBuilder(
-                  valueListenable: viewModel.pendingDeletionsNotifier,
-                  builder: (context, pending, _) => Column(
+                Visibility(
+                  key: const ValueKey('mobile-attachment-shelf'),
+                  visible: !_keyboardVisible,
+                  maintainState: true,
+                  child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      for (final reference in pending)
-                        Row(
+                      AttachmentJobPanel(
+                        viewModel: viewModel,
+                        auxiliaryOnly: true,
+                        excludedOperations: const {
+                          AttachmentJobOperation.export,
+                        },
+                      ),
+                      MobileAttachmentProgress(model: viewModel),
+                      ValueListenableBuilder(
+                        valueListenable: viewModel.pendingDeletionsNotifier,
+                        builder: (context, pending, _) => Column(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Expanded(
-                              child: Text('Permanent deletion is incomplete.'),
-                            ),
-                            TextButton(
-                              onPressed: _exporting
-                                  ? null
-                                  : () =>
-                                        viewModel.deleteReviewedNote(reference),
-                              child: const Text('Retry cleanup'),
-                            ),
+                            for (final reference in pending)
+                              Row(
+                                children: [
+                                  const Expanded(
+                                    child: Text(
+                                      'Permanent deletion is incomplete.',
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: _exporting
+                                        ? null
+                                        : () => viewModel.deleteReviewedNote(
+                                            reference,
+                                          ),
+                                    child: const Text('Retry cleanup'),
+                                  ),
+                                ],
+                              ),
                           ],
                         ),
+                      ),
+
+                      // Attachments Bar
+                      ValueListenableBuilder<bool>(
+                        valueListenable: viewModel.isLockedNotifier,
+                        builder: (context, isLocked, child) {
+                          if (isLocked) return const SizedBox.shrink();
+                          return ValueListenableBuilder<List<AttachmentModel>>(
+                            valueListenable: viewModel.attachmentsNotifier,
+                            builder: (context, attachments, child) {
+                              return _exportDisabled(
+                                MobilePanelRegion(
+                                  panels: _panels,
+                                  panel: MobileEditorPanel.attachments,
+                                  child: AttachmentStrip(
+                                    viewModel: viewModel,
+                                    panels: _panels,
+                                  ),
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      ),
                     ],
                   ),
-                ),
-
-                // Attachments Bar
-                ValueListenableBuilder<bool>(
-                  valueListenable: viewModel.isLockedNotifier,
-                  builder: (context, isLocked, child) {
-                    if (isLocked) return const SizedBox.shrink();
-                    return ValueListenableBuilder<List<AttachmentModel>>(
-                      valueListenable: viewModel.attachmentsNotifier,
-                      builder: (context, attachments, child) {
-                        return _exportDisabled(
-                          MobilePanelRegion(
-                            panels: _panels,
-                            panel: MobileEditorPanel.attachments,
-                            child: AttachmentStrip(
-                              viewModel: viewModel,
-                              panels: _panels,
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                  },
                 ),
               ],
             ),
@@ -572,7 +618,10 @@ class _MobileContentAreaState extends State<MobileContentArea> {
   );
 
   /// Floating toolbar "island" with grouped formatting tools
-  Widget _buildFormattingControls({bool expanded = false}) => AbsorbPointer(
+  Widget _buildFormattingControls({
+    bool expanded = false,
+    bool scrollable = false,
+  }) => AbsorbPointer(
     absorbing:
         viewModel.isLibraryCutover ||
         viewModel.isImportCutover ||
@@ -619,6 +668,12 @@ class _MobileContentAreaState extends State<MobileContentArea> {
                   attribute: Attribute.italic,
                   options: _getButtonOptions(),
                 ),
+                if (scrollable) ...[
+                  for (final entry in _toolbarPrimaryControls().asMap().entries)
+                    if (![0, 1, 2, 5, 6].contains(entry.key)) entry.value,
+                  _buildVerticalDivider(),
+                  ..._toolbarSecondaryControls(),
+                ],
               ],
             ),
     ),
@@ -1067,6 +1122,7 @@ class _MobileContentAreaState extends State<MobileContentArea> {
 
     // One modest inset, shared by Rich text and HTML.
     return Padding(
+      key: _editorViewportKey,
       padding: EdgeInsets.only(left: 16, right: 16, top: 4, bottom: 8),
       child: viewModel.isHtmlMode
           ? Column(

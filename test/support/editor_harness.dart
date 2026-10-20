@@ -17,6 +17,7 @@ import 'package:flutter_application_1/features/dashboard/viewmodels/content_view
 import 'validation_directory.dart';
 import 'package:flutter_application_1/core/storage/attachment_open_cache.dart';
 import 'package:flutter_application_1/core/platform/windows_desktop_actions.dart';
+import 'package:flutter_application_1/features/dashboard/models/auto_save_policy.dart';
 
 class PausePoint {
   final started = Completer<void>();
@@ -43,6 +44,7 @@ class EditorHarness {
     DesktopActions? desktopActions,
     Future<List<dynamic>> Function(String)? htmlToDelta,
     Future<String> Function(List<dynamic>)? deltaToHtml,
+    AutoSavePolicy autoSavePolicy = AutoSavePolicy.desktop,
   }) {
     editor = ContentViewModel(
       fileService: files,
@@ -55,6 +57,7 @@ class EditorHarness {
       desktopActions: desktopActions,
       htmlToDelta: htmlToDelta,
       deltaToHtml: deltaToHtml,
+      autoSavePolicy: autoSavePolicy,
     );
   }
 
@@ -64,6 +67,7 @@ class EditorHarness {
     DesktopActions? desktopActions,
     Future<List<dynamic>> Function(String)? htmlToDelta,
     Future<String> Function(List<dynamic>)? deltaToHtml,
+    AutoSavePolicy autoSavePolicy = AutoSavePolicy.desktop,
   }) async {
     // Widget tests run in fake async. Synchronous creation of this empty,
     // disposable directory avoids an OS future that fake async cannot resolve.
@@ -89,6 +93,7 @@ class EditorHarness {
       desktopActions: desktopActions,
       htmlToDelta: htmlToDelta,
       deltaToHtml: deltaToHtml,
+      autoSavePolicy: autoSavePolicy,
     );
   }
 

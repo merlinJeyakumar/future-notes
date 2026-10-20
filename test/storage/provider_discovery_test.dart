@@ -151,6 +151,42 @@ void main() {
   });
 
   test(
+    'unchanged provider hints reuse rows without reading note bytes; explicit refresh bypasses cache',
+    () async {
+      await documents.seed('one.enc', utf8.encode(_note('one')));
+      final first = await _scan(discovery) as DiscoverySnapshot;
+      documents.memory.readBytesByName.clear();
+      final second = await _scan(discovery) as DiscoverySnapshot;
+      expect(second.files.single, same(first.files.single));
+      expect(documents.memory.readBytesByName, isEmpty);
+      discovery.invalidateMetadataCache();
+      await _scan(discovery);
+      expect(documents.memory.readBytesByName['one.enc'], greaterThan(0));
+    },
+  );
+
+  test(
+    'changed envelope identity or size updates inventory and never reads attachments',
+    () async {
+      final old = await documents.seed('one.enc', utf8.encode(_note('one')));
+      await documents.seed('demo.med', [0, 1, 2]);
+      await _scan(discovery);
+      documents.memory.readBytesByName.clear();
+      documents.memory.corrupt(old, utf8.encode(_note('replacement-longer')));
+      final result = await _scan(discovery) as DiscoverySnapshot;
+      expect(result.files.single.noteId, 'replacement-longer');
+      expect(documents.memory.readBytesByName['one.enc'], greaterThan(0));
+      // Unrelated files may receive only the existing bounded recognition probe.
+      expect(
+        documents.memory.readBytesByName['demo.med'] ?? 0,
+        lessThanOrEqualTo(256),
+      );
+      documents.folderFailure = 'permission_revoked';
+      expect(await _scan(discovery), isA<DiscoveryFailureEvent>());
+    },
+  );
+
+  test(
     'mixed folder preserves canonical and arbitrary legacy names without payload scans',
     () async {
       final folder = await documents.seed(

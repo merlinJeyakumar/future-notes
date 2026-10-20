@@ -35,6 +35,7 @@ import '../../../core/storage/external_file_export.dart';
 import '../../../core/operations/operation_result.dart';
 import '../models/draft_session.dart';
 import '../models/save_ui_state.dart';
+import '../models/auto_save_policy.dart';
 import '../models/note_list_ui_state.dart';
 import '../models/draft_transition.dart';
 import '../models/note_envelope.dart' show DecodedNote;
@@ -231,6 +232,10 @@ class ContentViewModel extends BaseViewModel {
   String? _currentPassword;
   String? _currentFileName;
   Timer? _autoSaveTimer;
+  Timer? _autoSaveCooldown;
+  bool _autoSaveDue = false;
+  bool _automaticSavingActive = true;
+  final AutoSavePolicy _autoSavePolicy;
   Timer? _debounceTimer; // For file watching
   Timer? _searchDebounceTimer;
   StreamSubscription? _fileWatcherSubscription;
@@ -604,10 +609,12 @@ class ContentViewModel extends BaseViewModel {
       (_) {
         _mutationsPending--;
         _flushCommittedRefresh();
+        _resumeDeferredAutoSave();
       },
       onError: (Object _, StackTrace __) {
         _mutationsPending--;
         _flushCommittedRefresh();
+        _resumeDeferredAutoSave();
       },
     );
     return result;
@@ -1160,6 +1167,7 @@ class ContentViewModel extends BaseViewModel {
       };
     }
     _ownedJobStates.add(job);
+    if (_autoSavePolicy.deferDuringWork) _cancelAutoSave();
     attachmentJobsNotifier.value = [...attachmentJobsNotifier.value, job];
     _retireTerminalOpenJobs();
     return job;
@@ -1208,6 +1216,7 @@ class ContentViewModel extends BaseViewModel {
     );
     if (!job.progress.value.active && previous.active) {
       attachmentJobsNotifier.value = List.of(attachmentJobsNotifier.value);
+      _resumeDeferredAutoSave();
     }
   }
 
@@ -2476,7 +2485,9 @@ class ContentViewModel extends BaseViewModel {
     Future<String> Function(List<dynamic>)? deltaToHtml,
     AttachmentOpenCache? attachmentOpenCache,
     DesktopActions? desktopActions,
+    AutoSavePolicy autoSavePolicy = AutoSavePolicy.desktop,
   }) : _fileService = fileService,
+       _autoSavePolicy = autoSavePolicy,
        _encryptionService = encryptionService,
        _settings = settings ?? SettingsService(),
        _nowMilliseconds = nowMilliseconds ?? _systemMilliseconds,
@@ -2909,6 +2920,7 @@ class ContentViewModel extends BaseViewModel {
     } finally {
       if (!_disposed && request == _conversionRequest) {
         isConvertingNotifier.value = false;
+        _resumeDeferredAutoSave();
       }
     }
   }
@@ -2928,12 +2940,17 @@ class ContentViewModel extends BaseViewModel {
       if (_disposed || !background.isCurrent(snapshot.request)) {
         return;
       }
+      final unchanged =
+          background is MetadataLibraryDiscovery &&
+          listEquals(_recentFiles, snapshot.files);
       _recentFiles = snapshot.files;
       _inventoryRoot = snapshot.request.directoryPath;
-      _listingRevision++;
+      if (!unchanged) _listingRevision++;
       _listError = null;
-      _isScanning = !snapshot.isFinal || _refreshAgain;
-      _restartSearch();
+      _isScanning = background is MetadataLibraryDiscovery
+          ? _isScanning && (!snapshot.isFinal || _refreshAgain)
+          : !snapshot.isFinal || _refreshAgain;
+      if (!unchanged) _restartSearch();
       _publishNoteList();
       if (snapshot.isFinal) _finishBackgroundRefresh(snapshot.request);
     });
@@ -2967,7 +2984,11 @@ class ContentViewModel extends BaseViewModel {
         // Debounce reload
         if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
         _debounceTimer = Timer(const Duration(seconds: 2), () {
-          loadRecentFiles();
+          if (background is MetadataLibraryDiscovery) {
+            unawaited(_requestBackgroundRefresh());
+          } else {
+            loadRecentFiles();
+          }
         });
       },
       onError: (Object error, StackTrace stackTrace) {
@@ -3320,13 +3341,15 @@ class ContentViewModel extends BaseViewModel {
       return;
     if (_refreshInFlight != null || _refreshDispatching) {
       _refreshAgain = true;
-      _isScanning = true;
+      if (_backgroundService is! MetadataLibraryDiscovery) _isScanning = true;
       _publishNoteList();
       return;
     }
     _refreshDispatching = true;
     try {
-      await loadRecentFiles();
+      await loadRecentFiles(
+        background: _backgroundService is MetadataLibraryDiscovery,
+      );
     } finally {
       _refreshDispatching = false;
     }
@@ -3341,7 +3364,7 @@ class ContentViewModel extends BaseViewModel {
     }
   }
 
-  Future<void> loadRecentFiles() async {
+  Future<void> loadRecentFiles({bool background = false}) async {
     if (_disposed || _libraryResourcesClosing || _backgroundService == null) {
       return;
     }
@@ -3350,7 +3373,11 @@ class ContentViewModel extends BaseViewModel {
     _refreshAgain = false;
     _refreshInFlight = null;
     _listError = null;
-    _isScanning = true;
+    _isScanning = !background;
+    final discovery = _backgroundService;
+    if (!background && discovery is MetadataLibraryDiscovery) {
+      discovery.invalidateMetadataCache();
+    }
     _publishNoteList();
     try {
       final path = await _fileService.getUserDataPath();
@@ -3664,6 +3691,7 @@ class ContentViewModel extends BaseViewModel {
       return DraftDecision.cancel;
     } finally {
       _decisionPending = false;
+      _resumeDeferredAutoSave();
     }
   }
 
@@ -4629,6 +4657,7 @@ class ContentViewModel extends BaseViewModel {
       _drainingSaves = false;
       _publishSaveState();
       _flushCommittedRefresh();
+      _resumeDeferredAutoSave();
     }
   }
 
@@ -4773,6 +4802,13 @@ class ContentViewModel extends BaseViewModel {
         _sessionPasswords.remove(reference.fileName);
       }
       _autoSavePaused = false;
+      if (_autoSavePolicy.minimumInterval > Duration.zero) {
+        _autoSaveCooldown?.cancel();
+        _autoSaveCooldown = Timer(
+          _autoSavePolicy.minimumInterval,
+          _tryDeferredAutoSave,
+        );
+      }
       if (generationChange) notifyListeners();
       if (_session.isDirty) {
         _scheduleAutoSave();
@@ -6779,6 +6815,7 @@ class ContentViewModel extends BaseViewModel {
     _loadRequest++;
     _unlockRequest++;
     _autoSaveTimer?.cancel();
+    _autoSaveCooldown?.cancel();
     _debounceTimer?.cancel();
     _searchDebounceTimer?.cancel();
     _fileWatcherSubscription?.cancel();
@@ -6816,8 +6853,9 @@ class ContentViewModel extends BaseViewModel {
         _autoSavePaused) {
       return;
     }
+    if (_autoSavePolicy.deferDuringWork && _autoSaveWorkBlocked) return;
     final owner = _session.generation;
-    _autoSaveTimer = Timer(const Duration(seconds: 2), () async {
+    _autoSaveTimer = Timer(_autoSavePolicy.idleDelay, () async {
       if (_disposed ||
           owner != _session.generation ||
           !_session.canWrite ||
@@ -6825,11 +6863,70 @@ class ContentViewModel extends BaseViewModel {
           _autoSavePaused) {
         return;
       }
-      await saveNote(isAutoSave: true);
+      if (_autoSavePolicy.deferDuringWork) {
+        _autoSaveDue = true;
+        _tryDeferredAutoSave();
+      } else {
+        await saveNote(isAutoSave: true);
+      }
     });
   }
 
-  void _cancelAutoSave() => _autoSaveTimer?.cancel();
+  bool get _autoSaveWorkBlocked =>
+      !_automaticSavingActive ||
+      hasAttachmentJobs ||
+      _attachmentAdds != 0 ||
+      _bulkAttachmentJob ||
+      _mutationsPending != 0 ||
+      _drainingSaves ||
+      _activeLoads != 0 ||
+      isConvertingEditor ||
+      _librarySwitching ||
+      _importCutover ||
+      _decisionPending ||
+      _deleting;
+
+  /// Mobile lifecycle owns this gate. Backgrounding flushes private recovery,
+  /// not a queued library publication. Desktop scheduling ignores the gate.
+  void setAutomaticSavingActive(bool active) {
+    if (!_autoSavePolicy.deferDuringWork || _automaticSavingActive == active)
+      return;
+    _automaticSavingActive = active;
+    if (active) {
+      _scheduleAutoSave();
+    } else {
+      _cancelAutoSave();
+    }
+  }
+
+  void _tryDeferredAutoSave() {
+    if (!_autoSaveDue ||
+        _disposed ||
+        !_session.isPersisted ||
+        !_session.canWrite ||
+        _isLocked ||
+        !_session.isDirty ||
+        _autoSavePaused ||
+        _autoSaveWorkBlocked ||
+        (_autoSaveCooldown?.isActive ?? false))
+      return;
+    _autoSaveDue = false;
+    unawaited(saveNote(isAutoSave: true));
+  }
+
+  void _resumeDeferredAutoSave() {
+    if (!_autoSavePolicy.deferDuringWork || _disposed) return;
+    if (_autoSaveDue) {
+      _tryDeferredAutoSave();
+    } else if (!(_autoSaveTimer?.isActive ?? false) && !_autoSaveWorkBlocked) {
+      _scheduleAutoSave();
+    }
+  }
+
+  void _cancelAutoSave() {
+    _autoSaveTimer?.cancel();
+    _autoSaveDue = false;
+  }
 
   Future<Uint8List?> readAttachment(String attachmentId) {
     final key =

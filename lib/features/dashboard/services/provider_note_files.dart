@@ -224,11 +224,12 @@ class ProviderNoteFiles
   ];
 
   Future<({NoteReference reference, LibraryDocument metadata})?>
-  inspectDiscoveryCandidate(LibraryDocument entry) async {
+  inspectDiscoveryCandidate(
+    LibraryDocument entry, {
+    LibraryDocument? envelope,
+  }) async {
     validateDocumentName(entry.name);
-    final content = entry.isDirectory
-        ? await io.child(entry, 'note_content_${entry.name.substring(5)}.enc')
-        : entry;
+    final content = envelope ?? await discoveryEnvelope(entry);
     if (content == null) {
       // Older libraries keep attachment-only note_<id> folders alongside a
       // separate legacy note file. Absence of a canonical envelope does not
@@ -285,6 +286,13 @@ class ProviderNoteFiles
       throw const FormatException('Note metadata disappeared.');
     }
     return (reference: reference, metadata: content);
+  }
+
+  Future<LibraryDocument?> discoveryEnvelope(LibraryDocument entry) async {
+    validateDocumentName(entry.name);
+    return entry.isDirectory
+        ? await io.child(entry, 'note_content_${entry.name.substring(5)}.enc')
+        : entry;
   }
 
   @override

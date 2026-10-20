@@ -8,7 +8,7 @@ import 'encryption_service.dart';
 import 'note_codec.dart';
 import 'provider_note_files.dart';
 
-class ProviderDiscovery implements LibraryDiscovery {
+class ProviderDiscovery implements MetadataLibraryDiscovery {
   ProviderDiscovery(this.files);
   final ProviderNoteFiles files;
   final _snapshots = StreamController<DiscoverySnapshot>.broadcast();
@@ -18,6 +18,14 @@ class ProviderDiscovery implements LibraryDiscovery {
   int _request = 0;
   bool _closed = false;
   Future<void>? _active;
+  final _cache = <String, (LibraryDocument, RecentFile)>{};
+  int _cacheEpoch = 0;
+  @override
+  void invalidateMetadataCache() {
+    _cache.clear();
+    _cacheEpoch++;
+  }
+
   @override
   bool get isReady => !_closed;
   @override
@@ -61,12 +69,33 @@ class ProviderDiscovery implements LibraryDiscovery {
         1; // enumerate, recognize/resolve, decode, confirm folder access
     try {
       final recent = <RecentFile>[];
+      final cacheEpoch = _cacheEpoch;
+      final nextCache = <String, (LibraryDocument, RecentFile)>{};
       var unreadable = 0;
       for (final entry in await files.discoveryCandidates()) {
         if (!isCurrent(request)) return;
         stage = 2;
         try {
-          final candidate = await files.inspectDiscoveryCandidate(entry);
+          final envelope = await files.discoveryEnvelope(entry);
+          if (!isCurrent(request)) return;
+          if (envelope == null) continue;
+          final cached = _cache[entry.name];
+          if (cached != null &&
+              envelope.modifiedMillis != null &&
+              envelope.modifiedMillis! > 0 &&
+              envelope.token == cached.$1.token &&
+              envelope.name == cached.$1.name &&
+              envelope.isDirectory == cached.$1.isDirectory &&
+              envelope.length == cached.$1.length &&
+              envelope.modifiedMillis == cached.$1.modifiedMillis) {
+            recent.add(cached.$2);
+            nextCache[entry.name] = cached;
+            continue;
+          }
+          final candidate = await files.inspectDiscoveryCandidate(
+            entry,
+            envelope: envelope,
+          );
           if (candidate == null) continue;
           final reference = candidate.reference;
           stage = 3;
@@ -78,22 +107,20 @@ class ProviderDiscovery implements LibraryDiscovery {
           );
           final note = decoded.note;
           final metadata = candidate.metadata;
-          recent.add(
-            RecentFile(
-              path: entry.name,
-              fullPath: reference.contentPath,
-              title: note.title,
-              noteId: note.id,
-              isLocked: note.isLocked,
-              created: DateTime.fromMillisecondsSinceEpoch(note.timestamp),
-              modified: metadata.modifiedMillis == null
-                  ? null
-                  : DateTime.fromMillisecondsSinceEpoch(
-                      metadata.modifiedMillis!,
-                    ),
-              sizeBytes: metadata.length,
-            ),
+          final row = RecentFile(
+            path: entry.name,
+            fullPath: reference.contentPath,
+            title: note.title,
+            noteId: note.id,
+            isLocked: note.isLocked,
+            created: DateTime.fromMillisecondsSinceEpoch(note.timestamp),
+            modified: metadata.modifiedMillis == null
+                ? null
+                : DateTime.fromMillisecondsSinceEpoch(metadata.modifiedMillis!),
+            sizeBytes: metadata.length,
           );
+          recent.add(row);
+          nextCache[entry.name] = (metadata, row);
         } catch (error) {
           if (error is LibraryAccessException &&
               const {
@@ -126,6 +153,11 @@ class ProviderDiscovery implements LibraryDiscovery {
         ),
       );
       if (isCurrent(request)) {
+        if (cacheEpoch == _cacheEpoch) {
+          _cache
+            ..clear()
+            ..addAll(nextCache);
+        }
         _snapshots.add(DiscoverySnapshot(request, recent, isFinal: true));
       }
     } catch (error) {
@@ -173,7 +205,9 @@ class ProviderDiscovery implements LibraryDiscovery {
 
   @override
   void dispose() {
+    if (_closed) return;
     _closed = true;
+    _cache.clear();
     _desired = null;
     _snapshots.close();
     _failures.close();

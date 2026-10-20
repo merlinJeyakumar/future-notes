@@ -81,6 +81,12 @@ abstract interface class LibraryDiscovery {
   void dispose();
 }
 
+/// Provider hints may be broad (including resume). Reconcile cheap envelope
+/// metadata in the background; explicit Refresh requests a fresh decode.
+abstract interface class MetadataLibraryDiscovery implements LibraryDiscovery {
+  void invalidateMetadataCache();
+}
+
 class BackgroundService implements LibraryDiscovery {
   BackgroundService({
     StorageEnvironment environment = const StorageEnvironment.production(),

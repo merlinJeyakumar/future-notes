@@ -48,6 +48,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      expect(find.text('File compression'), findsNothing);
       expect(find.text('This device'), findsOneWidget);
       final fast = find.text('Higher throughput');
       await tester.ensureVisible(fast);

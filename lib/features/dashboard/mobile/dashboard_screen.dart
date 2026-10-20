@@ -2,6 +2,7 @@ import '../../../core/theme/app_dialog.dart';
 import '../models/note_import.dart';
 import '../widgets/note_import_dialog.dart';
 import '../models/note_list_ui_state.dart';
+import '../models/auto_save_policy.dart';
 import 'app_settings_dialog.dart';
 import 'dart:async';
 import 'dart:io';
@@ -222,8 +223,14 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
       desktopActions: _desktop,
       attachmentOpenCache: widget.attachmentOpenCache,
       backgroundService: widget.discovery,
+      autoSavePolicy: AutoSavePolicy.mobile,
     );
-    _lifecycle = AppLifecycleListener(onExitRequested: _requestExit);
+    _lifecycle = AppLifecycleListener(
+      onExitRequested: _requestExit,
+      onStateChange: (state) => _viewModel.setAutomaticSavingActive(
+        state == AppLifecycleState.resumed,
+      ),
+    );
     final library = widget.jobLibraryIdentity;
     if (library != null) {
       _noteActivity = MobileNoteActivityController(

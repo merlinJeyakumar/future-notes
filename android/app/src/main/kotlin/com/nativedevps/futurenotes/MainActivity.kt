@@ -20,6 +20,7 @@ class MainActivity : FlutterActivity() {
         super.onCreate(savedInstanceState)
         MobileDiagnostics.record(MobileDiagnostics.Event.ACTIVITY_CREATED, "restored" to if (savedInstanceState != null) 1 else 0)
         (application as FutureNotesApplication).jobHost.notificationIntent(intent)
+        (application as FutureNotesApplication).incomingShares.receive(intent)
         if (BuildConfig.FLAVOR == "preview") {
             // Explicitly allow developer screenshots/recording. Production keeps
             // its platform capture protection independently of build signing.
@@ -37,6 +38,7 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         (application as FutureNotesApplication).jobHost.notificationIntent(intent)
+        (application as FutureNotesApplication).incomingShares.receive(intent)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

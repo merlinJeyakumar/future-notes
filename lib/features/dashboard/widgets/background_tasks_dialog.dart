@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../../../core/platform/mobile_job_binding.dart';
 import '../models/attachment_job.dart';
 import '../viewmodels/content_viewmodel.dart';
@@ -27,9 +28,11 @@ class _BackgroundTasksDialogState extends State<BackgroundTasksDialog> {
   ContentViewModel get model => widget.model;
   MobileJobBinding? get jobs => widget.jobs;
   String? get selectedId => widget.selectedId;
+  ValueListenable<List<AttachmentJobState>> get jobStates =>
+      jobs?.allJobs ?? model.attachmentJobsNotifier;
 
   void _capture() {
-    for (final state in model.attachmentJobsNotifier.value) {
+    for (final state in jobStates.value) {
       final snapshot = state.progress.value;
       if (snapshot.active || _seen.containsKey(snapshot.id))
         _seen[snapshot.id] = snapshot;
@@ -42,7 +45,7 @@ class _BackgroundTasksDialogState extends State<BackgroundTasksDialog> {
   }
 
   void _sync() {
-    final states = model.attachmentJobsNotifier.value;
+    final states = jobStates.value;
     final currentIds = states.map((state) => state.progress.value.id).toSet();
     // Keep acknowledged terminal results, never an orphaned live snapshot.
     _seen.removeWhere(
@@ -66,13 +69,13 @@ class _BackgroundTasksDialogState extends State<BackgroundTasksDialog> {
   @override
   void initState() {
     super.initState();
-    model.attachmentJobsNotifier.addListener(_sync);
+    jobStates.addListener(_sync);
     _sync();
   }
 
   @override
   void dispose() {
-    model.attachmentJobsNotifier.removeListener(_sync);
+    jobStates.removeListener(_sync);
     for (final state in _observed.values) {
       state.progress.removeListener(_progress);
     }
@@ -86,7 +89,7 @@ class _BackgroundTasksDialogState extends State<BackgroundTasksDialog> {
       width: 440,
       height: MediaQuery.sizeOf(context).height * .5,
       child: ValueListenableBuilder<List<AttachmentJobState>>(
-        valueListenable: model.attachmentJobsNotifier,
+        valueListenable: jobStates,
         builder: (context, states, _) => ListenableBuilder(
           listenable: Listenable.merge([
             if (jobs != null) jobs!.retained,
@@ -203,7 +206,9 @@ class _BackgroundTasksDialogState extends State<BackgroundTasksDialog> {
               ? IconButton(
                   tooltip: 'Cancel this job',
                   icon: const Icon(Icons.close),
-                  onPressed: () => model.cancelAttachmentJob(job.id),
+                  onPressed: () => jobs == null
+                      ? model.cancelAttachmentJob(job.id)
+                      : jobs!.cancel(job.id),
                 )
               : null,
         ),

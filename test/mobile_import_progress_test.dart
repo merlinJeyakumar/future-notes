@@ -7,6 +7,7 @@ import 'package:flutter_application_1/core/storage/file_operation_progress.dart'
 import 'package:flutter_application_1/features/dashboard/models/attachment_job.dart';
 import 'package:flutter_application_1/features/dashboard/models/note_import.dart';
 import 'package:flutter_application_1/features/dashboard/widgets/note_import_dialog.dart';
+import 'package:flutter_application_1/features/dashboard/mobile/import_flow_dialog.dart';
 import 'note_replacement_dialog_test.dart' show conflict;
 
 void main() {
@@ -32,6 +33,17 @@ void main() {
             fileName: 'Synthetic.fnote',
             jobs: jobs,
             detailedProgress: true,
+            conflictBuilder: mobileImportConflict,
+            bodyBuilder: (context, state, result, cancelling, cancel, close) =>
+                mobileImportBody(
+                  context,
+                  state,
+                  result,
+                  cancelling,
+                  cancel,
+                  close,
+                  fileName: 'Synthetic.fnote',
+                ),
             cancelJob: (_) async {},
             startImport: (resolve) async {
               selected = await resolve(conflict(null));
@@ -43,7 +55,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('This note already exists'), findsOneWidget);
+      expect(find.text('Note already exists'), findsOneWidget);
       final label = switch (choice) {
         NoteImportDecision.duplicate => 'Duplicate',
         NoteImportDecision.replace => 'Back up & Replace',
@@ -54,7 +66,7 @@ void main() {
       await tester.tap(find.text(label));
       await tester.pumpAndSettle();
       expect(selected, choice);
-      expect(find.text('Done'), findsOneWidget);
+      expect(find.text('Close'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       jobs.dispose();
@@ -87,6 +99,17 @@ void main() {
           home: NoteImportDialog(
             fileName: 'Synthetic.fnote',
             detailedProgress: true,
+            conflictBuilder: mobileImportConflict,
+            bodyBuilder: (context, state, result, cancelling, cancel, close) =>
+                mobileImportBody(
+                  context,
+                  state,
+                  result,
+                  cancelling,
+                  cancel,
+                  close,
+                  fileName: 'Synthetic.fnote',
+                ),
             jobs: jobs,
             startImport: (_) {
               jobs.value = [job];
@@ -189,7 +212,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Note imported'), findsOneWidget);
-      expect(find.text('Done'), findsOneWidget);
+      expect(find.text('Close'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       jobs.dispose();

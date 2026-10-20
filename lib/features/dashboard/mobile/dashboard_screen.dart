@@ -12,6 +12,10 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'sidebar.dart';
 import 'job_notifications.dart';
+import 'shared_attachment_jobs.dart';
+import 'incoming_share_screen.dart';
+import '../services/provider_note_files.dart';
+import '../widgets/attachment_presentation.dart' show formatAttachmentBytes;
 import 'note_activity.dart';
 import 'export_progress_dialog.dart';
 import 'work_decision_dialog.dart';
@@ -25,7 +29,7 @@ import '../services/file_service.dart';
 import '../services/background_service.dart';
 import '../services/encryption_service.dart';
 import '../models/note_model.dart';
-import '../widgets/import_confirmation_dialog.dart';
+import 'import_flow_dialog.dart';
 import '../widgets/export_options_dialog.dart';
 import '../widgets/password_dialog.dart';
 import '../services/settings_service.dart';
@@ -89,6 +93,8 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
   final _shutdownElapsed = Stopwatch();
   AttachmentFileActions? _desktop;
   MobileJobBinding? _mobileJobs;
+  SharedAttachmentJobs? _sharedJobs;
+  bool _incomingOpen = false;
   MobileNoteActivityController? _noteActivity;
   MobileDraftBinding? _mobileDraft;
   bool _changingLibrary = false;
@@ -231,22 +237,35 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
         state == AppLifecycleState.resumed,
       ),
     );
-    final library = widget.jobLibraryIdentity;
-    if (library != null) {
-      _noteActivity = MobileNoteActivityController(
-        jobs: _viewModel.attachmentJobsNotifier,
-        library: library,
-        ownerOf: (id) =>
-            NoteJobOwner.fromRecovery(_viewModel.attachmentJobRecovery(id)),
+    if (widget.fileService case final ProviderNoteFiles files) {
+      _sharedJobs = SharedAttachmentJobs(
+        model: _viewModel,
+        files: files,
+        settings: _viewModel.settings,
       );
+      _sharedJobs!.batches.addListener(_incomingChanged);
     }
     if ((Platform.isAndroid || Platform.isIOS) &&
         widget.startBackgroundServices) {
       _mobileJobs = MobileJobBinding(
         _viewModel,
+        additional: _sharedJobs,
         onNotification: (id) => unawaited(_openJobNotification(id)),
       );
     }
+    final library = widget.jobLibraryIdentity;
+    if (library != null) {
+      _noteActivity = MobileNoteActivityController(
+        jobs: _mobileJobs?.allJobs ?? _viewModel.attachmentJobsNotifier,
+        library: library,
+        ownerOf: (id) => NoteJobOwner.fromRecovery(
+          _mobileJobs?.recovery(id) ?? _viewModel.attachmentJobRecovery(id),
+        ),
+      );
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_sharedJobs?.refreshInbox());
+    });
     unawaited(_viewModel.initializeAttachmentCache());
     _viewModel.operationResultNotifier.addListener(_showOperationFailure);
     _searchController.addListener(_queryChanged);
@@ -267,6 +286,126 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
   }
 
   bool _jobNotificationOpen = false;
+
+  void _incomingChanged() {
+    if (mounted && (_sharedJobs?.batches.value.isNotEmpty ?? false))
+      unawaited(_presentSharedFiles());
+  }
+
+  Future<void> _presentSharedFiles() async {
+    if (!mounted || _incomingOpen || _jobNotificationOpen || _shutdownStarted)
+      return;
+    await WidgetsBinding.instance.endOfFrame;
+    await _mobileDraft?.restored;
+    if (!mounted || _incomingOpen || ModalRoute.of(context)?.isCurrent != true)
+      return;
+    final shares = _sharedJobs;
+    if (shares == null || shares.batches.value.isEmpty) return;
+    final batch = shares.batches.value.first;
+    _incomingOpen = true;
+    IncomingShareResult? selected;
+    try {
+      selected = await Navigator.of(context).push<IncomingShareResult>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => IncomingShareScreen(
+            batch: batch,
+            jobs: shares,
+            model: _viewModel,
+          ),
+        ),
+      );
+      if (selected == null) await shares.discard(batch);
+      if (mounted && selected?.importSource != null) {
+        final source = selected!.importSource!;
+        _panelDismissals.value++;
+        final file = await shares.takePackage(batch, source);
+        if (mounted)
+          await _importSelectedFile(file);
+        else
+          await _viewModel.releaseImportSelection(file);
+        return;
+      }
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'This shared file is unavailable. Share it again to retry.',
+            ),
+          ),
+        );
+      return;
+    } finally {
+      _incomingOpen = false;
+    }
+    if (!mounted || selected == null) return;
+    if (selected.openEditor) {
+      final result = await _viewModel.loadNote(
+        selected.target!.reference.fileName,
+      );
+      if (mounted && result.isSuccess) setState(() => _phoneEditor = true);
+    } else {
+      _showPhoneNotes();
+    }
+  }
+
+  Widget? _sharedStatus() {
+    final shares = _sharedJobs;
+    if (shares == null || MediaQuery.viewInsetsOf(context).bottom > 0)
+      return null;
+    return ListenableBuilder(
+      listenable: Listenable.merge([shares.batches, shares.jobs]),
+      builder: (context, _) {
+        final active = shares.jobs.value
+            .where((j) => j.progress.value.active)
+            .toList();
+        if (shares.batches.value.isEmpty && active.isEmpty)
+          return const SizedBox.shrink();
+        if (shares.batches.value.isNotEmpty)
+          return SafeArea(
+            child: ListTile(
+              leading: const Icon(Icons.file_present_outlined),
+              title: const Text('Shared files waiting'),
+              trailing: TextButton(
+                onPressed: _presentSharedFiles,
+                child: const Text('Open'),
+              ),
+            ),
+          );
+        return ValueListenableBuilder<AttachmentJobSnapshot>(
+          valueListenable: active.first.progress,
+          builder: (context, job, _) => SafeArea(
+            child: ListTile(
+              leading: const Icon(Icons.sync),
+              title: Text(
+                job.fileName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '${job.detail ?? 'Preparing'} · ${formatAttachmentBytes(job.bytes)}${job.total == null ? '' : ' / ${formatAttachmentBytes(job.total!)}'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  LinearProgressIndicator(
+                    value: job.total == null || job.total == 0
+                        ? null
+                        : (job.bytes / job.total!).clamp(0.0, 1.0),
+                  ),
+                ],
+              ),
+              onTap: _showJobNotifications,
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   AttachmentJobState? _activeExport({String? id}) {
     for (final state in _viewModel.attachmentJobsNotifier.value) {
@@ -406,6 +545,29 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
         final confirmed =
             await (widget.confirmExit?.call() ?? Future.value(true));
         if (!mounted || !confirmed) return AppExitResponse.cancel;
+        if (_sharedJobs?.hasActive == true) {
+          final cancel = await showAppDialog<bool>(
+            context: context,
+            builder: (dialog) => AlertDialog(
+              title: const Text('Attachments are processing'),
+              content: const Text(
+                'Cancel background attachment tasks and exit?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialog, false),
+                  child: const Text('Keep open'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialog, true),
+                  child: const Text('Cancel tasks and exit'),
+                ),
+              ],
+            ),
+          );
+          if (cancel != true) return AppExitResponse.cancel;
+          await _sharedJobs!.close();
+        }
         final result = await _viewModel.prepareToExit();
         if (!mounted || !result.isSuccess) {
           return AppExitResponse.cancel;
@@ -491,6 +653,8 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
     _exportRequests.dispose();
     _panelDismissals.dispose();
     _mobileDraft?.dispose();
+    _sharedJobs?.batches.removeListener(_incomingChanged);
+    _sharedJobs?.dispose();
     _mobileJobs?.dispose();
     _noteActivity?.dispose();
     _noJobNotifications.dispose();
@@ -894,6 +1058,10 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
 
     final file = await _viewModel.pickImportPackFile();
     if (file == null) return;
+    await _importSelectedFile(file);
+  }
+
+  Future<void> _importSelectedFile(PlatformFile file) async {
     try {
       if (!mounted) return;
 
@@ -903,43 +1071,59 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
       if (!mounted) return;
 
       if (!verification.isValid) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Invalid file: ${verification.message}'),
-            backgroundColor: Colors.red,
+        await showAppDialog<void>(
+          context: context,
+          builder: (dialog) => MobileImportDialog(
+            title: 'Cannot import file',
+            children: [
+              Text(file.name, style: Theme.of(dialog).textTheme.titleSmall),
+              const SizedBox(height: 16),
+              Text(verification.message),
+              const SizedBox(height: 24),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(dialog),
+                  child: const Text('Close'),
+                ),
+              ),
+            ],
           ),
         );
         return;
       }
 
-      // Show confirmation dialog
-      final shouldImport = await showAppDialog<bool>(
+      final password = await showAppDialog<String>(
         context: context,
-        builder: (context) => ImportConfirmationDialog(
+        builder: (_) => MobileImportSetupDialog(
           fileName: file.name,
+          size: file.size,
           fileType: verification.message,
+          isPackage: verification.isPack,
+          passwordRequired: verification.isPackEncrypted,
           previewInfo: verification.previewInfo,
         ),
       );
-
-      if (shouldImport != true) return;
-
-      if (!mounted) return;
+      if (password == null || !mounted) return;
 
       if (_viewModel.usesOwnedStorage) {
-        String? password;
-        if (verification.isPack) {
-          password = await _showPackPasswordDialog(
-            isRequired: verification.isPackEncrypted,
-          );
-          if (password == null || !mounted) return;
-        }
         final result = await showAppDialog<OperationResult<NoteImportResult>>(
           context: context,
           barrierDismissible: false,
           builder: (_) => NoteImportDialog(
             fileName: file.name,
             detailedProgress: true,
+            bodyBuilder: (context, state, result, cancelling, cancel, close) =>
+                mobileImportBody(
+                  context,
+                  state,
+                  result,
+                  cancelling,
+                  cancel,
+                  close,
+                  fileName: file.name,
+                ),
+            conflictBuilder: mobileImportConflict,
             jobs: _viewModel.attachmentJobsNotifier,
             cancelJob: _viewModel.cancelAttachmentJob,
             startImport: (resolveConflict) => _viewModel.importNoteFile(
@@ -964,16 +1148,6 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
       String? errorMessage;
 
       if (verification.isPack) {
-        // Handle pack file import - always ask for optional archive password
-        final password = await _showPackPasswordDialog(
-          isRequired: verification.isPackEncrypted,
-        );
-
-        // If password is required and user cancelled, abort
-        if (password == null) {
-          return;
-        }
-
         // Import runs in background (uses compute internally)
         importedNoteId = await _viewModel.importNotePack(
           file.path!,
@@ -1027,80 +1201,6 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
     }
   }
 
-  Future<String?> _showPackPasswordDialog({bool isRequired = false}) async {
-    final passwordController = TextEditingController();
-
-    final result = await showAppDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF161E2D),
-        title: Text(
-          isRequired ? 'Enter Archive Password' : 'Archive Password (Optional)',
-          style: const TextStyle(color: Colors.white),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              isRequired
-                  ? 'This archive is password protected. Enter the password to import.'
-                  : 'If this archive has a password, enter it below. Leave empty if no password.',
-              style: const TextStyle(color: Colors.white70),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: passwordController,
-              autofocus: true,
-              obscureText: true,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'Archive Password',
-                hintText: isRequired ? null : 'Leave empty if no password',
-                hintStyle: const TextStyle(color: Colors.grey),
-                labelStyle: const TextStyle(color: Colors.grey),
-                filled: true,
-                fillColor: const Color(0xFF1E293B),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFF334155)),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFF334155)),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Colors.blueAccent),
-                ),
-              ),
-              onSubmitted: (value) => Navigator.pop(context, value),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, null),
-            child: const Text('Cancel'),
-          ),
-          if (!isRequired)
-            TextButton(
-              onPressed: () => Navigator.pop(context, ''),
-              child: const Text('Skip'),
-            ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, passwordController.text),
-            child: const Text('Import'),
-          ),
-        ],
-      ),
-    );
-
-    // Don't dispose controller here - it will be garbage collected
-    // Null means Cancel; an empty string is an explicit no-password import.
-    return result;
-  }
-
   void _showMasterSettings(BuildContext context) {
     _panelDismissals.value++;
     showAppDialog<void>(
@@ -1113,6 +1213,11 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
         changeLibrary: widget.changeMobileLibrary == null
             ? null
             : () async {
+                if (_sharedJobs?.hasActive == true)
+                  return const OperationResult<void>.failure(
+                    OperationOutcome.conflict,
+                    'Finish or cancel background attachment tasks before changing libraries.',
+                  );
                 setState(() => _changingLibrary = true);
                 try {
                   return await widget.changeMobileLibrary!(
@@ -1193,6 +1298,7 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
             child: Scaffold(
               key: _scaffoldKey,
               resizeToAvoidBottomInset: true,
+              bottomNavigationBar: _sharedStatus(),
               body: SafeArea(
                 child: Stack(
                   children: [

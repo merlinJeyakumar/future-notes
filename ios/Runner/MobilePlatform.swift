@@ -31,6 +31,9 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
   private let selection: URL
   private let ledger: URL
   private let interruptedLedger: URL
+  private var incoming: [String: [String: Any]] = [:]
+  private var incomingLeases = Set<String>()
+  private var incomingChannel: FlutterMethodChannel?
 
   init(controller: FlutterViewController) throws {
     host = controller
@@ -45,6 +48,12 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
     try protectDirectory(cacheRoot)
     install("future_notes/documents", controller) { [weak self] call, result in self?.documentCall(call, result) }
     install("future_notes/files", controller) { [weak self] call, result in self?.fileCall(call, result) }
+    let incomingChannel = FlutterMethodChannel(name: "future_notes/incoming_shares", binaryMessenger: controller.binaryMessenger)
+    self.incomingChannel = incomingChannel
+    incomingChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self = self else { return }
+      self.queue.async { self.reply(result) { try self.incomingCall(call) } }
+    }
     install("future_notes/private_drafts", controller) { [weak self] call, result in
       guard let self = self else { return }
       self.queue.async { self.reply(result) { try self.draftCall(call) } }
@@ -134,7 +143,100 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
     return ["lease": lease, "path": url.path, "identity": identity, "length": status.st_size, "name": url.lastPathComponent]
   }
   private func closeLease(_ lease: String, owner: String) {
-    if let value = leases[lease], value.0 == owner { value.2.closeFile(); if value.3 { value.1.stopAccessingSecurityScopedResource() }; leases.removeValue(forKey: lease) }
+    if let value = leases[lease], value.0 == owner {
+      value.2.closeFile(); if value.3 { value.1.stopAccessingSecurityScopedResource() }; leases.removeValue(forKey: lease)
+      if incomingLeases.remove(lease) != nil { cleanupIncomingFile(value.1) }
+    }
+  }
+
+  private func incomingRoot() -> URL? {
+    fm.containerURL(forSecurityApplicationGroupIdentifier: "group.com.nativedevps.futurenotes")?.appendingPathComponent("IncomingShares", isDirectory: true)
+  }
+  private func ownsIncoming(_ url: URL) -> Bool {
+    guard let root = incomingRoot() else { return false }
+    let folder = url.deletingLastPathComponent()
+    return folder.deletingLastPathComponent().standardizedFileURL == root.standardizedFileURL && UUID(uuidString: folder.lastPathComponent) != nil && url.lastPathComponent.hasPrefix("file-") && url.pathExtension == "bin"
+  }
+  private func cleanupIncomingFile(_ url: URL) {
+    guard ownsIncoming(url) else { return }
+    try? fm.removeItem(at: url)
+    let folder = url.deletingLastPathComponent()
+    if let entries = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil), !entries.contains(where: { $0.pathExtension == "bin" }) {
+      try? fm.removeItem(at: folder)
+    }
+  }
+  private func incomingCall(_ call: FlutterMethodCall) throws -> Any? {
+    guard let root = incomingRoot() else {
+      if call.method == "pending" { return [] }
+      throw failure("App Group is unavailable. Configure signing on a Mac.")
+    }
+    if call.method == "pending" {
+      for folder in (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] {
+        guard UUID(uuidString: folder.lastPathComponent) != nil, incoming[folder.lastPathComponent] == nil,
+          let receipt = try readPrivate(folder.appendingPathComponent("receipt.json"), limit: 2 * 1024 * 1024),
+          let manifest = try JSONSerialization.jsonObject(with: receipt) as? [String: Any], manifest["version"] as? Int == 1,
+          let id = manifest["id"] as? String, id == folder.lastPathComponent,
+          let records = manifest["sources"] as? [[String: Any]], (1...128).contains(records.count) else { continue }
+        var opened: [[String: Any]] = []
+        do {
+          for record in records {
+            let file = try name(record["file"])
+            let url = folder.appendingPathComponent(file)
+            guard ownsIncoming(url), let length = record["length"] as? NSNumber, length.int64Value >= 0, length.int64Value <= 10 * 1024 * 1024 * 1024 else { throw failure("Invalid shared file.") }
+            var value = try source(url, owner: "picked", scoped: false)
+            guard (value["length"] as? NSNumber)?.int64Value == length.int64Value else { throw failure("Shared file changed.") }
+            value["name"] = record["name"] as? String ?? "Shared file"
+            if let lease = value["lease"] as? String { incomingLeases.insert(lease) }
+            opened.append(value)
+          }
+          incoming[id] = ["id": id, "sources": opened]
+        } catch {
+          for item in opened { if let lease = item["lease"] as? String { closeLease(lease, owner: "picked") } }
+          throw error
+        }
+      }
+      return Array(incoming.values)
+    }
+    guard let args = call.arguments as? [String: Any], let id = args["id"] as? String, UUID(uuidString: id) != nil else { throw failure("Invalid share receipt.") }
+    let folder = root.appendingPathComponent(id, isDirectory: true)
+    if call.method == "claim" {
+      guard let batch = incoming[id], let sources = batch["sources"] as? [[String: Any]],
+        let lease = args["lease"] as? String, let selected = sources.first(where: { $0["lease"] as? String == lease }),
+        let ownedSource = leases[lease], ownedSource.0 == "picked", ownsIncoming(ownedSource.1),
+        let data = try readPrivate(folder.appendingPathComponent("receipt.json"), limit: 2 * 1024 * 1024),
+        var manifest = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let records = manifest["sources"] as? [[String: Any]] else { throw failure("Shared file is unavailable.") }
+      let remaining = sources.filter { $0["lease"] as? String != lease }
+      manifest["sources"] = records.filter { $0["file"] as? String != ownedSource.1.lastPathComponent }
+      let receipt = folder.appendingPathComponent("receipt.json")
+      if remaining.isEmpty {
+        try atomic(data, folder.appendingPathComponent("accepted.json"))
+        try fm.removeItem(at: receipt)
+        incoming.removeValue(forKey: id)
+      } else {
+        try atomic(JSONSerialization.data(withJSONObject: manifest), receipt)
+        incoming[id] = ["id": id, "sources": remaining]
+      }
+      return selected
+    }
+    if call.method == "acknowledge" {
+      let receipt = folder.appendingPathComponent("receipt.json")
+      if fm.fileExists(atPath: receipt.path) { try fm.moveItem(at: receipt, to: folder.appendingPathComponent("accepted.json")) }
+      incoming.removeValue(forKey: id)
+      return nil
+    }
+    if call.method == "discard" {
+      if let batch = incoming.removeValue(forKey: id), let sources = batch["sources"] as? [[String: Any]] {
+        for item in sources { if let lease = item["lease"] as? String { closeLease(lease, owner: "picked") } }
+      }
+      let receipt = folder.appendingPathComponent("receipt.json")
+      if fm.fileExists(atPath: receipt.path) { try fm.removeItem(at: receipt) }
+      // Claimed files can still be owned by another job or its recovery record.
+      if let entries = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil),
+        !entries.contains(where: { $0.pathExtension == "bin" }) { try fm.removeItem(at: folder) }
+      return nil
+    }
+    throw failure("Unsupported share inbox action.")
   }
   private func documentCall(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
     if call.method == "selectLocalFolder" || call.method == "pickFile" || call.method == "pickFiles" {
@@ -185,11 +287,22 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
   }
   private func documentWork(_ call: FlutterMethodCall) throws -> Any? {
     let args = call.arguments as? [String: Any] ?? [:]
-    if call.method == "forgetPickedSource" { return nil } // Scope ends with its source lease; no global read grant exists.
+    if call.method == "forgetPickedSource" {
+      if let encoded = args["identity"] as? String, let data = Data(base64Encoded: encoded) {
+        var stale = false
+        if let url = try? URL(resolvingBookmarkData: data, options: .withoutUI, relativeTo: nil, bookmarkDataIsStale: &stale), ownsIncoming(url), !leases.values.contains(where: { $0.1 == url }) { cleanupIncomingFile(url) }
+      }
+      return nil
+    }
     if call.method == "reopenPickedSource" {
       guard let encoded = args["identity"] as? String, let data = Data(base64Encoded: encoded) else { throw failure("Missing input bookmark.") }
       var stale = false
       let url = try URL(resolvingBookmarkData: data, options: .withoutUI, relativeTo: nil, bookmarkDataIsStale: &stale)
+      if !stale && ownsIncoming(url) {
+        let value = try source(url, owner: "picked", scoped: false)
+        if let lease = value["lease"] as? String { incomingLeases.insert(lease) }
+        return value
+      }
       guard !stale, url.startAccessingSecurityScopedResource() else { throw failure("Select the input again.") }
       do { return try source(url, owner: "picked", scoped: true) } catch { url.stopAccessingSecurityScopedResource(); throw error }
     }
@@ -374,7 +487,7 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
     let view = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial)); view.frame = window.bounds; view.autoresizingMask = [.flexibleWidth, .flexibleHeight]; view.isUserInteractionEnabled = true
     window.addSubview(view); cover = view
   }
-  @objc private func uncoverSnapshot() { cover?.removeFromSuperview(); cover = nil }
+  @objc private func uncoverSnapshot() { cover?.removeFromSuperview(); cover = nil; incomingChannel?.invokeMethod("changed", arguments: nil) }
   deinit {
     NotificationCenter.default.removeObserver(self)
     for value in leases.values { value.2.closeFile(); if value.3 { value.1.stopAccessingSecurityScopedResource() } }

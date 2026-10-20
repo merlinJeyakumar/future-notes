@@ -12,6 +12,7 @@ import '../services/file_service.dart';
 import '../services/background_service.dart';
 import '../services/encryption_service.dart';
 import '../models/note_model.dart';
+import '../models/shared_attachment_target.dart';
 import '../models/attachment_mention.dart';
 import '../../../core/routing/fnotes_uri.dart';
 import '../models/note_import.dart';
@@ -107,6 +108,155 @@ class ContentViewModel extends BaseViewModel {
   bool get isConvertingEditor => isConvertingNotifier.value;
   EditorMode get editorMode =>
       _isHtmlMode ? EditorMode.html : EditorMode.richText;
+
+  // Populated only by the mobile opt-in API. Default desktop saves are unchanged.
+  final _sharedAttachmentCommits = <String, Map<String, AttachmentModel>>{};
+  List<RecentFile> get shareDestinationNotes => List.unmodifiable(_recentFiles);
+  bool get supportsSharedAttachments =>
+      _fileService is MobileSharePersistence &&
+      (_fileService as MobileSharePersistence).supportsBackgroundIntake;
+
+  Future<SharedAttachmentTarget> prepareSharedTarget(
+    String fileName, {
+    String? password,
+    bool rememberPassword = true,
+  }) async {
+    if (!supportsSharedAttachments || _disposed)
+      throw StateError('Shared intake unavailable.');
+    final reference = await _fileService.resolveNote(fileName);
+    if (reference == null)
+      throw StateError('The selected note is unavailable.');
+    final source = await _fileService.readResolved(reference);
+    if (source == null) throw StateError('The selected note is unavailable.');
+    final decoded = await NoteCodec.decode(
+      source,
+      decryptApp: _encryptionService.decryptAppResult,
+    );
+    final credential = password ?? _sessionPasswords[fileName];
+    if (decoded.note.isLocked) {
+      if (credential == null ||
+          !(await _encryptionService.decryptResult(
+            decoded.note.content,
+            password: credential,
+          )).isSuccess) {
+        throw const SharedAttachmentPasswordRequired();
+      }
+      if (rememberPassword) _sessionPasswords[fileName] = credential;
+    }
+    return SharedAttachmentTarget(
+      reference.withModelId(decoded.note.id),
+      decoded,
+      decoded.note.isLocked ? credential : null,
+    );
+  }
+
+  bool sharedTargetCredentialCurrent(SharedAttachmentTarget target) =>
+      !_disposed &&
+      (!target.decoded.note.isLocked ||
+          _sessionPasswords[target.reference.fileName] == target.password);
+
+  Future<SharedAttachmentTarget> createSharedNote(
+    String title,
+    String? password,
+  ) => _mutate(() async {
+    if (!supportsSharedAttachments || _disposed)
+      throw StateError('Shared intake unavailable.');
+    final id = const Uuid().v4();
+    final body = jsonEncode([
+      {'insert': '\n'},
+    ]);
+    final metadata = <String, dynamic>{
+      'id': id,
+      'title': title.trim().isEmpty ? 'New Note' : title.trim(),
+      'content': password == null
+          ? body
+          : await _encryptionService.encrypt(body, password: password),
+      'isLocked': password != null,
+      'timestamp': _nowMilliseconds(),
+      'attachments': <Object>[],
+    };
+    final reference = await _fileService.newNoteReference(id);
+    final committed = await _fileService.writeResolved(
+      reference,
+      await _encryptionService.encryptApp(jsonEncode(metadata)),
+    );
+    if (password != null) _sessionPasswords[committed.fileName] = password;
+    _markCommittedRefresh(committed.binding);
+    return SharedAttachmentTarget(
+      committed.withModelId(id),
+      NoteCodec.decodeMetadata(
+        jsonEncode(metadata),
+        kind: NoteEnvelopeKind.appEncrypted,
+      ),
+      password,
+    );
+  });
+
+  /// Shares use the same mutation queue as editor saves, without editor ownership.
+  Future<void> commitSharedAttachment(
+    SharedAttachmentTarget target,
+    AttachmentModel attachment,
+    PreparedAttachmentFile prepared, {
+    required bool Function() cancelled,
+    void Function()? onFinalizing,
+    FileByteProgress? onProgress,
+  }) => _mutate(() async {
+    if (!supportsSharedAttachments ||
+        !sharedTargetCredentialCurrent(target) ||
+        cancelled())
+      throw const FileJobCancelled();
+    if (_noteReference?.contentPath == target.reference.contentPath &&
+        (_bulkAttachmentJob || _deleting || _importCutover))
+      throw const FileJobCancelled();
+    final fresh = await prepareSharedTarget(
+      target.reference.fileName,
+      password: target.password,
+      rememberPassword: false,
+    );
+    if (fresh.decoded.note.id != target.decoded.note.id ||
+        fresh.decoded.note.isLocked != target.decoded.note.isLocked ||
+        cancelled())
+      throw const FileJobCancelled();
+    final original = fresh.decoded.metadata['attachments'];
+    final byId = <String, dynamic>{
+      for (final a in fresh.decoded.note.attachments)
+        a.id: original is List
+            ? original
+                      .whereType<Map>()
+                      .where((e) => e['id'] == a.id)
+                      .firstOrNull ??
+                  a.toJson()
+            : a.toJson(),
+      attachment.id: attachment.toJson(),
+    };
+    final metadata = <String, dynamic>{
+      ...fresh.decoded.metadata,
+      'attachments': byId.values.toList(),
+    };
+    final json = jsonEncode(metadata);
+    final encoded = fresh.decoded.kind == NoteEnvelopeKind.legacyJson
+        ? json
+        : await _encryptionService.encryptApp(json);
+    if (!sharedTargetCredentialCurrent(target) || cancelled())
+      throw const FileJobCancelled();
+    onFinalizing?.call();
+    final committed = await (_fileService as TransactionalNoteFiles)
+        .commitGeneration(fresh.reference, encoded, [
+          prepared,
+        ], onProgress: onProgress);
+    (_sharedAttachmentCommits[committed.fileName] ??= {})[attachment.id] =
+        attachment;
+    if (_noteReference?.contentPath == committed.contentPath) {
+      _noteReference = committed;
+      _storedNote = NoteModel.fromJson(metadata);
+      _retainedMetadata = metadata;
+      if (!_attachments.any((a) => a.id == attachment.id))
+        _attachments = [..._attachments, attachment];
+      attachmentsNotifier.value = List.unmodifiable(_attachments);
+      // Do not replace controllers, body, selection, revision, or dirty fields.
+    }
+    _markCommittedRefresh(committed.binding);
+  });
 
   void _publishSaveState() {
     if (_disposed) return;
@@ -3750,6 +3900,7 @@ class ContentViewModel extends BaseViewModel {
         _currentFileName = fileName;
         _currentPassword = password;
         _storedNote = note;
+        _sharedAttachmentCommits.remove(fileName);
         _retainedPlainBody = plainBody;
         _noteReference = resolvedReference;
         _retainedMetadata = prospective.metadata;
@@ -4897,6 +5048,36 @@ class ContentViewModel extends BaseViewModel {
               .toList();
         }
       }
+      final shared = _sharedAttachmentCommits[reference.fileName];
+      if (shared != null) {
+        final original = snapshot.metadata['attachments'];
+        final known = original is List
+            ? original.map((a) => a is Map ? a['id'] : a).toSet()
+            : <Object?>{};
+        if (snapshot.attachmentsChanged) {
+          shared.removeWhere(
+            (id, _) =>
+                known.contains(id) &&
+                !snapshot.attachments.any((a) => a.id == id),
+          );
+        }
+        final entries = metadata['attachments'];
+        final effective = <String, dynamic>{
+          if (entries is List)
+            for (final entry in entries)
+              if (entry is Map && entry['id'] is String)
+                entry['id'] as String: entry
+              else if (entry is String)
+                entry: AttachmentModel(
+                  id: entry,
+                  fileName: 'Attachment',
+                ).toJson(),
+        };
+        for (final addition in shared.values) {
+          effective.putIfAbsent(addition.id, addition.toJson);
+        }
+        metadata['attachments'] = effective.values.toList();
+      }
       final json = jsonEncode(metadata);
       final encoded = snapshot.envelopeKind == NoteEnvelopeKind.legacyJson
           ? json
@@ -4936,7 +5117,9 @@ class ContentViewModel extends BaseViewModel {
           dirtyFields: sameRevision ? const {} : _session.dirtyFields,
         );
         _persistedCredentialGeneration = _session.credentialGeneration;
-        _attachments = List.of(snapshot.attachments);
+        _attachments = shared == null
+            ? List.of(snapshot.attachments)
+            : NoteModel.fromJson(metadata).attachments;
         _currentPassword = snapshot.password;
         attachmentsNotifier.value = List.of(_attachments);
         _attachmentCache.clear();
@@ -6501,6 +6684,7 @@ class ContentViewModel extends BaseViewModel {
       _noteReference = reference;
       _currentPassword = null;
       _storedNote = note;
+      _sharedAttachmentCommits.remove(reference.fileName);
       _retainedMetadata = metadata;
       _retainedPlainBody = note.isLocked ? null : note.content;
       _envelopeKind = kind;

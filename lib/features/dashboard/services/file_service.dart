@@ -62,6 +62,11 @@ abstract interface class ImportSourceReader {
   Future<Uint8List> readImportHeader(String source);
 }
 
+/// Opt-in only: mobile provider-backed intake can publish independent jobs.
+abstract interface class MobileSharePersistence {
+  bool get supportsBackgroundIntake;
+}
+
 /// Attachment intake is multi-file; note import and recovery pickers stay single.
 abstract interface class AttachmentFilePicker {
   Future<FilePickerResult?> pickAttachments();

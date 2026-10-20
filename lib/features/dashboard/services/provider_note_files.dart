@@ -39,6 +39,7 @@ class ProviderNoteFiles
         AttachmentSourceSession,
         PickedSourceOwner,
         ImportSourceReader,
+        MobileSharePersistence,
         PickedSourceRecovery,
         NativeDropSourceOwner,
         AttachmentStagingCapacity,
@@ -72,12 +73,39 @@ class ProviderNoteFiles
   late final ProviderGenerationStore store;
   late final StorageOwnerRoot owner;
   final _changes = StreamController<void>.broadcast();
+  @override
+  bool get supportsBackgroundIntake => true;
   final _leases = <String, _SourceLease>{};
   final _operations = <String>{};
   final _outputs = <String, (LibraryOutputSinkLease, String)>{};
+  Future<void> _candidateTail = Future.value();
 
   @override
   Future<OwnedWriteTarget> createAttachmentCandidate(
+    NoteReference reference,
+    String attachmentId,
+    Directory operation,
+    int expectedBytes,
+  ) {
+    // Candidate setup may create the same first attachment folder. Serialize
+    // only allocation, across editor and shared jobs; payload transforms remain
+    // independently scheduled and all publication still uses the store queue.
+    final result = _candidateTail.then(
+      (_) => _createAttachmentCandidate(
+        reference,
+        attachmentId,
+        operation,
+        expectedBytes,
+      ),
+    );
+    _candidateTail = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return result;
+  }
+
+  Future<OwnedWriteTarget> _createAttachmentCandidate(
     NoteReference reference,
     String attachmentId,
     Directory operation,

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'additional_mobile_jobs.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../../features/dashboard/models/attachment_job.dart';
@@ -13,7 +14,7 @@ import '../storage/attachment_scheduler.dart';
 /// One UI binding to the application-owned native job host. It observes existing
 /// jobs and forwards cancellation to their existing coordinator.
 class MobileJobBinding {
-  MobileJobBinding(this.model, {this.onNotification}) {
+  MobileJobBinding(this.model, {this.onNotification, this.additional}) {
     _owner = this;
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'memoryPressure') {
@@ -42,10 +43,10 @@ class MobileJobBinding {
       if (call.method == 'cancelJob') {
         final id = (call.arguments as Map?)?['id'];
         if (id is String) {
-          for (final state in model.attachmentJobsNotifier.value.toList()) {
+          for (final state in allJobs.value.toList()) {
             final job = state.progress.value;
             if (job.id == id && job.cancellable) {
-              await model.cancelAttachmentJob(id);
+              await cancel(id);
               break;
             }
           }
@@ -62,10 +63,19 @@ class MobileJobBinding {
       }
     });
     model.attachmentJobsNotifier.addListener(_refresh);
+    additional?.jobs.addListener(_refresh);
     interrupted = _initialize();
   }
   static const _channel = MethodChannel('future_notes/jobs');
   final ContentViewModel model;
+  final AdditionalMobileJobs? additional;
+  final allJobs = ValueNotifier<List<AttachmentJobState>>([]);
+  Future<void> cancel(String id) =>
+      additional?.jobs.value.any((j) => j.progress.value.id == id) == true
+      ? additional!.cancel(id)
+      : model.cancelAttachmentJob(id);
+  Map<String, Object?>? recovery(String id) =>
+      additional?.recovery(id) ?? model.attachmentJobRecovery(id);
   final ValueChanged<String>? onNotification;
   final notificationCount = ValueNotifier<int>(0);
   final activeCount = ValueNotifier<int>(0);
@@ -114,7 +124,7 @@ class MobileJobBinding {
   void _countNotifications() {
     if (_closed) return;
     final activeIds = {
-      for (final state in model.attachmentJobsNotifier.value)
+      for (final state in allJobs.value)
         if (state.progress.value.active) state.progress.value.id,
     };
     activeCount.value = activeIds.length;
@@ -127,8 +137,14 @@ class MobileJobBinding {
 
   void _refresh() {
     if (_closed || !_ready) return;
+    final merged = [
+      ...model.attachmentJobsNotifier.value,
+      ...?additional?.jobs.value,
+    ];
+    if (!listEquals(merged, allJobs.value))
+      allJobs.value = List.unmodifiable(merged);
     _countNotifications();
-    final current = model.attachmentJobsNotifier.value.toSet();
+    final current = allJobs.value.toSet();
     _owner = this;
     if (current.any((job) => job.progress.value.active)) {
       _poll ??= Timer.periodic(
@@ -186,7 +202,7 @@ class MobileJobBinding {
     _sending = true;
     try {
       final jobs = [
-        for (final state in model.attachmentJobsNotifier.value)
+        for (final state in allJobs.value)
           if (state.progress.value.active)
             {
               'id': state.progress.value.id,
@@ -201,8 +217,7 @@ class MobileJobBinding {
                 'currentBytes': file.bytes,
                 'currentTotal': file.total,
               },
-              if (model.attachmentJobRecovery(state.progress.value.id)
-                  case final recovery?)
+              if (recovery(state.progress.value.id) case final recovery?)
                 'recovery': recovery,
             },
       ];
@@ -228,9 +243,9 @@ class MobileJobBinding {
   }
 
   Future<void> _cancelSafeJobs() async {
-    for (final state in model.attachmentJobsNotifier.value.toList()) {
+    for (final state in allJobs.value.toList()) {
       final job = state.progress.value;
-      if (job.cancellable) await model.cancelAttachmentJob(job.id);
+      if (job.cancellable) await cancel(job.id);
     }
   }
 
@@ -276,6 +291,8 @@ class MobileJobBinding {
     _timer?.cancel();
     _poll?.cancel();
     model.attachmentJobsNotifier.removeListener(_refresh);
+    additional?.jobs.removeListener(_refresh);
+    allJobs.dispose();
     for (final entry in _listeners.entries) {
       entry.key.progress.removeListener(entry.value);
     }

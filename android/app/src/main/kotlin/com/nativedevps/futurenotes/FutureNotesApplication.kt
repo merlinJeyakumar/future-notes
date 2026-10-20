@@ -20,6 +20,8 @@ class FutureNotesApplication : Application() {
         private set
     lateinit var attachmentDrop: AttachmentDrop
         private set
+    lateinit var incomingShares: IncomingShares
+        private set
     private var privateDrafts: PrivateDrafts? = null
     private var cipher: AndroidCipher? = null
     fun jobHostOrNull(): AndroidJobHost? = if (::jobHost.isInitialized) jobHost else null
@@ -33,6 +35,7 @@ class FutureNotesApplication : Application() {
         cipher = AndroidCipher(this, engine.dartExecutor.binaryMessenger, documents::acquireCipherSource, documents::acquireCipherOutput)
         libraryEvents = LibraryEvents(this, engine.dartExecutor.binaryMessenger)
         attachmentDrop = AttachmentDrop(engine.dartExecutor.binaryMessenger, documents)
+        incomingShares = IncomingShares(engine.dartExecutor.binaryMessenger, documents)
         files = AttachmentFiles(this, engine.dartExecutor.binaryMessenger)
         jobHost = AndroidJobHost(this, engine.dartExecutor.binaryMessenger)
         privateDrafts = PrivateDrafts(this, engine.dartExecutor.binaryMessenger)

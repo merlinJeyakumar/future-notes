@@ -15,6 +15,23 @@ typedef StartNoteImport =
       ResolveNoteImportConflict resolveConflict,
     );
 
+/// Optional presentation adapters; the import lifecycle remains owned here.
+typedef ImportBodyBuilder =
+    Widget Function(
+      BuildContext context,
+      AttachmentJobSnapshot? progress,
+      OperationResult<NoteImportResult>? result,
+      bool cancelling,
+      VoidCallback cancel,
+      VoidCallback close,
+    );
+typedef ImportConflictBuilder =
+    Widget Function(
+      BuildContext context,
+      NoteImportConflict conflict,
+      ValueChanged<NoteImportDecision> choose,
+    );
+
 /// One route owns preparation, an explicit conflict decision and the result.
 /// Progress is isolated here and never rebuilds the editor or attachment dock.
 class NoteImportDialog extends StatefulWidget {
@@ -25,6 +42,8 @@ class NoteImportDialog extends StatefulWidget {
     required this.startImport,
     required this.cancelJob,
     this.detailedProgress = false,
+    this.bodyBuilder,
+    this.conflictBuilder,
   });
   final String fileName;
   final ValueListenable<List<AttachmentJobState>> jobs;
@@ -33,6 +52,8 @@ class NoteImportDialog extends StatefulWidget {
 
   /// Mobile opts in; preserve the accepted desktop presentation.
   final bool detailedProgress;
+  final ImportBodyBuilder? bodyBuilder;
+  final ImportConflictBuilder? conflictBuilder;
 
   @override
   State<NoteImportDialog> createState() => _NoteImportDialogState();
@@ -167,11 +188,12 @@ class _NoteImportDialogState extends State<NoteImportDialog> {
   Widget build(BuildContext context) => PopScope(
     canPop: _result != null,
     child: _conflict != null
-        ? NoteReplacementDialog(
-            conflict: _conflict!,
-            fileName: widget.fileName,
-            onDecision: _choose,
-          )
+        ? widget.conflictBuilder?.call(context, _conflict!, _choose) ??
+              NoteReplacementDialog(
+                conflict: _conflict!,
+                fileName: widget.fileName,
+                onDecision: _choose,
+              )
         : _job != null && _result == null
         ? ValueListenableBuilder<AttachmentJobSnapshot>(
             valueListenable: _job!.progress,
@@ -181,6 +203,11 @@ class _NoteImportDialogState extends State<NoteImportDialog> {
   );
 
   Widget _body(BuildContext context, AttachmentJobSnapshot? state) {
+    if (widget.bodyBuilder case final builder?) {
+      return builder(context, state, _result, _cancelRequested, _cancel, () {
+        if (_result != null) Navigator.pop(context, _result);
+      });
+    }
     final theme = Theme.of(context);
     final result = _result;
     final finishing = state?.phase == AttachmentJobPhase.finalizing;

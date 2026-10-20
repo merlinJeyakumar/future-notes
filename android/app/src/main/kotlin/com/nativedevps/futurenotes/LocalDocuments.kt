@@ -210,6 +210,51 @@ class LocalDocuments(context: Context, messenger: BinaryMessenger) {
         }
     }
 
+    fun openShared(uris: List<Uri>, flags: Int, callback: (List<Map<String, Any?>>?, String?) -> Unit) {
+        executor.execute {
+            val opened = mutableListOf<Map<String, Any?>>()
+            try {
+                for (uri in uris) {
+                    val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                        if (it.moveToFirst()) it.getString(0) else null
+                    }?.takeIf { it.isNotBlank() } ?: "Shared file"
+                    val fd = resolver.openFileDescriptor(uri, "r") ?: throw IllegalStateException()
+                    val status = try { Os.fstat(fd.fileDescriptor) } catch (error: Exception) { fd.close(); throw error }
+                    if (!OsConstants.S_ISREG(status.st_mode) || status.st_size < 0 || status.st_size > 10L * 1024 * 1024 * 1024) {
+                        fd.close(); throw IllegalStateException()
+                    }
+                    if (flags and Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION != 0) {
+                        try { resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                        catch (_: SecurityException) { /* The live descriptor still owns its transient grant. */ }
+                    }
+                    val lease = UUID.randomUUID().toString()
+                    sources[lease] = Pair("picked", fd); pickedUris[lease] = uri
+                    opened.add(mapOf("lease" to lease, "path" to "/proc/self/fd/${fd.fd}", "length" to status.st_size, "identity" to uri.toString(), "name" to name))
+                }
+                main.post { callback(opened, null) }
+            } catch (_: Exception) {
+                for (source in opened) {
+                    val key = source["lease"] as String
+                    sources.remove(key)?.second?.close()
+                    pickedUris.remove(key)?.let { forgetUris.add(it); releasePickedGrant(it) }
+                }
+                main.post { callback(null, "A shared file is unavailable, is not a regular readable file, or exceeds 10 GiB. Share the files again from their source app.") }
+            }
+        }
+    }
+
+    fun closeShared(values: List<Map<String, Any?>>) {
+        executor.execute {
+            for (value in values) {
+                val key = value["lease"] as? String ?: continue
+                if (sources[key]?.first == "picked") {
+                    sources.remove(key)?.second?.close()
+                    pickedUris.remove(key)?.let { forgetUris.add(it); releasePickedGrant(it) }
+                }
+            }
+        }
+    }
+
     private fun requireLocal(tree: Uri) {
         if (tree.scheme != "content" || tree.authority != "com.android.externalstorage.documents" ||
             !DocumentsContract.isTreeUri(tree)) {

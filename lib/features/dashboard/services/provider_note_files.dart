@@ -20,6 +20,7 @@ import '../../../core/storage/provider_document_io.dart';
 import '../../../core/storage/provider_generation_store.dart';
 import '../../../core/storage/attachment_transform_worker.dart';
 import '../../../core/storage/streaming_file_cipher.dart';
+import '../../../core/storage/bounded_file_reader.dart';
 import '../../../core/storage/storage_owner_worker.dart';
 import '../../../core/storage/owned_write.dart';
 import 'package:uuid/uuid.dart';
@@ -37,6 +38,7 @@ class ProviderNoteFiles
         AttachmentMetadataReader,
         AttachmentSourceSession,
         PickedSourceOwner,
+        ImportSourceReader,
         PickedSourceRecovery,
         NativeDropSourceOwner,
         AttachmentStagingCapacity,
@@ -628,6 +630,16 @@ class ProviderNoteFiles
   ) async {
     final doc = (await io.resolve(_reference(reference).documentPath))!;
     return documents.read(location, doc, offset: 0, length: length);
+  }
+
+  @override
+  Future<Uint8List> readImportHeader(String source) async {
+    final reader = await BoundedFileReader.openPath(source);
+    try {
+      return await reader.read(6);
+    } finally {
+      await reader.close();
+    }
   }
 
   @override

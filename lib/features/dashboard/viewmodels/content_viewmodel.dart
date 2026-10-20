@@ -5158,12 +5158,18 @@ class ContentViewModel extends BaseViewModel {
         );
       }
       try {
-        final input = await File(path).open();
         Uint8List header;
-        try {
-          header = await input.read(6);
-        } finally {
-          await input.close();
+        if (_fileService is ImportSourceReader) {
+          header = await (_fileService as ImportSourceReader).readImportHeader(
+            path,
+          );
+        } else {
+          final input = await File(path).open();
+          try {
+            header = await input.read(6);
+          } finally {
+            await input.close();
+          }
         }
         final binary =
             header.length >= 6 &&

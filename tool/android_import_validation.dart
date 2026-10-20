@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:crypto/crypto.dart' as crypto;
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter_application_1/core/platform/android_native_cipher.dart';
 import 'package:flutter_application_1/core/platform/library_documents.dart';
 import 'package:flutter_application_1/core/platform/mobile_file_actions.dart';
@@ -376,6 +377,17 @@ void main() async {
           await docs.flush(location, doc);
           final grant = await docs.openSource(location, doc);
           try {
+            final verification = await editor.verifyImportFile(
+              PlatformFile(
+                name: doc.name,
+                path: grant.path,
+                size: grant.length,
+              ),
+            );
+            _check(
+              verification.isValid && verification.isPack,
+              'provider-import-header-rejected',
+            );
             final staging = await Directory(
               '${run.path}/metadata-review-$cases',
             ).create();

@@ -57,6 +57,11 @@ abstract interface class PickedSourceOwner {
   Future<void> releasePickedSource(String path);
 }
 
+/// Provider-selected inputs may be readable only through their retained grant.
+abstract interface class ImportSourceReader {
+  Future<Uint8List> readImportHeader(String source);
+}
+
 /// Attachment intake is multi-file; note import and recovery pickers stay single.
 abstract interface class AttachmentFilePicker {
   Future<FilePickerResult?> pickAttachments();

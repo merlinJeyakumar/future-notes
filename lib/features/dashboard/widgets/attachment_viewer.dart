@@ -190,10 +190,11 @@ class GifAttachmentPlayer implements AttachmentMediaPlayer {
       return LayoutBuilder(
         builder: (context, constraints) {
           final ratio = MediaQuery.devicePixelRatioOf(context);
-          final image = ResizeImage.resizeIfNeeded(
-            (constraints.maxWidth * ratio).clamp(1, 2048).round(),
-            (constraints.maxHeight * ratio).clamp(1, 2048).round(),
+          final image = ResizeImage(
             FileImage(File(path)),
+            width: (constraints.maxWidth * ratio).clamp(1, 2048).round(),
+            height: (constraints.maxHeight * ratio).clamp(1, 2048).round(),
+            policy: ResizeImagePolicy.fit,
           );
           if (_image != image) _image?.evict();
           _image = image;
@@ -653,10 +654,11 @@ class _AttachmentViewerState extends State<AttachmentViewer> {
                               final height = (constraints.maxHeight * ratio)
                                   .clamp(1, 2048)
                                   .round();
-                              final image = ResizeImage.resizeIfNeeded(
-                                width,
-                                height,
+                              final image = ResizeImage(
                                 FileImage(File(widget.file.path)),
+                                width: width,
+                                height: height,
+                                policy: ResizeImagePolicy.fit,
                               );
                               if (_previewImage != image)
                                 _previewImage?.evict();

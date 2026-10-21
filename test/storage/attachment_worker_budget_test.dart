@@ -14,9 +14,7 @@ void main() {
   test(
     'separate encryption and decryption workers share a bounded pool and drain on close',
     () async {
-      final run = await Directory.systemTemp.createTemp(
-        'future-notes-validation-',
-      );
+      final run = await createValidationRun();
       const length = 2 * 1024 * 1024;
       final source = File('${run.path}/source');
       await source.writeAsBytes(
@@ -93,9 +91,7 @@ void main() {
   test(
     'memory-pressure pause accepts cancellation and releases handles before close',
     () async {
-      final run = await Directory.systemTemp.createTemp(
-        'future-notes-validation-',
-      );
+      final run = await createValidationRun();
       var available = 1024 * 1024 * 1024;
       final scheduler = AttachmentScheduler(
         sample: () => SystemCapacity(

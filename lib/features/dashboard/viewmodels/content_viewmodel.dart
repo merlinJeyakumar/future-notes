@@ -29,6 +29,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../../core/storage/macos_export_target.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/settings_service.dart';
 import '../services/pack_service.dart';
@@ -2496,6 +2497,7 @@ class ContentViewModel extends BaseViewModel {
     final performance = policy ?? _settings.attachmentPerformance;
     final checks = performance.exportChecks(mobile: mobile);
     String? candidate;
+    MacosExportTarget? macosTarget;
     OperationResult<void> result;
     try {
       final source = await files.attachmentSource(
@@ -2511,8 +2513,13 @@ class ContentViewModel extends BaseViewModel {
           detail: batchDetail,
         ),
       );
+      if (Platform.isMacOS && batchOutput == null) {
+        macosTarget = await MacosExportTarget.choose(attachment.fileName);
+      }
       final destination = batchOutput != null
           ? await batchOutput.destination(attachment.fileName)
+          : Platform.isMacOS
+          ? macosTarget?.destination
           : Platform.isAndroid || Platform.isIOS
           ? await MobileExport.destination(attachment.fileName)
           : await FilePicker.platform.saveFile(
@@ -2531,7 +2538,9 @@ class ContentViewModel extends BaseViewModel {
           destination,
           verifyReadback: performance.verifyLargeFileWrites,
         );
-        candidate = ExternalFileExport.candidatePath(destination);
+        candidate =
+            macosTarget?.candidate ??
+            ExternalFileExport.candidatePath(destination);
         final id = job.progress.value.id;
         if (_cancelledAttachmentJobs.contains(id) ||
             readCancellation.cancelled ||
@@ -2569,7 +2578,9 @@ class ContentViewModel extends BaseViewModel {
             transformed.outcome == OperationOutcome.rejectedInput &&
             _currentPassword != null &&
             !_cancelledAttachmentJobs.contains(id)) {
-          candidate = ExternalFileExport.candidatePath(destination);
+          candidate = macosTarget != null
+              ? await macosTarget.nextCandidate()
+              : ExternalFileExport.candidatePath(destination);
           final fallback = _attachmentWorker.submit(
             FileTransformRequest(
               source: source,
@@ -2607,11 +2618,13 @@ class ContentViewModel extends BaseViewModel {
         } else if (batchJob == null && !_tryBeginFinalization([job])) {
           result = _cancelledResult();
         } else {
-          result = await ExternalFileExport.publishOwned(
-            receipt: transformed.value!.receipt!,
-            destination: destination,
-            expected: expected,
-          );
+          result = macosTarget != null
+              ? await macosTarget.publish(transformed.value!.receipt!)
+              : await ExternalFileExport.publishOwned(
+                  receipt: transformed.value!.receipt!,
+                  destination: destination,
+                  expected: expected,
+                );
           if (batchJob == null &&
               result.isSuccess &&
               (Platform.isAndroid || Platform.isIOS))
@@ -2630,7 +2643,9 @@ class ContentViewModel extends BaseViewModel {
               'Attachment export failed; the source was retained.',
             );
     } finally {
-      if (candidate != null && await File(candidate).exists()) {
+      if (macosTarget?.retainCandidate != true &&
+          candidate != null &&
+          await File(candidate).exists()) {
         try {
           await File(candidate).delete();
         } catch (_) {
@@ -2640,6 +2655,14 @@ class ContentViewModel extends BaseViewModel {
       if (batchJob == null) {
         _bulkAttachmentJob = false;
         _exportReadCancellations.remove(job.progress.value.id);
+      }
+      try {
+        await macosTarget?.close();
+      } catch (_) {
+        result = const OperationResult.failure(
+          OperationOutcome.recoveryRequired,
+          'Export access cleanup needs retry. The source was retained.',
+        );
       }
     }
     if (batchJob == null)
@@ -5687,6 +5710,7 @@ class ContentViewModel extends BaseViewModel {
     Directory? operation;
     String? candidate;
     String? privateExport;
+    MacosExportTarget? macosTarget;
     OperationResult<void> result;
     try {
       checkCancellation();
@@ -5792,7 +5816,14 @@ class ContentViewModel extends BaseViewModel {
               : 'Choose export destination',
         );
       }
-      destination ??= mobileDestination
+      if (Platform.isMacOS && destination == null) {
+        macosTarget = await MacosExportTarget.choose(
+          noteExportFileName(decoded.note.title, extension),
+        );
+      }
+      destination ??= Platform.isMacOS
+          ? macosTarget?.destination
+          : mobileDestination
           ? await MobileExport.destination(
               noteExportFileName(decoded.note.title, extension),
             )
@@ -5819,7 +5850,9 @@ class ContentViewModel extends BaseViewModel {
         final cancellation = File(p.join(operation.path, 'cancel'));
         _packageCancellationFiles[id] = cancellation;
         checkCancellation();
-        candidate = ExternalFileExport.candidatePath(destination);
+        candidate =
+            macosTarget?.candidate ??
+            ExternalFileExport.candidatePath(destination);
         _jobPhase(
           job,
           AttachmentJobPhase.preparing,
@@ -5871,11 +5904,13 @@ class ContentViewModel extends BaseViewModel {
           } else if (!_tryBeginFinalization([job])) {
             result = _cancelledResult();
           } else {
-            result = await ExternalFileExport.publishOwned(
-              receipt: receipt,
-              destination: destination,
-              expected: expected,
-            );
+            result = macosTarget != null
+                ? await macosTarget.publish(receipt)
+                : await ExternalFileExport.publishOwned(
+                    receipt: receipt,
+                    destination: destination,
+                    expected: expected,
+                  );
             if (result.isSuccess && mobileDestination) {
               await _preparedMobileExports.remember(
                 job: id,
@@ -5921,7 +5956,9 @@ class ContentViewModel extends BaseViewModel {
           /* Startup retries orphan cleanup. */
         }
       }
-      if (candidate != null && await File(candidate).exists()) {
+      if (macosTarget?.retainCandidate != true &&
+          candidate != null &&
+          await File(candidate).exists()) {
         try {
           await File(candidate).delete();
         } catch (_) {
@@ -5936,6 +5973,14 @@ class ContentViewModel extends BaseViewModel {
         }
       }
       _bulkAttachmentJob = false;
+      try {
+        await macosTarget?.close();
+      } catch (_) {
+        result = const OperationResult.failure(
+          OperationOutcome.recoveryRequired,
+          'Export access cleanup needs retry. The source was retained.',
+        );
+      }
     }
     _jobPhase(
       job,

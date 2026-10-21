@@ -27,7 +27,7 @@ void main() {
   });
 
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     settings = SettingsService.withStorage(
       storage: StorageEnvironment.validation(
         validationRoot: run.path,

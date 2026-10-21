@@ -58,7 +58,9 @@ class MobileJobBinding {
         await _cancelSafeJobs();
         if (call.method == 'timeout')
           _report(
-            'Android ended this background-processing window. Reopen the app to recover or retry unfinished work.',
+            Platform.isAndroid
+                ? 'Android ended this background-processing window. Reopen the app to recover or retry unfinished work.'
+                : 'The system ended this background-processing window. Reopen the app to recover or retry unfinished work.',
           );
       }
     });

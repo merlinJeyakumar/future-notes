@@ -1,0 +1,56 @@
+{
+  "inputReport": {
+    "path": "C:\\Users\\smerl\\Downloads\\future-notes-multiplatform-gap-report.md",
+    "sha256": "3840fcd3dd6b22574750e01f101d30f75e2fc8ff37e6299326f18cde6ceb2e31",
+    "provenance": "User-supplied Mac Codex audit; runtime totals attributed, not rerun"
+  },
+  "sourceCommit": "a5be98cd520d501eb8f31e19bacb7bcd4cc8f4e6",
+  "localToolchain": {
+    "flutter": "3.41.5",
+    "frameworkRevision": "2c9eb20739dfec95e2c74bd3dfa4601b0a8a36aa",
+    "dart": "3.11.3",
+    "evidence": "SDK git revision/describe plus flutter --no-version-check --suppress-analytics --version"
+  },
+  "connectedAndroid": {
+    "api": 31,
+    "observedPreviewPid": "20479",
+    "newDeviceWorkflowRun": false
+  },
+  "otherHosts": {
+    "macOS": "No Mac/Xcode host available in this review",
+    "Linux": "Only docker-desktop WSL distribution listed; no configured GUI/package test host",
+    "iOS": "No simulator/device/native Apple build available"
+  },
+  "existingEvidence": [
+    {
+      "path": ".validation/share-session-fix/video-results.json",
+      "sha256": "2fddfea769affa2833f5df48d70579b51e36a0fed38883ea4089c6212ce9dd80",
+      "purpose": "Bounded Android Files share/password/preview workflow"
+    },
+    {
+      "path": ".validation/share-session-fix/video-runtime.json",
+      "sha256": "faaf6e5f17d3027d0cf69c237e3c1e8646bb98d48e12322a8dce667ace4a593e",
+      "purpose": "Content-free failures, PID and resource evidence"
+    },
+    {
+      "path": ".validation/share-session-fix/apk-packaging.json",
+      "sha256": "c8162a568b6bdbd094f958735fa06491a05fe450a831c94e2b08f5c60d9a8b88",
+      "purpose": "Protected candidate APK identity and ABI packaging"
+    },
+    {
+      "path": ".validation/release-apk-preview/shared-protection-regressions.txt",
+      "sha256": "cc3b788f9792f1ccc1eaff134fe49368ef5b51ec5eb0b5f03b9019ac9781694e",
+      "purpose": "74 affected tests previously passed"
+    }
+  ],
+  "commandsNotRerun": [
+    "native builds",
+    "application test suite",
+    "Android synthetic workflow"
+  ],
+  "inspectionLimits": [
+    "No raw Mac event log or exact audited source manifest provided",
+    "No actual new-host filesystem/native/UI result claimed",
+    "Optional SDK working-tree diff inspection was not completed after automatic-review timeout; not needed for verified SDK version"
+  ]
+}

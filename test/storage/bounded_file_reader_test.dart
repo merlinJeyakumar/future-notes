@@ -8,9 +8,7 @@ void main() {
   test(
     'read-only bounded cursors stay independent and reject invalid windows',
     () async {
-      final run = await Directory.systemTemp.createTemp(
-        'future-notes-validation-',
-      );
+      final run = await createValidationRun();
       try {
         final file = File(p.join(run.path, 'source'));
         await file.writeAsBytes(List.generate(4096, (i) => i % 251));

@@ -8,14 +8,15 @@ import 'native_storage_primitives.dart';
 import 'recoverable_store.dart';
 import 'storage_environment.dart';
 import 'storage_owner_worker.dart';
+import 'desktop_storage_host.dart';
 
 /// Captured settings binding. The caller serializes settings mutations
 /// and owns this root; the injected worker may also own an independent library.
 class OwnedSettingsPersistence {
   OwnedSettingsPersistence({required this.environment, required this.owner}) {
-    if (!environment.hasOwnedStorage || !Platform.isWindows) {
+    if (!environment.hasOwnedStorage || !isOwnedDesktopHost) {
       throw ArgumentError(
-        'Owned settings require explicitly bound Windows storage.',
+        'Owned settings require explicitly bound desktop storage.',
       );
     }
   }

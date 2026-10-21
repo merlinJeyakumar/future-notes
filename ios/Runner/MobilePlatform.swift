@@ -6,6 +6,77 @@ import Security
 import Darwin
 import os
 
+/// Stable channel failures; native errors and paths never cross the channel.
+private enum DocumentFailure: String, Error {
+  case nameExists = "name_exists"
+  case permissionRevoked = "permission_revoked"
+  case missingDocument = "missing_document"
+  case fullDisk = "full_disk"
+  case nativeFailure = "native_document_failed"
+
+  var message: String {
+    switch self {
+    case .nameExists: return "A document with this name already exists."
+    case .permissionRevoked: return "Folder access is no longer available. Select the folder again."
+    case .missingDocument: return "The selected document is no longer available."
+    case .fullDisk: return "The selected storage does not have enough free space."
+    case .nativeFailure: return "The selected document operation failed. Existing material was retained."
+    }
+  }
+
+  static func classify(_ error: Error) -> DocumentFailure {
+    if let failure = error as? DocumentFailure { return failure }
+    let native = error as NSError
+    if native.domain == NSPOSIXErrorDomain {
+      switch Int32(native.code) {
+      case EEXIST: return .nameExists
+      case EACCES, EPERM, EROFS: return .permissionRevoked
+      case ENOENT: return .missingDocument
+      case ENOSPC, EDQUOT: return .fullDisk
+      default: break
+      }
+    }
+    if native.domain == NSCocoaErrorDomain {
+      switch native.code {
+      case NSFileWriteFileExistsError: return .nameExists
+      case NSFileReadNoPermissionError, NSFileWriteNoPermissionError, NSFileWriteVolumeReadOnlyError: return .permissionRevoked
+      case NSFileNoSuchFileError, NSFileReadNoSuchFileError: return .missingDocument
+      case NSFileWriteOutOfSpaceError: return .fullDisk
+      default: break
+      }
+    }
+    return .nativeFailure
+  }
+}
+
+/// File-presenter callbacks only request metadata reconciliation. They do not
+/// grant write authority or create another storage/job owner.
+private final class LibraryPresenter: NSObject, NSFilePresenter {
+  let presentedItemURL: URL?
+  let presentedItemOperationQueue: OperationQueue
+  private let changed: () -> Void
+
+  init(url: URL, changed: @escaping () -> Void) {
+    presentedItemURL = url
+    self.changed = changed
+    presentedItemOperationQueue = OperationQueue()
+    presentedItemOperationQueue.maxConcurrentOperationCount = 1
+    super.init()
+  }
+
+  func presentedItemDidChange() { changed() }
+  func presentedItemDidMove(to newURL: URL) { changed() }
+  func accommodatePresentedItemDeletion(completionHandler: @escaping (Error?) -> Void) {
+    changed(); completionHandler(nil)
+  }
+  func presentedSubitemDidAppear(at url: URL) { changed() }
+  func presentedSubitemDidChange(at url: URL) { changed() }
+  func presentedSubitem(at oldURL: URL, didMoveTo newURL: URL) { changed() }
+  func accommodatePresentedSubitemDeletion(at url: URL, completionHandler: @escaping (Error?) -> Void) {
+    changed(); completionHandler(nil)
+  }
+}
+
 /// Native document capabilities for the shared provider coordinator. Bookmarks
 /// identify selected roots; child tokens are opaque, process-local capabilities.
 /// NSFileCoordinator protects individual accesses, not a multi-file transaction.
@@ -34,6 +105,8 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
   private var incoming: [String: [String: Any]] = [:]
   private var incomingLeases = Set<String>()
   private var incomingChannel: FlutterMethodChannel?
+  private var libraryChannel: FlutterMethodChannel?
+  private var presenters: [String: LibraryPresenter] = [:]
 
   init(controller: FlutterViewController) throws {
     host = controller
@@ -48,6 +121,12 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
     try protectDirectory(cacheRoot)
     install("future_notes/documents", controller) { [weak self] call, result in self?.documentCall(call, result) }
     install("future_notes/files", controller) { [weak self] call, result in self?.fileCall(call, result) }
+    let libraryChannel = FlutterMethodChannel(name: "future_notes/library_events", binaryMessenger: controller.binaryMessenger)
+    self.libraryChannel = libraryChannel
+    libraryChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self = self else { return }
+      self.queue.async { self.reply(result) { try self.libraryEventCall(call) } }
+    }
     let incomingChannel = FlutterMethodChannel(name: "future_notes/incoming_shares", binaryMessenger: controller.binaryMessenger)
     self.incomingChannel = incomingChannel
     incomingChannel.setMethodCallHandler { [weak self] call, result in
@@ -70,7 +149,32 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
   private func failure(_ message: String) -> NSError { NSError(domain: "FutureNotes", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
   private func reply(_ result: @escaping FlutterResult, _ work: () throws -> Any?) {
     do { let value = try work(); DispatchQueue.main.async { result(value) } }
-    catch { DispatchQueue.main.async { result(FlutterError(code: "native_document_failed", message: "The selected document operation failed. Existing material was retained.", details: nil)) } }
+    catch {
+      let failure = DocumentFailure.classify(error)
+      DispatchQueue.main.async { result(FlutterError(code: failure.rawValue, message: failure.message, details: nil)) }
+    }
+  }
+  private func libraryEventCall(_ call: FlutterMethodCall) throws -> Any? {
+    guard let args = call.arguments as? [String: Any], let library = args["library"] as? String else { throw failure("Missing library capability.") }
+    switch call.method {
+    case "watch":
+      if presenters[library] == nil {
+        let url = try root(library)
+        let presenter = LibraryPresenter(url: url) { [weak self] in self?.libraryChanged(library) }
+        presenters[library] = presenter
+        NSFileCoordinator.addFilePresenter(presenter)
+      }
+    case "unwatch":
+      if let presenter = presenters.removeValue(forKey: library) { NSFileCoordinator.removeFilePresenter(presenter) }
+    default: throw failure("Unsupported library event action.")
+    }
+    return nil
+  }
+  private func libraryChanged(_ library: String) {
+    queue.async { [weak self] in
+      guard let self = self, self.presenters[library] != nil else { return }
+      DispatchQueue.main.async { [weak self] in self?.libraryChannel?.invokeMethod("changed", arguments: library) }
+    }
   }
   private func protectDirectory(_ url: URL) throws {
     try fm.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
@@ -96,7 +200,7 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
     guard let data = Data(base64Encoded: token) else { throw failure("Invalid bookmark.") }
     var stale = false
     let url = try URL(resolvingBookmarkData: data, options: [.withoutUI], relativeTo: nil, bookmarkDataIsStale: &stale)
-    guard !stale, url.startAccessingSecurityScopedResource() else { throw failure("Select the folder again.") }
+    guard !stale, url.startAccessingSecurityScopedResource() else { throw DocumentFailure.permissionRevoked }
     do {
       let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isUbiquitousItemKey, .volumeIsLocalKey])
       guard values.isDirectory == true, values.isUbiquitousItem != true, values.volumeIsLocal == true else { throw failure("Select a local device folder.") }
@@ -322,9 +426,9 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
       let childName = try name(args["name"])
       return try coordinate(url, writing: true) { parent in
         let child = parent.appendingPathComponent(childName, isDirectory: args["directory"] as? Bool == true)
-        if self.fm.fileExists(atPath: child.path) { throw self.failure("The exact name already exists.") }
+        if self.fm.fileExists(atPath: child.path) { throw DocumentFailure.nameExists }
         if args["directory"] as? Bool == true { try self.fm.createDirectory(at: child, withIntermediateDirectories: false) }
-        else { let fd = Darwin.open(child.path, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR); guard fd >= 0 else { throw self.failure("Exclusive creation failed.") }; Darwin.close(fd) }
+        else { let fd = Darwin.open(child.path, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR); guard fd >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: nil) }; Darwin.close(fd) }
         return try self.metadata(child, library)
       }
     case "read":
@@ -342,7 +446,7 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
       guard url != (try root(library)) else { throw failure("Cannot rename the library root.") }
       return try coordinate(url.deletingLastPathComponent(), writing: true) { parent in
         let next = parent.appendingPathComponent(newName)
-        guard !self.fm.fileExists(atPath: next.path) else { throw self.failure("Rename target exists.") }
+        guard !self.fm.fileExists(atPath: next.path) else { throw DocumentFailure.nameExists }
         try self.fm.moveItem(at: url, to: next); return try self.metadata(next, library)
       }
     case "delete":
@@ -399,6 +503,14 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
       switch call.method {
       case "cacheRoot": return self.cacheRoot.path
       case "privateRoot": return self.privateRoot.path
+      case "readSettings":
+        guard let data = try self.readPrivate(self.privateRoot.appendingPathComponent("settings-v1.json"), limit: 65536) else { return nil }
+        guard let json = String(data: data, encoding: .utf8) else { throw self.failure("Invalid settings record.") }
+        return json
+      case "writeSettings":
+        guard let json = args["json"] as? String, let data = json.data(using: .utf8), data.count <= 65536,
+          (try JSONSerialization.jsonObject(with: data)) is [String: Any] else { throw self.failure("Invalid settings record.") }
+        try self.atomic(data, self.privateRoot.appendingPathComponent("settings-v1.json")); return nil
       case "readLibrarySelection": return try self.readPrivate(self.selection, limit: 65536).flatMap { String(data: $0, encoding: .utf8) }
       case "writeLibrarySelection":
         guard let json = args["json"] as? String, let data = json.data(using: .utf8), data.count <= 65536 else { throw self.failure("Invalid selection record.") }
@@ -487,9 +599,16 @@ final class MobilePlatform: NSObject, UIDocumentPickerDelegate {
     let view = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial)); view.frame = window.bounds; view.autoresizingMask = [.flexibleWidth, .flexibleHeight]; view.isUserInteractionEnabled = true
     window.addSubview(view); cover = view
   }
-  @objc private func uncoverSnapshot() { cover?.removeFromSuperview(); cover = nil; incomingChannel?.invokeMethod("changed", arguments: nil) }
+  @objc private func uncoverSnapshot() {
+    cover?.removeFromSuperview(); cover = nil; incomingChannel?.invokeMethod("changed", arguments: nil)
+    queue.async { [weak self] in
+      guard let self = self else { return }
+      for library in self.presenters.keys { self.libraryChanged(library) }
+    }
+  }
   deinit {
     NotificationCenter.default.removeObserver(self)
+    for presenter in presenters.values { NSFileCoordinator.removeFilePresenter(presenter) }
     for value in leases.values { value.2.closeFile(); if value.3 { value.1.stopAccessingSecurityScopedResource() } }
     for url in roots.values { url.stopAccessingSecurityScopedResource() }
   }

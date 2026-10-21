@@ -91,6 +91,41 @@ install(CODE "
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 
+# Built separately on the matching host; never select a Windows DLL or silently
+# package an application whose Office preview native engine is absent.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+  set(OFFICE_RUST_TARGET "x86_64-unknown-linux-gnu")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+  set(OFFICE_RUST_TARGET "aarch64-unknown-linux-gnu")
+else()
+  message(FATAL_ERROR "Office preview is not packaged for this Linux CPU.")
+endif()
+set(OFFICE_ARTIFACT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../.native-deps/office-oxide/linux/${OFFICE_RUST_TARGET}")
+set(OFFICE_LIBRARY "${OFFICE_ARTIFACT_DIR}/liboffice_oxide.so")
+if(NOT EXISTS "${OFFICE_LIBRARY}")
+  message(FATAL_ERROR "Build pinned Office Oxide on this host with tools/build-desktop-office.sh before packaging Linux.")
+endif()
+if(NOT EXISTS "${OFFICE_ARTIFACT_DIR}/SOURCE_COMMIT" OR
+   NOT EXISTS "${OFFICE_ARTIFACT_DIR}/RUST_TARGET")
+  message(FATAL_ERROR "Office preview artifact provenance is missing; rebuild with the pinned desktop recipe.")
+endif()
+file(READ "${OFFICE_ARTIFACT_DIR}/SOURCE_COMMIT" OFFICE_SOURCE_COMMIT)
+file(READ "${OFFICE_ARTIFACT_DIR}/RUST_TARGET" OFFICE_BUILT_TARGET)
+string(STRIP "${OFFICE_SOURCE_COMMIT}" OFFICE_SOURCE_COMMIT)
+string(STRIP "${OFFICE_BUILT_TARGET}" OFFICE_BUILT_TARGET)
+if(NOT OFFICE_SOURCE_COMMIT STREQUAL "5d183f4de990de254f32976bf952e548bcd25972" OR
+   NOT OFFICE_BUILT_TARGET STREQUAL OFFICE_RUST_TARGET)
+  message(FATAL_ERROR "Office preview artifact source pin or CPU does not match this package.")
+endif()
+foreach(office_license LICENSE-MIT LICENSE-APACHE NOTICE TRADEMARKS.md)
+  if(NOT EXISTS "${OFFICE_ARTIFACT_DIR}/Licenses/${office_license}")
+    message(FATAL_ERROR "Pinned Office license material is missing from this package.")
+  endif()
+endforeach()
+install(FILES "${OFFICE_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+install(DIRECTORY "${OFFICE_ARTIFACT_DIR}/Licenses/"
+  DESTINATION "${INSTALL_BUNDLE_DATA_DIR}/office-oxide-licenses" COMPONENT Runtime)
+
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 

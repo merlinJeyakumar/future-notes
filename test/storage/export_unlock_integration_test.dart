@@ -31,9 +31,7 @@ void main() {
   test(
     'unlocking read-only does not cancel or change a real protected export',
     () async {
-      final run = await Directory.systemTemp.createTemp(
-        'future-notes-validation-',
-      );
+      final run = await createValidationRun();
       final app = OwnedAppServices(
         environment: StorageEnvironment.validation(
           validationRoot: run.path,

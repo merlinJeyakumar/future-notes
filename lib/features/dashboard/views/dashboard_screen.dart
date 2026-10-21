@@ -29,6 +29,10 @@ import '../widgets/draft_decision_dialog.dart';
 import '../../../core/operations/operation_result.dart';
 import '../../../core/operations/shutdown_sequence.dart';
 import '../../../core/platform/windows_desktop_actions.dart';
+import '../../../core/platform/macos_desktop_actions.dart';
+import '../../../core/platform/macos_file_access.dart';
+import '../../../core/platform/linux_desktop_actions.dart';
+import '../services/macos_file_service.dart';
 import '../../../core/storage/attachment_open_cache.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -179,8 +183,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.initState();
     _desktop =
         widget.desktopActions ??
-        (Platform.isWindows && widget.startBackgroundServices
+        (!widget.startBackgroundServices
+            ? null
+            : Platform.isWindows
             ? WindowsDesktopActions()
+            : Platform.isMacOS
+            ? const MacosDesktopActions()
+            : Platform.isLinux
+            ? LinuxDesktopActions()
             : null);
     _viewModel = ContentViewModel(
       fileService: widget.fileService ?? FileService(settings: widget.settings),
@@ -342,6 +352,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (Platform.isWindows) {
       await Process.run('explorer.exe', ['/select,', normalizedPath]);
+    } else if (Platform.isMacOS) {
+      await const MacosFileAccess().revealLibraryFile(fullPath);
+    } else if (_desktop case final LinuxDesktopActions linux) {
+      await linux.revealFile(fullPath);
     } else {
       // Fallback or other platforms
       print("Show in folder not implemented for this platform");
@@ -832,7 +846,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       context: context,
       builder: (_) => AppSettingsDialog(
         settings: _viewModel.settings,
-        pickLibrary: () => FilePicker.platform.getDirectoryPath(),
+        pickLibrary: widget.fileService is MacosFileService
+            ? (widget.fileService as MacosFileService).chooseLibrary
+            : () => FilePicker.platform.getDirectoryPath(),
         openLibrary: _viewModel.switchLibrary,
       ),
     );
@@ -862,14 +878,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
       builder: (context, _) {
         return CallbackShortcuts(
           bindings: {
-            const SingleActivator(LogicalKeyboardKey.keyF, control: true):
-                _focusSearch,
-            SingleActivator(LogicalKeyboardKey.keyS, control: true): () {
+            SingleActivator(
+              LogicalKeyboardKey.keyF,
+              control: !Platform.isMacOS,
+              meta: Platform.isMacOS,
+            ): _focusSearch,
+            SingleActivator(
+              LogicalKeyboardKey.keyS,
+              control: !Platform.isMacOS,
+              meta: Platform.isMacOS,
+            ): () {
               if (!_shutdownStarted) {
                 _viewModel.saveNote();
               }
             },
-            SingleActivator(LogicalKeyboardKey.keyN, control: true): () {
+            SingleActivator(
+              LogicalKeyboardKey.keyN,
+              control: !Platform.isMacOS,
+              meta: Platform.isMacOS,
+            ): () {
               if (!_shutdownStarted) {
                 unawaited(_handleNewNote());
               }
@@ -881,6 +908,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 !_viewModel.isBusy &&
                 _viewModel.canAcceptAttachmentDrop,
             onDrop: (paths) async {
+              final service = widget.fileService;
+              if (service is MacosFileService) {
+                final held = await service.retainDroppedInputs(paths);
+                try {
+                  await _viewModel.attachDroppedFiles(
+                    held.map((file) => file.path!).toList(),
+                  );
+                } finally {
+                  for (final file in held) {
+                    await service.releasePickedSource(file.path!);
+                  }
+                }
+                return;
+              }
               await _viewModel.attachDroppedFiles(
                 paths,
                 waitForCompletion: false,

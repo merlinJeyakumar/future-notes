@@ -9,7 +9,7 @@ void main() {
   test(
     'desktop 1.4.1 reader refuses an interrupted provider library and accepts clean handoff',
     () async {
-      final run = await Directory.systemTemp.createTemp(
+      final run = await createValidationRun(
         'future-notes-validation-provider-guard-',
       );
       RecoverableStore? owner;

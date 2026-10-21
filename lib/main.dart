@@ -12,6 +12,7 @@ import 'core/storage/storage_environment.dart';
 import 'core/storage/owned_app_services.dart';
 import 'core/storage/storage_startup_failure.dart';
 import 'core/storage/windows_storage_bootstrap.dart';
+import 'core/storage/desktop_storage_startup.dart';
 import 'core/platform/windows_navigation_shortcuts.dart';
 import 'core/platform/window_actions.dart';
 import 'core/platform/mobile_diagnostics.dart';
@@ -28,6 +29,22 @@ void main() async {
     var environment = StorageEnvironment.fromDefines();
     if (!kIsWeb && Platform.isWindows && !environment.hasOwnedStorage) {
       environment = await WindowsStorageBootstrap.resolve();
+    }
+    if (!kIsWeb && (Platform.isMacOS || Platform.isLinux)) {
+      runApp(
+        DesktopStorageStartup(
+          environment: environment,
+          buildReady: (settings, files, close) => MyApp(
+            settings: settings,
+            home: DashboardScreen(
+              settings: settings,
+              fileService: files,
+              onClose: close,
+            ),
+          ),
+        ),
+      );
+      return;
     }
     SettingsService().configureStorage(environment);
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {

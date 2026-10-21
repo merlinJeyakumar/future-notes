@@ -262,9 +262,7 @@ void main() {
   test(
     'discovery recognizes legacy and locked/current notes without rewriting them',
     () async {
-      final run = await Directory.systemTemp.createTemp(
-        'future-notes-validation-',
-      );
+      final run = await createValidationRun();
       addTearDown(() => deleteValidationRun(run));
       var index = 0;
       for (final source in [
@@ -307,9 +305,7 @@ void main() {
   );
 
   test('discovery rejects damaged structured and encrypted notes', () async {
-    final run = await Directory.systemTemp.createTemp(
-      'future-notes-validation-',
-    );
+    final run = await createValidationRun();
     addTearDown(() => deleteValidationRun(run));
     final file = File(p.join(run.path, 'synthetic-damaged.enc'));
     for (final source in [

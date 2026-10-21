@@ -1,12 +1,12 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:path/path.dart' as p;
 
 import '../../features/dashboard/services/file_service.dart';
 import '../../features/dashboard/services/settings_service.dart';
 import '../operations/operation_result.dart';
 import 'storage_environment.dart';
 import 'storage_owner_worker.dart';
+import 'desktop_storage_host.dart';
 
 typedef StorageOwnerStarter =
     Future<OperationResult<StorageOwner>> Function(
@@ -17,17 +17,33 @@ typedef StorageOwnerStarter =
 /// Keep this object alive after failed startup/close so acquired handles remain
 /// available for cleanup. Unconfigured production environments are refused.
 class OwnedAppServices {
-  OwnedAppServices({required this.environment, StorageOwnerStarter? startOwner})
-    : _startOwner = startOwner ?? _startWorker {
-    if (!environment.hasOwnedStorage || !Platform.isWindows) {
+  OwnedAppServices({
+    required this.environment,
+    StorageOwnerStarter? startOwner,
+    FileService Function(SettingsService, StorageOwner)? createFiles,
+    this.selectedLibraryOverride,
+    this.afterLibraryAdmission,
+  }) : _startOwner = startOwner ?? _startWorker,
+       _createFiles = createFiles {
+    if (!environment.hasOwnedStorage || !isOwnedDesktopHost) {
       throw ArgumentError(
-        'Owned services require explicitly bound Windows storage.',
+        'Owned services require explicitly bound desktop storage.',
+      );
+    }
+    if (selectedLibraryOverride != null &&
+        (!environment.isRecoverable ||
+            !p.equals(selectedLibraryOverride!, environment.dataRoot!))) {
+      throw ArgumentError(
+        'The startup selection must be an explicitly captured library.',
       );
     }
   }
 
   final StorageEnvironment environment;
   final StorageOwnerStarter _startOwner;
+  final FileService Function(SettingsService, StorageOwner)? _createFiles;
+  final String? selectedLibraryOverride;
+  final Future<void> Function()? afterLibraryAdmission;
   StorageOwner? _owner;
   SettingsService? _settings;
   FileService? _files;
@@ -88,15 +104,22 @@ class OwnedAppServices {
       final settings = SettingsService.withStorage(
         storage: environment,
         storageOwner: _owner,
+        bootstrapLibraryRoot: selectedLibraryOverride,
         documentsDirectoryResolver: () async =>
             throw StateError('Production storage is unavailable.'),
       );
       _settings = settings;
       await settings.init();
-      final files = FileService(settings: settings, storageOwner: _owner);
+      final files =
+          _createFiles?.call(settings, _owner!) ??
+          FileService(settings: settings, storageOwner: _owner);
       _files = files;
       // Acquire leases and recover both roots before the UI can start scanning.
       await files.currentLibrary();
+      await afterLibraryAdmission?.call();
+      if (selectedLibraryOverride != null) {
+        await settings.setCustomDataPath(selectedLibraryOverride);
+      }
       _ready = true;
       return const OperationResult.success();
     } catch (_) {

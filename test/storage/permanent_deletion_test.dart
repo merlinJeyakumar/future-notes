@@ -16,7 +16,7 @@ void main() {
   late NativeStoragePrimitives primitives;
   RecoverableStore? store;
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     root = p.join(run.path, 'library');
     await Directory(root).create();
     environment = StorageEnvironment.validation(

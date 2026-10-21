@@ -40,6 +40,8 @@ app.*.symbols
 /.native-deps/
 /ios/OfficeOxide/*.xcframework/
 /ios/OfficeOxide/Licenses/
+/macos/OfficeOxide/*.xcframework/
+/macos/OfficeOxide/Licenses/
 
 # Obfuscation related
 app.*.map.json

@@ -14,7 +14,7 @@ void main() {
   late String library;
   late NativeStoragePrimitives storage;
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     library = p.join(run.path, 'library');
     storage = NativeStoragePrimitives(
       StorageEnvironment.validation(

@@ -1,15 +1,42 @@
 param(
-    [string]$AndroidSdk = "$env:LOCALAPPDATA\Android\Sdk",
+    [string]$AndroidSdk = '',
     [string]$NdkVersion = '28.2.13676358'
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
-$sourceRoot = Join-Path $projectRoot '.validation\office-oxide-source'
-$outputRoot = Join-Path $projectRoot '.native-deps\office-oxide\android'
+$sourceRoot = Join-Path $projectRoot '.validation/office-oxide-source'
+$outputRoot = Join-Path $projectRoot '.native-deps/office-oxide/android'
 # v0.1.15 is an annotated tag (tag object fcdbdc2f...). Pin its peeled commit.
 $pinnedCommit = '5d183f4de990de254f32976bf952e548bcd25972'
-$toolchain = Join-Path $AndroidSdk "ndk\$NdkVersion\toolchains\llvm\prebuilt\windows-x86_64\bin"
-if (-not (Test-Path -LiteralPath (Join-Path $toolchain 'llvm-ar.exe'))) {
+$windowsHost = $env:OS -eq 'Windows_NT'
+if ($windowsHost) {
+    $hostTag = 'windows-x86_64'
+    $archiveName = 'llvm-ar.exe'
+    $compilerSuffix = '-clang.cmd'
+} elseif ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::OSX)) {
+    # NDK uses this directory name for both Intel and Apple Silicon hosts.
+    $hostTag = 'darwin-x86_64'
+    $archiveName = 'llvm-ar'
+    $compilerSuffix = '-clang'
+} elseif ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::Linux)) {
+    $hostTag = 'linux-x86_64'
+    $archiveName = 'llvm-ar'
+    $compilerSuffix = '-clang'
+} else {
+    throw 'This Office Android recipe supports Windows, macOS and Linux NDK hosts.'
+}
+if ([string]::IsNullOrWhiteSpace($AndroidSdk)) {
+    if ($env:ANDROID_SDK_ROOT) { $AndroidSdk = $env:ANDROID_SDK_ROOT }
+    elseif ($env:ANDROID_HOME) { $AndroidSdk = $env:ANDROID_HOME }
+    elseif ($windowsHost) { $AndroidSdk = Join-Path $env:LOCALAPPDATA 'Android/Sdk' }
+    elseif ($hostTag -eq 'darwin-x86_64') { $AndroidSdk = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Library/Android/sdk' }
+    else { $AndroidSdk = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Android/Sdk' }
+}
+if (Test-Path -LiteralPath $outputRoot) {
+    throw 'Preserve/archive the existing Android Office output before rebuilding; it will not be overwritten.'
+}
+$toolchain = Join-Path $AndroidSdk "ndk/$NdkVersion/toolchains/llvm/prebuilt/$hostTag/bin"
+if (-not (Test-Path -LiteralPath (Join-Path $toolchain $archiveName))) {
     throw "Install the pinned Android NDK $NdkVersion before building Office previews."
 }
 if (-not (Test-Path -LiteralPath $sourceRoot)) {
@@ -29,12 +56,13 @@ $priorCc = $env:CC
 $priorAr = $env:AR
 try {
     $env:RUSTFLAGS = '-C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wl,-z,common-page-size=16384'
-    $env:AR = Join-Path $toolchain 'llvm-ar.exe'
+    $env:AR = Join-Path $toolchain $archiveName
     foreach ($target in $targets) {
         & rustup target add $target.Rust
         if ($LASTEXITCODE -ne 0) { throw "Rust target installation failed: $($target.Rust)" }
         $linkerName = 'CARGO_TARGET_' + $target.Rust.Replace('-', '_').ToUpperInvariant() + '_LINKER'
-        $linker = Join-Path $toolchain ($target.Clang + '-clang.cmd')
+        $linker = Join-Path $toolchain ($target.Clang + $compilerSuffix)
+        if (-not (Test-Path -LiteralPath $linker)) { throw "The pinned NDK compiler is missing: $($target.Rust)" }
         $priorLinker = [Environment]::GetEnvironmentVariable($linkerName, 'Process')
         try {
             [Environment]::SetEnvironmentVariable($linkerName, $linker, 'Process')
@@ -43,7 +71,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "Office native compilation failed: $($target.Abi)" }
             $destination = Join-Path $outputRoot $target.Abi
             New-Item -ItemType Directory -Force $destination | Out-Null
-            Copy-Item -LiteralPath (Join-Path $sourceRoot "target\$($target.Rust)\release\liboffice_oxide.so") -Destination $destination
+            Copy-Item -LiteralPath (Join-Path $sourceRoot "target/$($target.Rust)/release/liboffice_oxide.so") -Destination $destination
         } finally {
             [Environment]::SetEnvironmentVariable($linkerName, $priorLinker, 'Process')
         }
@@ -51,7 +79,13 @@ try {
     $licensesRoot = Join-Path (Split-Path $outputRoot -Parent) 'licenses'
     New-Item -ItemType Directory -Force $licensesRoot | Out-Null
     foreach ($license in @('LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'TRADEMARKS.md')) {
-        Copy-Item -LiteralPath (Join-Path $sourceRoot $license) -Destination $licensesRoot
+        $licenseSource = Join-Path $sourceRoot $license
+        $licenseDestination = Join-Path $licensesRoot $license
+        if (Test-Path -LiteralPath $licenseDestination) {
+            if ((Get-FileHash -LiteralPath $licenseSource -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $licenseDestination -Algorithm SHA256).Hash) {
+                throw 'Existing Office license material differs; preserve it before rebuilding.'
+            }
+        } else { Copy-Item -LiteralPath $licenseSource -Destination $licenseDestination }
     }
     Get-ChildItem -LiteralPath $outputRoot -Recurse -File | Get-FileHash -Algorithm SHA256
 } finally {

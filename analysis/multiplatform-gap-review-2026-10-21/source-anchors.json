@@ -1,0 +1,122 @@
+[
+  {
+    "path": "lib/main.dart",
+    "line": 29,
+    "contains": "Platform.isWindows"
+  },
+  {
+    "path": "lib/main.dart",
+    "line": 33,
+    "contains": "Platform.isAndroid"
+  },
+  {
+    "path": "lib/core/storage/external_file_export.dart",
+    "line": 64,
+    "contains": "Platform.isWindows"
+  },
+  {
+    "path": "lib/core/storage/external_file_export.dart",
+    "line": 160,
+    "contains": "Platform.isAndroid"
+  },
+  {
+    "path": "lib/core/storage/posix_file_actions.dart",
+    "line": 22,
+    "contains": "Platform.isAndroid"
+  },
+  {
+    "path": "lib/core/theme/app_tooltip.dart",
+    "line": 21,
+    "contains": "RawTooltip"
+  },
+  {
+    "path": "lib/core/platform/attachment_file_actions.dart",
+    "line": 4,
+    "contains": "abstract class AttachmentFileActions"
+  },
+  {
+    "path": "lib/features/dashboard/services/office_preview_service.dart",
+    "line": 41,
+    "contains": "office_oxide.dll"
+  },
+  {
+    "path": "lib/core/storage/library_admission_probe.dart",
+    "line": 77,
+    "contains": "error.code != 'name_exists'"
+  },
+  {
+    "path": "ios/Runner/MobilePlatform.swift",
+    "line": 73,
+    "contains": "native_document_failed"
+  },
+  {
+    "path": "ios/Runner/MobilePlatform.swift",
+    "line": 325,
+    "contains": "exact name already exists"
+  },
+  {
+    "path": "lib/core/platform/mobile_library_events.dart",
+    "line": 14,
+    "contains": "Platform.isAndroid"
+  },
+  {
+    "path": "lib/features/dashboard/views/dashboard_screen.dart",
+    "line": 182,
+    "contains": "Platform.isWindows"
+  },
+  {
+    "path": "lib/features/dashboard/views/dashboard_screen.dart",
+    "line": 344,
+    "contains": "explorer.exe"
+  },
+  {
+    "path": "lib/features/dashboard/views/dashboard_screen.dart",
+    "line": 865,
+    "contains": "control: true"
+  },
+  {
+    "path": "lib/features/dashboard/widgets/app_settings_dialog.dart",
+    "line": 138,
+    "contains": "Platform.isAndroid"
+  },
+  {
+    "path": "lib/core/storage/attachment_scheduler.dart",
+    "line": 42,
+    "contains": "!capacity.detected"
+  },
+  {
+    "path": "lib/core/storage/attachment_performance.dart",
+    "line": 7,
+    "contains": "checkBeforeOpen = false"
+  },
+  {
+    "path": "lib/core/storage/attachment_performance.dart",
+    "line": 8,
+    "contains": "verifyAfterOpen = false"
+  },
+  {
+    "path": "lib/core/storage/attachment_performance.dart",
+    "line": 9,
+    "contains": "validateExportedBackup = false"
+  },
+  {
+    "path": "lib/core/storage/attachment_performance.dart",
+    "line": 10,
+    "contains": "verifyLargeFileWrites = false"
+  },
+  {
+    "path": "lib/core/storage/recoverable_store.dart",
+    "line": 795,
+    "contains": "captureRevision"
+  },
+  {
+    "path": "pubspec.lock",
+    "line": 1134,
+    "contains": ">=3.11.0"
+  },
+  {
+    "path": "pubspec.yaml",
+    "line": 22,
+    "contains": "^3.10.1"
+  }
+]

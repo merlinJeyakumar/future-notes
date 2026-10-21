@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-21",
+  "baselineHead": "a5be98cd520d501eb8f31e19bacb7bcd4cc8f4e6",
+  "report": "implementation-status.md",
+  "format": {"checkedFiles": 93, "changedFiles": 0, "exitCode": 0},
+  "whitespaceCheckExitCode": 0,
+  "scopedAnalysis": {"remainingErrors": 0, "remainingWarnings": 0, "informationalLintsRemain": true},
+  "affectedSuite": {"files": 60, "passed": 610, "skippedNativePosix": 2, "staleUidAssertionsFailed": 2},
+  "correctedUidSuite": {"passed": 3, "failed": 0},
+  "finalStartupSuite": {"passed": 61, "failed": 0},
+  "windows": {"protectedBuildPassed": true, "isolatedVisibleStartup": true, "normalCloseObserved": true},
+  "android": {
+    "protectedBuildPassed": true,
+    "previewInstalledAndLaunched": true,
+    "apiObserved": 31,
+    "matchingSigner": true,
+    "appDataCleared": false,
+    "apk": ".validation/multiplatform-stage-builds/preview-candidate-final.apk",
+    "sha256": "2a9dc2276a36637f96aecee0de62c06fc61ad338a786d4ca85686984fdcfb90b"
+  },
+  "nativeAcceptancePending": ["macOS", "Linux", "iOS"],
+  "otherPending": ["Android minimum/current API and tablet matrix", "sustained large-file performance", "G13 completed-baseline trust/identity optimization", "macOS native capacity telemetry"],
+  "notesEdited": false,
+  "publishedReleasesChanged": false,
+  "committed": false,
+  "pushed": false
+}

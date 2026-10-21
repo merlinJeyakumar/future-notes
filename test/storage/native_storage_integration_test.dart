@@ -30,7 +30,7 @@ void main() {
 
     setUp(() async {
       services = null;
-      run = await Directory.systemTemp.createTemp('future-notes-validation-');
+      run = await createValidationRun();
       library = p.join(run.path, 'UserData');
       configuration = File(p.join(library, 'settings.json'));
       environment = StorageEnvironment.recoverable(

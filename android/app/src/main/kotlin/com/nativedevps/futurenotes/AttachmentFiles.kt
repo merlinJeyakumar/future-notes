@@ -21,6 +21,7 @@ class AttachmentFiles(private val context: Context, messenger: BinaryMessenger) 
     private val channel = MethodChannel(messenger, "future_notes/files")
     private val root = File(context.cacheDir, "attachment-previews")
     private val exportExecutor = Executors.newSingleThreadExecutor()
+    private val settingsExecutor = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private var exportPicker: Pair<File, MethodChannel.Result>? = null
     private val exportRequest = 6831
@@ -30,6 +31,42 @@ class AttachmentFiles(private val context: Context, messenger: BinaryMessenger) 
         channel.setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
+                    "readSettings", "writeSettings" -> {
+                        settingsExecutor.execute {
+                            try {
+                                val file = AtomicFile(File(context.noBackupFilesDir, "future-notes-settings-v1.json"))
+                                val value: String? = if (call.method == "readSettings") {
+                                    try {
+                                        file.openRead().use { input ->
+                                            if (input.channel.size() > 65536) throw IllegalStateException()
+                                            val bytes = input.readBytes()
+                                            if (bytes.size > 65536) throw IllegalStateException()
+                                            Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+                                                .also { org.json.JSONObject(it) }
+                                        }
+                                    } catch (error: java.io.FileNotFoundException) {
+                                        if (file.baseFile.exists() || File(file.baseFile.path + ".bak").exists()) throw error
+                                        null
+                                    }
+                                } else {
+                                    val json = call.argument<String>("json") ?: throw IllegalStateException()
+                                    val bytes = json.toByteArray(Charsets.UTF_8)
+                                    if (bytes.size > 65536) throw IllegalStateException()
+                                    org.json.JSONObject(json)
+                                    val output = file.startWrite()
+                                    try {
+                                        output.write(bytes); output.fd.sync(); file.finishWrite(output)
+                                    } catch (error: Exception) { file.failWrite(output); throw error }
+                                    // A bounded settings acknowledgement, never a payload scan.
+                                    file.openRead().use { if (it.channel.size() > 65536 || !it.readBytes().contentEquals(bytes)) throw IllegalStateException() }
+                                    null
+                                }
+                                main.post { result.success(value) }
+                            } catch (_: Exception) {
+                                main.post { result.error("settings_io_failed", "Settings could not be saved or restored.", null) }
+                            }
+                        }
+                    }
                     "shareExport" -> {
                         val file = ownedExport(call.argument<String>("path") ?: "")
                         val host = activity ?: throw IllegalStateException()

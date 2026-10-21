@@ -1,0 +1,151 @@
+{
+  "date": "2026-10-21",
+  "sourceCommit": "a5be98cd520d501eb8f31e19bacb7bcd4cc8f4e6",
+  "scope": [
+    "macOS",
+    "Linux",
+    "Android",
+    "iOS"
+  ],
+  "mode": "analysis and proposed fixes only",
+  "nativeBuildsOrTestsRunForThisReview": false,
+  "validationMeaning": "Ten different source/configuration/contract/evidence reviews; not ten native runtime passes. Runtime acceptance of proposed repairs remains pending.",
+  "passes": [
+    {
+      "id": 1,
+      "question": "Baseline, provenance and host inventory",
+      "evidence": "host-integration-review.md",
+      "reviewStatus": "complete",
+      "targets": {
+        "macOS": "reported run uses older SDK and temporary adapter; current canonical build unproved",
+        "Linux": "runner present; only docker-desktop WSL available, no configured desktop host",
+        "Android": "API31 connected; protected candidate and bounded workflow evidence inspected",
+        "iOS": "no native build/device evidence available"
+      }
+    },
+    {
+      "id": 2,
+      "question": "Bootstrap, owner and settings writer",
+      "evidence": "storage-review.md",
+      "reviewStatus": "complete",
+      "targets": {
+        "macOS": "legacy default; explicit owned startup rejected",
+        "Linux": "legacy default; explicit owned startup rejected",
+        "Android": "provider notes; ordinary settings direct JSON",
+        "iOS": "provider source; first admission blocked by native error mapping"
+      }
+    },
+    {
+      "id": 3,
+      "question": "Publication routing and native semantics",
+      "evidence": "storage-review.md",
+      "reviewStatus": "complete",
+      "targets": {
+        "macOS": "both desktop export routes select rejecting actions",
+        "Linux": "both desktop export routes select rejecting actions",
+        "Android": "preserve admitted SAF/private publication",
+        "iOS": "coordinated provider/private source; direct sink unsupported"
+      }
+    },
+    {
+      "id": 4,
+      "question": "Recovery, migration, identity and failure safety",
+      "evidence": "storage-review.md",
+      "reviewStatus": "complete",
+      "targets": {
+        "macOS": "volume case/aliases, advisory locks and durability need native binding",
+        "Linux": "locks, no-replace filesystem support and directory durability need host evidence",
+        "Android": "preserve provider-v2 guards, SAF identity and receipts",
+        "iOS": "preserve bookmarks/coordination and encrypted-transfer fallback; runtime pending"
+      }
+    },
+    {
+      "id": 5,
+      "question": "Format, UID-first import, verification policy and cache",
+      "evidence": "mobile-review.md",
+      "reviewStatus": "complete",
+      "targets": {
+        "macOS": "shared codecs exist; ordinary legacy route bypasses owned importer/cache",
+        "Linux": "shared codecs exist; ordinary legacy route bypasses owned importer/cache",
+        "Android": "shared/native format and default-off policy present; bounded prior runtime evidence",
+        "iOS": "shared Dart format and default-off policy; no new cipher format required"
+      }
+    },
+    {
+      "id": 6,
+      "question": "Runtime lifetime, jobs, sharing and lifecycle",
+      "evidence": "mobile-review.md",
+      "reviewStatus": "complete",
+      "targets": {
+        "macOS": "desktop owner/actions port pending",
+        "Linux": "desktop owner/actions port pending",
+        "Android": "retained engine, service and notifications implemented; broader OS gates pending",
+        "iOS": "extension wired; finite UIKit window; no library hints or native job notifications"
+      }
+    },
+    {
+      "id": 7,
+      "question": "SDK, plugins, native packaging and project wiring",
+      "evidence": "packaging-test-review.md",
+      "reviewStatus": "complete",
+      "targets": {
+        "macOS": "Flutter/lock alignment, native artifacts, sandbox and clean build pending",
+        "Linux": "native artifacts/media runtime dependencies/host build pending",
+        "Android": "current Gradle toolchain meets locked plugin declarations; Office build recipe host-specific",
+        "iOS": "Office XCFramework absent; source wiring exists; Apple build/signing pending"
+      }
+    },
+    {
+      "id": 8,
+      "question": "Portable tests, audit counts and CI evidence",
+      "evidence": "packaging-test-review.md",
+      "reviewStatus": "complete",
+      "targets": {
+        "macOS": "textual patterns reproduced; supplied runtime totals remain attributed",
+        "Linux": "native-host tests/fixtures/CI not established",
+        "Android": "UI target overrides are not native Android validation",
+        "iOS": "UI target overrides and Mac app tests are not iOS validation"
+      }
+    },
+    {
+      "id": 9,
+      "question": "Host affordances, capabilities, keyboard and capacity",
+      "evidence": "host-integration-review.md",
+      "reviewStatus": "complete",
+      "targets": {
+        "macOS": "Picker entitlement failure source-confirmed; native permission-request/bookmark/denial plan added; signed Mac execution pending",
+        "Linux": "native open/reveal and locked file-sharing capability gaps",
+        "Android": "preserve accepted mobile presentation/native actions",
+        "iOS": "Apple hardware keyboard/presentation and native runtime acceptance pending"
+      }
+    },
+    {
+      "id": 10,
+      "question": "Independent adversarial integration and preservation review",
+      "evidence": "README.md",
+      "reviewStatus": "complete",
+      "targets": {
+        "macOS": "Proposal preserves existing hosts and requires real native admission/build gates",
+        "Linux": "Proposal does not assume generic POSIX, file-URL launching or portable media packaging",
+        "Android": "Accepted owner/cipher/UI and default-off policy preserved; broader runtime gates remain explicit",
+        "iOS": "Source-only integration and current blocker kept distinct from Apple native acceptance"
+      },
+      "independentEvidence": "independent-cross-review.json"
+    }
+  ],
+  "reviewPassesCompleted": 10,
+  "followups": [
+    {
+      "date": "2026-10-21",
+      "annotationIndex": 1,
+      "scope": "macOS permission requests and persistent folder access",
+      "sourceEvidence": [
+        "checked-in DebugProfile/Release entitlements",
+        "locked file_picker10.3.7 macOS entitlement check before Open/Save panels",
+        "directory picker returns path, not persisted bookmark ownership"
+      ],
+      "review": "Independent read-only source and Apple-contract check confirmed proposal",
+      "nativeAcceptance": "pending actual signed Mac Debug/Release and access/restart gates"
+    }
+  ]
+}

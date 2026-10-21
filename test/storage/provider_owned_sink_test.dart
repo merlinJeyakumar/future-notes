@@ -42,9 +42,7 @@ void main() {
       test(
         'owned provider sink verify=$verify boundary=$boundary never recopies payload',
         () async {
-          final run = await Directory.systemTemp.createTemp(
-            'future-notes-validation-',
-          );
+          final run = await createValidationRun();
           final backend = MemoryLibraryDocuments();
           final io = ProviderDocumentIo(backend, location);
           final parent = await io.directory(['note', 'attachments']);

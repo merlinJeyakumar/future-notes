@@ -32,14 +32,10 @@ class OfficePreviewService {
   Future<String> load(String path) {
     final dll =
         libraryPath ??
-        (Platform.isAndroid
-            ? 'liboffice_oxide.so'
-            : Platform.isIOS
-            ? '' // Statically linked symbols in the application image.
-            : p.join(
-                p.dirname(Platform.resolvedExecutable),
-                'office_oxide.dll',
-              ));
+        officePreviewLibrary(
+          operatingSystem: Platform.operatingSystem,
+          executable: Platform.resolvedExecutable,
+        );
     return Isolate.run(() => readOfficePreview(path, dll));
   }
 }
@@ -48,7 +44,7 @@ String readOfficePreview(String path, String libraryPath) {
   validateOfficePreviewSource(path);
   final before = File(path).statSync();
   try {
-    final library = libraryPath.isEmpty && Platform.isIOS
+    final library = libraryPath.isEmpty && (Platform.isIOS || Platform.isMacOS)
         ? DynamicLibrary.process()
         : DynamicLibrary.open(libraryPath);
     final open = library
@@ -119,6 +115,19 @@ String readOfficePreview(String path, String libraryPath) {
     );
   }
 }
+
+/// Packaging contract: Apple links the C ABI into the application; Linux
+/// installs its shared object beside Flutter's other native libraries.
+String officePreviewLibrary({
+  required String operatingSystem,
+  required String executable,
+}) => switch (operatingSystem) {
+  'android' => 'liboffice_oxide.so',
+  'ios' || 'macos' => '',
+  'linux' => p.join(p.dirname(executable), 'lib', 'liboffice_oxide.so'),
+  'windows' => p.join(p.dirname(executable), 'office_oxide.dll'),
+  _ => throw UnsupportedError('Native Office preview is unavailable.'),
+};
 
 void validateOfficePreviewSource(String path) {
   final file = File(path);

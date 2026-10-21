@@ -5,13 +5,8 @@ import 'package:path/path.dart' as p;
 
 import '../operations/operation_result.dart';
 import 'storage_environment.dart';
-
-abstract class StorageFileActions {
-  Future<OperationResult<void>> moveWithoutReplace(
-    String source,
-    String destination,
-  );
-}
+import 'storage_file_actions.dart';
+export 'storage_file_actions.dart';
 
 /// Metadata-only, same-volume move with native destination exclusion.
 /// Dispatch through the storage owner worker before wiring to UI operations.

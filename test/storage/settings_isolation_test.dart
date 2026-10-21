@@ -19,7 +19,7 @@ void main() {
   late int documentsRequests;
 
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     library = p.join(run.path, 'library');
     settingsFile = p.join(run.path, 'configuration', 'settings.json');
     documentsRequests = 0;

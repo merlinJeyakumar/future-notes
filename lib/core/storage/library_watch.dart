@@ -18,13 +18,20 @@ abstract interface class LibraryWatch {
 /// A recursive root watch plus a shallow ancestor watch. The latter survives
 /// root removal and follows creation of missing path components without polling.
 class NativeLibraryWatch implements LibraryWatch {
-  NativeLibraryWatch._(this.binding, this._verify, this._watch, this._exists);
+  NativeLibraryWatch._(
+    this.binding,
+    this._verify,
+    this._watch,
+    this._exists,
+    this._watchAncestors,
+  );
 
   static Future<NativeLibraryWatch> open(
     StorageBinding binding, {
     required Future<void> Function(String) verify,
     DirectoryWatchFactory? watch,
     Future<bool> Function(String)? exists,
+    bool watchAncestors = true,
   }) async {
     final owner = NativeLibraryWatch._(
       binding,
@@ -32,6 +39,7 @@ class NativeLibraryWatch implements LibraryWatch {
       watch ??
           ((path, recursive) => Directory(path).watch(recursive: recursive)),
       exists ?? ((path) => Directory(path).exists()),
+      watchAncestors,
     );
     try {
       await owner._rebind();
@@ -47,6 +55,7 @@ class NativeLibraryWatch implements LibraryWatch {
   final Future<void> Function(String) _verify;
   final DirectoryWatchFactory _watch;
   final Future<bool> Function(String) _exists;
+  final bool _watchAncestors;
   final _changes = StreamController<void>.broadcast();
   StreamSubscription<FileSystemEvent>? _rootWatch;
   StreamSubscription<FileSystemEvent>? _ancestorWatch;
@@ -116,28 +125,35 @@ class NativeLibraryWatch implements LibraryWatch {
   Future<void> _rebind() async {
     await _verify(binding.root);
     var ancestor = p.dirname(binding.root);
-    while (!await _exists(ancestor)) {
-      final parent = p.dirname(ancestor);
-      if (p.equals(parent, ancestor)) {
-        throw const FileSystemException('No watch ancestor.');
+    if (_watchAncestors) {
+      while (!await _exists(ancestor)) {
+        final parent = p.dirname(ancestor);
+        if (p.equals(parent, ancestor)) {
+          throw const FileSystemException('No watch ancestor.');
+        }
+        ancestor = parent;
       }
-      ancestor = parent;
-    }
-    if (_closed) return;
-    if (_ancestor != ancestor) {
-      await _ancestorWatch?.cancel();
       if (_closed) return;
-      _ancestor = ancestor;
-      _ancestorWatch = _watch(ancestor, false).listen(
-        _event,
-        onError: _error,
-        onDone: () {
-          _ancestor = null;
-          _requestRebind();
-        },
-      );
+      if (_ancestor != ancestor) {
+        await _ancestorWatch?.cancel();
+        if (_closed) return;
+        _ancestor = ancestor;
+        _ancestorWatch = _watch(ancestor, false).listen(
+          _event,
+          onError: _error,
+          onDone: () {
+            _ancestor = null;
+            _requestRebind();
+          },
+        );
+      }
     }
     final exists = await _exists(binding.root);
+    if (!_watchAncestors && !exists) {
+      throw const FileSystemException(
+        'The selected notes folder is unavailable.',
+      );
+    }
     if (_closed) return;
     // Reattach even when a same-named root was removed and recreated.
     await _rootWatch?.cancel();

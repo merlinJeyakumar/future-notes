@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:isolate';
 import 'dart:math';
 
@@ -11,6 +10,7 @@ import 'native_storage_primitives.dart';
 import 'permanent_deletion.dart';
 import 'recoverable_store.dart';
 import 'storage_environment.dart';
+import 'desktop_storage_host.dart';
 export 'permanent_deletion.dart' show DeletionReport;
 
 class StorageWorkerStart {
@@ -106,11 +106,11 @@ class StorageOwnerWorker
     Duration startupTimeout = const Duration(seconds: 10),
   }) async {
     if (!environment.hasOwnedStorage ||
-        !Platform.isWindows ||
+        !isOwnedDesktopHost ||
         startupTimeout <= Duration.zero) {
       return const OperationResult.failure(
         OperationOutcome.rejectedInput,
-        'Storage worker requires explicitly bound Windows storage.',
+        'Storage worker requires explicitly bound desktop storage.',
       );
     }
     final random = Random.secure();
@@ -471,7 +471,7 @@ class StorageOwnerWorker
     final stores = <int, RecoverableStore>{};
     var nextRoot = 0;
     try {
-      if (!start.environment.hasOwnedStorage || !Platform.isWindows) {
+      if (!start.environment.hasOwnedStorage || !isOwnedDesktopHost) {
         throw StateError('Unsupported storage owner.');
       }
       await start.environment.verifyConfiguredPaths();

@@ -1,4 +1,5 @@
 #include "my_application.h"
+#include "desktop_file_actions.h"
 
 #include <flutter_linux/flutter_linux.h>
 #ifdef GDK_WINDOWING_X11
@@ -45,11 +46,11 @@ static void my_application_activate(GApplication* application) {
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "flutter_application_1");
+    gtk_header_bar_set_title(header_bar, "Future Notes");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {
-    gtk_window_set_title(window, "flutter_application_1");
+    gtk_window_set_title(window, "Future Notes");
   }
 
   gtk_window_set_default_size(window, 1280, 720);
@@ -74,6 +75,8 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+  future_notes_register_desktop_file_actions(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)), window);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

@@ -1,33 +1,34 @@
-Future Notes 1.4.2 is the protected Windows x64 portable release (build 9).
+Future Notes 1.4.3 is the protected Windows x64 portable release (build 10).
 
-Changes since 1.4.1:
+Changes since 1.4.2:
 
-- Package import reads bounded note metadata first. A matching note ID prompts
-  Duplicate / Back up & Replace / Ignore before extracting attachments. Ignore
-  skips attachment processing; proceeding imports retain format checks,
-  cancellation, progress and recovery backups. Existing attachment payloads are
-  not compared before the choice.
-- Optional source checking, decrypted-output verification, exported-backup
-  validation and extra verification after large writes default to off. Saved
-  choices are respected. Required bounds, framing, streamed CRC, short-write
-  detection and recoverable publication remain. Necessary provider transfers and
-  recovery backups still take time; no hidden full-payload rescan is added.
-- Processing uses streamed write receipts and checksums to avoid redundant
-  reads and copies where supported. Import/export progress describes the actual
-  stage, file and byte counts. Password changes and prepared exports preserve
-  existing encryption and package compatibility.
-- Windows attachment opening retains its accepted private-cache path, including
-  short-name directory aliases. Reopening reuses decrypted files until lock,
-  credential changes, removal or exit. Content-free failure codes aid diagnosis.
-- Interrupted-task recovery is available from the overflow menu. The existing
-  desktop layout, formatting, gallery and window controls are preserved.
+- Full-screen image previews preserve portrait and landscape proportions during
+  bounded decoding on desktop and mobile. Original files, zoom, playback and
+  decrypted-cache reuse are retained.
+- Multiple files can be added in one pick. Desktop attachment galleries support
+  batch selection and actions alongside the existing mobile selection workflow.
+- Mobile editing preserves selection and formatting focus, provides a scrolling
+  formatting row with explicit expansion, structures HTML source, and keeps
+  attachment shelves behind the on-screen keyboard.
+- Android background-task notifications update progress without flooding,
+  support cancellation and remove stale active entries. Interrupted work remains
+  available through the overflow recovery action.
+- Android Preview accepts shared files for an existing or new note and continues
+  attachment processing in the background. Shared .fnote packages offer Validate
+  and Import. The destination list refreshes after cold startup without requiring
+  the user to reopen the chooser.
+- Android import retains access to picked files and reads package headers through
+  the retained URI grant, fixing passwordless import failures. Matching note IDs
+  still prompt Duplicate / Back up & Replace / Ignore before attachment extraction.
 
-The shared source also contains the separately validated Android Preview work.
-This release distributes the Windows portable build only, not a production
-Android upgrade or an iOS build.
+GitHub release assets contain the Windows portable build. A separately protected
+Android Preview APK with the same version is delivered to the requested local
+Drive folder; it retains the Preview package and signing identity and is not a
+production Android upgrade. iOS sharing adapters are source-only readiness;
+Mac builds and iPhone/iPad acceptance remain pending.
 
 The normal editor, existing storage backend, encryption formats, note/settings
-locations, attachment processing and cache lifetime are retained. Opening notes
+locations, optional-verification defaults and cache lifetime are retained. Opening notes
 does not migrate their attachment metadata. Decrypted attachment files remain
 cached until locking, credential changes, removal or actual Exit invalidates
 them, with deferred cleanup for files held open by another application.
@@ -42,7 +43,7 @@ Dynamic-code prohibition and Microsoft-only DLL policies remain disabled for
 Flutter/native-library compatibility. The application is unsigned.
 
 Download **Download-FutureNotes.ps1**, run it in Windows PowerShell, then read
-**RUN-ME.txt** in the verified `FutureNotes-1.4.2-windows-x64` folder and open
+**RUN-ME.txt** in the verified `FutureNotes-1.4.3-windows-x64` folder and open
 **FutureNotes.exe**. The helper reconstructs the folder from individual release
 assets and verifies SHA-256 hashes. No ZIP, installer, administrator rights,
 Flutter/Dart SDK, Microsoft Office or separate Visual C++ installation is needed.
@@ -58,10 +59,11 @@ app folder. Transfer notes with backup or package export/import and reselect a
 custom library if its path differs on another PC. Existing release tags and
 previous GitHub release assets are preserved.
 
-The application changes passed their affected automated suites. The final
-metadata-first import work passed 193 affected host tests plus protected Windows
-and Android synthetic probes. The user accepted the Windows attachment-opening
-correction and duplicate choices appearing before attachment extraction.
+The application changes passed their affected automated suites, including the
+163-test sharing/import regression suite and the 45-test image-preview suite.
+Protected Android synthetic checks covered shared-file intake, cancellation,
+draft preservation and cold-start destination loading. The user accepted mobile
+sharing, multi-file selection, import, notification fixes and image proportions.
 Release promotion additionally verifies packaging, native imports, private-symbol
 exclusion, hashes and portable-folder startup. Same-machine checks do not prove
 clean second-PC/VM compatibility. The existing Flutter Windows accessibility-tree

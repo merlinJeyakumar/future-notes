@@ -70,6 +70,15 @@ final class NativeFileAccess {
   private var channel: FlutterMethodChannel?
   private let exportQueue = DispatchQueue(label: "future-notes.macos-export")
 
+  private func canonicalExistingDirectory(_ url: URL) throws -> URL {
+    guard let resolved = url.path.withCString({ realpath($0, nil) }) else {
+      throw AccessFailure(code: "access_unavailable",
+        message: "The save staging location is unavailable.")
+    }
+    defer { free(resolved) }
+    return URL(fileURLWithPath: String(cString: resolved), isDirectory: true)
+  }
+
   private func cacheRoot() throws -> URL {
     let base = try FileManager.default.url(for: .cachesDirectory,
       in: .userDomainMask, appropriateFor: nil, create: true)
@@ -219,9 +228,10 @@ final class NativeFileAccess {
       let expected = try fileStamp(URL(fileURLWithPath: path))
       // The OS, rather than a guessed sibling pathname, issues staging access
       // on the destination volume for a coordinated safe save.
-      let replacement = try FileManager.default.url(for: .itemReplacementDirectory,
-        in: .userDomainMask, appropriateFor: url, create: true)
-        .standardizedFileURL.resolvingSymlinksInPath()
+      let replacement = try canonicalExistingDirectory(
+        FileManager.default.url(for: .itemReplacementDirectory,
+          in: .userDomainMask, appropriateFor: url, create: true)
+          .standardizedFileURL.resolvingSymlinksInPath())
       try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: replacement.path)
       grant.save = SaveState(directory: replacement, expected: expected)
       let token = UUID().uuidString

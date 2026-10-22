@@ -35,6 +35,12 @@ void main() {
   final dll =
       Platform.environment['FN_OFFICE_PREVIEW_DLL'] ??
       'build/windows/x64/runner/Release/office_oxide.dll';
+  // Mac fixture runs use the already-built pinned dylib explicitly. The normal
+  // app continues resolving its statically linked engine from process symbols.
+  final nativeOfficeHost =
+      Platform.isWindows ||
+      (Platform.isMacOS &&
+          Platform.environment['FN_OFFICE_PREVIEW_DLL']?.isNotEmpty == true);
   test('HTML is passive, preserves text/tables and cannot load resources', () {
     final result = sanitizeOfficePreview(
       '<p onclick="bad()" style="font-weight:bold;background:url(https://invalid)">Hello</p><table><tr><td colspan="2">Cell</td></tr></table><a href="file:///private">&lt;img src=x&gt;</a><img src="https://invalid"><script>secret()</script><iframe src="https://invalid"></iframe>',
@@ -140,7 +146,7 @@ void main() {
           root.deleteSync(recursive: true);
         }
       },
-      skip: !Platform.isWindows,
+      skip: !nativeOfficeHost,
     );
   }
 
@@ -164,7 +170,7 @@ void main() {
         root.deleteSync(recursive: true);
       }
     },
-    skip: !Platform.isWindows,
+    skip: !nativeOfficeHost,
   );
 
   test(

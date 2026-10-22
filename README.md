@@ -45,8 +45,9 @@ replacements pass the affected validation gates.
 
 The staged implementation and its current evidence are recorded in
 [the implementation status](analysis/multiplatform-gap-review-2026-10-21/implementation-status.md).
-macOS, Linux and iOS native acceptance remains pending; Windows-host contract
-tests do not replace those checks.
+The selected Intel Mac Monterey workflows are accepted as listed in
+`scripts/release/RELEASE_NOTES.md`. iOS application/device and Linux native
+acceptance remain pending; universal packaging alone does not validate ARM runtime.
 
 On the destination macOS or GNU/glibc Linux host, first use the pinned Flutter
 SDK and install the host's Flutter native prerequisites, Rust and build tools.
@@ -64,3 +65,10 @@ On Linux use `flutter build linux --release`. Run each only on its native host;
 native signing, permissions, portal integration and preview acceptance remain
 separate gates. iOS uses the existing mobile Office recipe and requires its own
 Mac/Xcode, signing and device validation.
+
+## Release provenance
+
+`v1.4.4-apple-compat` identifies this approved Mac compatibility source for
+version `1.4.4+11`; `v1.4.4` identifies the canonical development release with
+the separately preserved Windows/Android pins. Functional fixes are aligned,
+and `release-provenance.json` records exact platform source/artifact hashes.

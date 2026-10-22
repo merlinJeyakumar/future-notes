@@ -5071,7 +5071,11 @@ class ContentViewModel extends BaseViewModel {
               .toList();
         }
       }
-      final shared = _sharedAttachmentCommits[reference.fileName];
+      // Protection replaces attachment storage IDs. Its snapshot already
+      // contains the shared files, so do not restore their old-key entries.
+      final shared = changesProtection
+          ? null
+          : _sharedAttachmentCommits[reference.fileName];
       if (shared != null) {
         final original = snapshot.metadata['attachments'];
         final known = original is List
@@ -5128,6 +5132,9 @@ class ContentViewModel extends BaseViewModel {
       _storedNote = NoteModel.fromJson(metadata);
       if (!snapshot.reuseStoredBody) _retainedPlainBody = snapshot.body;
       _retainedMetadata = metadata;
+      if (changesProtection) {
+        _sharedAttachmentCommits.remove(committedReference.fileName);
+      }
       _persistedCredentialGeneration = snapshot.credentialGeneration;
       if (generationChange) {
         final sameRevision = _session.editRevision == snapshot.editRevision - 1;

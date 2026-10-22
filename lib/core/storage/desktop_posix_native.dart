@@ -11,6 +11,14 @@ abstract interface class DesktopPosixOperations {
   void syncDirectory(String directory);
 }
 
+final class _DarwinTimespec extends Struct {
+  @Int64()
+  external int seconds;
+
+  @Int64()
+  external int nanoseconds;
+}
+
 class DesktopPosixNative implements DesktopPosixOperations {
   DesktopPosixNative() {
     if (!supportedHost) throw UnsupportedError('Desktop POSIX host required.');
@@ -21,6 +29,11 @@ class DesktopPosixNative implements DesktopPosixOperations {
       code == 17 || (Platform.isMacOS ? code == 66 : code == 39);
   static bool isLockBusy(int? code) => code == (Platform.isMacOS ? 35 : 11);
   late final _library = DynamicLibrary.process();
+  late final _futimens = _library
+      .lookupFunction<
+        Int32 Function(Int32, Pointer<_DarwinTimespec>),
+        int Function(int, Pointer<_DarwinTimespec>)
+      >('futimens');
   late final _open = _library
       .lookupFunction<
         Int32 Function(Pointer<Utf8>, Int32),
@@ -55,6 +68,42 @@ class DesktopPosixNative implements DesktopPosixOperations {
       return fd;
     } finally {
       calloc.free(text);
+    }
+  }
+
+  void setLastModifiedMicros(String path, int micros) {
+    if (!Platform.isMacOS) {
+      throw UnsupportedError('Mac timestamp restoration is required.');
+    }
+    final times = calloc<_DarwinTimespec>(2);
+    int? fd;
+    var failed = false;
+
+    void check(int result, String message) {
+      if (result != 0) {
+        final code = _error().value;
+        throw FileSystemException(message, '', OSError('', code));
+      }
+    }
+
+    try {
+      fd = _descriptor(path, write: true);
+      times[0].nanoseconds = -2; // Darwin UTIME_OMIT preserves access time.
+      final remainder = micros % 1000000;
+      times[1]
+        ..seconds = (micros - remainder) ~/ 1000000
+        ..nanoseconds = remainder * 1000;
+      check(_futimens(fd, times), 'Timestamp restoration failed');
+      check(_sync(fd), 'Timestamp persistence failed');
+    } catch (_) {
+      failed = true;
+      rethrow;
+    } finally {
+      calloc.free(times);
+      if (fd != null) {
+        final result = _close(fd);
+        if (!failed) check(result, 'Timestamp handle close failed');
+      }
     }
   }
 

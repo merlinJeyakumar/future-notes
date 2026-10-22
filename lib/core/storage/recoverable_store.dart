@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import '../operations/operation_result.dart';
 import 'commit_record.dart';
+import 'desktop_posix_native.dart';
 import 'native_storage_primitives.dart';
 import 'permanent_deletion.dart';
 import 'storage_environment.dart';
@@ -715,9 +716,18 @@ class RecoverableStore {
         await _copy(previous, restoredStage, prior, record.transactionId);
         // Preserve the captured filesystem revision so recovery can resume if
         // interrupted after restoration but before its resolution receipt.
-        await File(restoredStage).setLastModified(
-          DateTime.fromMicrosecondsSinceEpoch(record.expected.modifiedMicros!),
-        );
+        if (Platform.isMacOS) {
+          DesktopPosixNative().setLastModifiedMicros(
+            restoredStage,
+            record.expected.modifiedMicros!,
+          );
+        } else {
+          await File(restoredStage).setLastModified(
+            DateTime.fromMicrosecondsSinceEpoch(
+              record.expected.modifiedMicros!,
+            ),
+          );
+        }
         if (!(await _primitives.captureRevision(
           restoredStage,
         )).matches(record.expected)) {

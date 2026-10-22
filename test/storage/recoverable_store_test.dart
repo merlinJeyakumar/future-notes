@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_application_1/core/operations/operation_result.dart';
 import 'package:flutter_application_1/core/storage/commit_record.dart';
+import 'package:flutter_application_1/core/storage/desktop_posix_native.dart';
 import 'package:flutter_application_1/core/storage/native_storage_primitives.dart';
 import 'package:flutter_application_1/core/storage/recoverable_store.dart';
 import 'package:flutter_application_1/core/storage/storage_environment.dart';
@@ -104,6 +105,12 @@ void main() {
         final canonical = File(p.join(root, 'attachments', 'new.med'));
         await canonical.parent.create(recursive: true);
         await canonical.writeAsBytes(List.filled(4096, 17), flush: true);
+        if (Platform.isMacOS) {
+          DesktopPosixNative().setLastModifiedMicros(
+            canonical.path,
+            DateTime.utc(2026, 1, 2, 3, 4, 5, 972).microsecondsSinceEpoch,
+          );
+        }
         final expected = await primitives.captureRevision(canonical.path);
         final store = await open(
           fault: (phase, id) async {

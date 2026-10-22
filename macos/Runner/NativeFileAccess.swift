@@ -369,10 +369,28 @@ final class NativeFileAccess {
           try self.fileStamp(save.candidate) == candidate else {
           throw AccessFailure(code: "conflict", message: "The export destination changed; retained files were not overwritten.")
         }
-        if save.expected != nil {
-          let backup = ".future-notes-export-\(UUID().uuidString).previous"
-          _ = try FileManager.default.replaceItemAt(destination, withItemAt: save.candidate,
-            backupItemName: backup, options: [.usingNewMetadataOnly, .withoutDeletingBackupItem])
+        if let expected = save.expected {
+          // A named Foundation backup would be a sibling of the destination,
+          // outside an exact-file save grant. Retain the predecessor in our
+          // OS-issued replacement directory instead. Foundation clones on APFS
+          // and performs the necessary backup copy on other file systems.
+          let backup = save.directory.appendingPathComponent(
+            ".future-notes-export-\(UUID().uuidString).previous")
+          try self.exportStep(1) {
+            try FileManager.default.copyItem(at: destination, to: backup)
+            try self.synchronizeExportItem(backup)
+            try self.synchronizeExportItem(save.directory)
+          }
+          guard let predecessor = try self.fileStamp(backup), predecessor.size == expected.size,
+            try self.fileStamp(destination) == expected,
+            try self.fileStamp(save.candidate) == candidate else {
+            throw AccessFailure(code: "conflict",
+              message: "The export destination changed; retained files were not overwritten.")
+          }
+          _ = try self.exportStep(2) {
+            try FileManager.default.replaceItemAt(destination, withItemAt: save.candidate,
+              backupItemName: nil, options: [.usingNewMetadataOnly])
+          }
         } else {
           let code = save.candidate.path.withCString { from in
             destination.path.withCString { to in Darwin.renamex_np(from, to, 4) }
@@ -400,6 +418,33 @@ final class NativeFileAccess {
     // Only an empty OS-issued replacement folder is removed. Unexpected or
     // ambiguous material is retained, never recursively deleted.
     _ = Darwin.rmdir(save.directory.path)
+  }
+
+  private func exportStep<T>(_ stage: Int, _ action: () throws -> T) throws -> T {
+    do { return try action() }
+    catch {
+      let native = error as NSError
+      let domain = native.domain == NSCocoaErrorDomain ? 1 :
+        (native.domain == NSPOSIXErrorDomain ? 2 : 0)
+      // Fixed stages and numeric error classifications only; never log the
+      // native message/userInfo, which can contain selected file paths.
+      NSLog("FN_MAC_EXPORT_NATIVE stage=%ld domain=%ld code=%ld", stage, domain, native.code)
+      throw error
+    }
+  }
+
+  private func synchronizeExportItem(_ url: URL) throws {
+    let descriptor = url.path.withCString {
+      Darwin.open($0, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    }
+    guard descriptor >= 0 else {
+      throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+    }
+    let flushed = Darwin.fsync(descriptor)
+    let flushError = errno
+    let closed = Darwin.close(descriptor)
+    if flushed != 0 { throw NSError(domain: NSPOSIXErrorDomain, code: Int(flushError)) }
+    if closed != 0 { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
   }
 
   private func requireEntitlements() throws {

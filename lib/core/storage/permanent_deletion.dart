@@ -23,8 +23,9 @@ class DeletionIntent {
     this.target,
     this.objects,
     this.files,
-    this.transactions,
-  ) {
+    this.transactions, {
+    this.desktopCompatibility = false,
+  }) {
     CommitRecord(
       transactionId: id,
       target: target,
@@ -106,7 +107,11 @@ class DeletionIntent {
           sourceParts[0] == '.future-notes-storage' &&
           sourceParts[1] == 'sources' &&
           objects.any(
-            (object) => sourceParts[2] == CommitRecord.objectIdentity(object),
+            (object) =>
+                sourceParts[2] == CommitRecord.objectIdentity(object) ||
+                (desktopCompatibility &&
+                    sourceParts[2] ==
+                        CommitRecord.windowsObjectIdentity(object)),
           ) &&
           RegExp(
             r'^(note|attachment)-operation-[A-Za-z0-9]+$',
@@ -130,6 +135,7 @@ class DeletionIntent {
   final Set<String> objects;
   final Map<String, StorageRevision> files;
   final List<CommitRecord> transactions;
+  final bool desktopCompatibility;
   String get path => '.future-notes-storage/deletions/$id.json';
   String get hash => sha256.convert(utf8.encode(encode())).toString();
   String encode() => jsonEncode({
@@ -170,8 +176,9 @@ class DeletionIntent {
         ),
       ),
       (json['transactions'] as List)
-          .map((text) => CommitRecord.decode(text as String))
+          .map((text) => CommitRecord.decodeDesktopCompatible(text as String))
           .toList(),
+      desktopCompatibility: Platform.isMacOS || Platform.isLinux,
     );
     if (intent.encode() != text) {
       throw const FormatException('Noncanonical deletion journal.');
@@ -224,9 +231,11 @@ class PermanentDeletion {
       throw const FormatException('Deletion journal exceeds limit.');
     }
     final file = File(await _location(relative));
-    await file.parent.create(recursive: true);
+    final primitives = NativeStoragePrimitives(environment);
+    await primitives.prepareParent(file.path);
     await file.create(exclusive: true);
     await file.writeAsBytes(bytes, flush: true);
+    await primitives.persistParent(file.path);
     if (await _read(file.path) != value) {
       throw const FormatException('Deletion journal verification failed.');
     }
@@ -347,7 +356,9 @@ class PermanentDeletion {
     if (await journals.exists()) {
       await for (final entity in journals.list(followLinks: false)) {
         if (entity is! File || !entity.path.endsWith('.json')) continue;
-        final record = CommitRecord.decode(await _read(entity.path));
+        final record = CommitRecord.decodeDesktopCompatible(
+          await _read(entity.path),
+        );
         if (!objects.any((object) => p.equals(object, record.target))) {
           final managedAttachment =
               attachmentDirectory != null &&

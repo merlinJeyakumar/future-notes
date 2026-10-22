@@ -196,6 +196,33 @@ void main() {
       await controller.close();
     }
   });
+
+  test('a scoped folder watch never requests access to its parent', () async {
+    final scoped = _Surface();
+    final opened = await NativeLibraryWatch.open(
+      StorageBinding(scoped.root, 9),
+      verify: (_) async {},
+      watchAncestors: false,
+      exists: (path) async {
+        expect(path, scoped.root);
+        return scoped.present.contains(path);
+      },
+      watch: scoped.open,
+    );
+    expect(scoped.opens, [(scoped.root, true)]);
+    final errors = <Object>[];
+    final listener = opened.changes.listen((_) {}, onError: errors.add);
+    scoped.present.remove(scoped.root);
+    scoped.emit(scoped.root, FileSystemDeleteEvent(scoped.root, true));
+    await _drain();
+    expect(opened.failed, isTrue);
+    expect(errors, hasLength(1));
+    await listener.cancel();
+    await opened.close();
+    for (final controller in scoped.controllers) {
+      await controller.close();
+    }
+  });
 }
 
 Future<void> _drain() async {

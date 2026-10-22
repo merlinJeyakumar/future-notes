@@ -60,9 +60,7 @@ void main() {
   test(
     'native multi-picker owns each grant and releases malformed results',
     () async {
-      final run = await Directory.systemTemp.createTemp(
-        'future-notes-validation-',
-      );
+      final run = await createValidationRun();
       final calls = <String>[];
       var invalid = false;
       const channel = MethodChannel('future_notes/documents');
@@ -128,9 +126,7 @@ void main() {
   test(
     'owned multi-intake creates independent jobs, preserves names and source bytes',
     () async {
-      final run = await Directory.systemTemp.createTemp(
-        'future-notes-validation-',
-      );
+      final run = await createValidationRun();
       final app = OwnedAppServices(
         environment: StorageEnvironment.validation(
           validationRoot: run.path,
@@ -262,9 +258,7 @@ void main() {
   });
 
   test('cancelled directory export removes only owned outputs', () async {
-    final run = await Directory.systemTemp.createTemp(
-      'future-notes-validation-',
-    );
+    final run = await createValidationRun();
     try {
       final sentinel = await File(
         '${run.path}/preserve.txt',

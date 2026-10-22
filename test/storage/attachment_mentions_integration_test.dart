@@ -20,7 +20,7 @@ void main() {
   late ContentViewModel editor;
   late AttachmentOpenCache cache;
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     app = OwnedAppServices(
       environment: StorageEnvironment.validation(
         validationRoot: run.path,
@@ -161,7 +161,8 @@ void main() {
         final result = await editor.importNoteFile(
           destination,
           resolveConflict: (match) async {
-            expect(match.identical, isTrue);
+            // Matching UIDs prompt before payload extraction/comparison.
+            expect(match.identical, isNull);
             return NoteImportDecision.duplicate;
           },
         );
@@ -201,7 +202,7 @@ void main() {
           duplicateExport,
           resolveConflict: (match) async {
             prompted = true;
-            expect(match.identical, isTrue);
+            expect(match.identical, isNull);
             return NoteImportDecision.ignore;
           },
         );

@@ -8,6 +8,7 @@ import '../../../core/storage/owned_settings_persistence.dart';
 import '../../../core/storage/storage_owner_worker.dart';
 import '../../../core/operations/operation_result.dart';
 import '../../../core/storage/attachment_performance.dart';
+import '../../../core/platform/private_settings_store.dart';
 
 enum CompressionLevel {
   high, // significant compression
@@ -23,6 +24,10 @@ class SettingsService {
   SettingsService._internal()
     : _storage = const StorageEnvironment.production(),
       _storageOwner = null,
+      _bootstrapLibraryRoot = null,
+      _privateSettings = Platform.isAndroid || Platform.isIOS
+          ? const NativePrivateSettingsStore()
+          : null,
       _documentsDirectoryResolver = getApplicationDocumentsDirectory;
 
   /// Independent instance for injected storage and tests. Does not replace the
@@ -31,13 +36,27 @@ class SettingsService {
     required StorageEnvironment storage,
     StorageOwner? storageOwner,
     Future<Directory> Function()? documentsDirectoryResolver,
+    PrivateSettingsStore? privateSettings,
+    String? bootstrapLibraryRoot,
   }) : _storage = storage,
        _storageOwner = storageOwner,
+       _bootstrapLibraryRoot = bootstrapLibraryRoot,
+       _privateSettings =
+           privateSettings ??
+           (!storage.hasOwnedStorage &&
+                   documentsDirectoryResolver == null &&
+                   (Platform.isAndroid || Platform.isIOS)
+               ? const NativePrivateSettingsStore()
+               : null),
        _documentsDirectoryResolver =
            documentsDirectoryResolver ?? getApplicationDocumentsDirectory;
 
   StorageEnvironment _storage;
   final StorageOwner? _storageOwner;
+  final String? _bootstrapLibraryRoot;
+  final PrivateSettingsStore? _privateSettings;
+  bool get _usesQueuedPreferences =>
+      _storageOwner != null || _privateSettings != null;
   OwnedSettingsPersistence? _ownedPersistence;
   Map<String, dynamic> _ownedMetadata = {};
   Future<void> _settingsTail = Future.value();
@@ -55,6 +74,12 @@ class SettingsService {
     if (_initialization != null) {
       throw StateError(
         'Storage must be configured before settings initialization.',
+      );
+    }
+    if (storage.hasOwnedStorage &&
+        _privateSettings is NativePrivateSettingsStore) {
+      throw ArgumentError(
+        'Isolated mobile settings require an injected private store.',
       );
     }
     _storage = storage;
@@ -83,7 +108,7 @@ class SettingsService {
 
   Future<void> setAttachmentPerformance(AttachmentPerformance value) async {
     final validated = AttachmentPerformance.fromJson(value.toJson());
-    if (_storageOwner != null) {
+    if (_usesQueuedPreferences) {
       return _queueOwnedSettings(
         () => _saveOwnedSettings(performance: validated),
       );
@@ -96,7 +121,7 @@ class SettingsService {
   bool _minimizeToTrayOnClose = Platform.isWindows;
   bool get minimizeToTrayOnClose => _minimizeToTrayOnClose;
   Future<void> setMinimizeToTrayOnClose(bool enabled) async {
-    if (_storageOwner != null) {
+    if (_usesQueuedPreferences) {
       return _queueOwnedSettings(
         () => _saveOwnedSettings(minimizeToTray: enabled),
       );
@@ -112,7 +137,7 @@ class SettingsService {
   }
 
   Future<void> setThemeMode(ThemeMode mode) async {
-    if (_storageOwner != null) {
+    if (_usesQueuedPreferences) {
       return _queueOwnedSettings(() => _saveOwnedSettings(theme: mode));
     }
     _themeMode = mode;
@@ -121,7 +146,7 @@ class SettingsService {
   }
 
   Future<void> init() {
-    if (_storageOwner != null &&
+    if (_usesQueuedPreferences &&
         _persistenceClosing &&
         _initialization == null) {
       return Future.error(
@@ -133,6 +158,10 @@ class SettingsService {
 
   Future<void> _initialize() async {
     await _storage.verifyConfiguredPaths();
+    if (_privateSettings != null) {
+      await _loadPrivateSettings();
+      return;
+    }
     if (_storageOwner != null) {
       try {
         final persistence = OwnedSettingsPersistence(
@@ -185,7 +214,8 @@ class SettingsService {
         // Verified settings rollback can restore the previous selection after
         // bootstrap captured the interrupted replacement's new selection.
         // Ordinary JSON mismatches cannot broaden root capabilities.
-        final storedPath = metadata['customDataPath'] as String?;
+        final storedPath =
+            _bootstrapLibraryRoot ?? metadata['customDataPath'] as String?;
         if (_storage.isRecoverable) {
           final selected = storedPath == null || storedPath.isEmpty
               ? p.dirname(_storage.settingsFile!)
@@ -222,7 +252,7 @@ class SettingsService {
   }
 
   Future<void> setCompressionLevel(CompressionLevel level) async {
-    if (_storageOwner != null) {
+    if (_usesQueuedPreferences) {
       return _queueOwnedSettings(() => _saveOwnedSettings(compression: level));
     }
     _compressionLevel = level;
@@ -230,7 +260,7 @@ class SettingsService {
   }
 
   Future<void> setCustomDataPath(String? path) async {
-    if (_storageOwner != null) {
+    if (_usesQueuedPreferences) {
       return _queueOwnedSettings(() async {
         final candidate = path == null
             ? null
@@ -318,7 +348,11 @@ class SettingsService {
       'minimizeToTrayOnClose': minimizeToTray ?? _minimizeToTrayOnClose,
       'attachmentPerformance': (performance ?? attachmentPerformance).toJson(),
     };
-    await _ownedPersistence!.write(candidate);
+    if (_privateSettings != null) {
+      await _privateSettings.write(candidate);
+    } else {
+      await _ownedPersistence!.write(candidate);
+    }
     _ownedMetadata = candidate;
     _compressionLevel = candidateCompression;
     _customDataPath = candidatePath;
@@ -406,6 +440,74 @@ class SettingsService {
     String attachmentId,
   ) async {
     return getLibraryFilePath('note_$noteId/attachments/$attachmentId.med');
+  }
+
+  Future<void> _loadPrivateSettings() async {
+    try {
+      final saved = await _privateSettings!.read();
+      Map<String, dynamic> metadata;
+      if (saved != null) {
+        metadata = saved;
+      } else {
+        final file = File(await getSettingsFilePath());
+        RandomAccessFile? input;
+        try {
+          input = await file.open();
+          final bytes = await input.read(
+            NativePrivateSettingsStore.maximumBytes + 1,
+          );
+          if (bytes.length > NativePrivateSettingsStore.maximumBytes) {
+            throw const FormatException('Legacy settings exceed their bound.');
+          }
+          final value = jsonDecode(utf8.decode(bytes));
+          if (value is! Map<String, dynamic>)
+            throw const FormatException('Invalid legacy settings.');
+          metadata = value;
+        } on FileSystemException catch (error) {
+          if (error.osError?.errorCode != 2 &&
+              !(Platform.isWindows && error.osError?.errorCode == 3))
+            rethrow;
+          metadata = {};
+        } finally {
+          await input?.close();
+        }
+      }
+      final compression = metadata['compressionLevel'];
+      final theme = metadata['themeMode'];
+      final path = metadata['customDataPath'];
+      final tray = metadata['minimizeToTrayOnClose'];
+      if ((metadata.containsKey('compressionLevel') &&
+              (compression is! int ||
+                  compression < 0 ||
+                  compression >= CompressionLevel.values.length)) ||
+          (metadata.containsKey('themeMode') &&
+              (theme is! int ||
+                  theme < 0 ||
+                  theme >= ThemeMode.values.length)) ||
+          (path != null && path is! String) ||
+          (metadata.containsKey('minimizeToTrayOnClose') && tray is! bool)) {
+        throw const FormatException('Invalid private settings.');
+      }
+      final performance = AttachmentPerformance.fromJson(
+        metadata['attachmentPerformance'],
+      );
+      // Migrate only after successful validation/acknowledgement. The original
+      // JSON and note folders remain untouched, including unknown metadata.
+      if (saved == null) await _privateSettings.write(metadata);
+      _ownedMetadata = Map.of(metadata);
+      _compressionLevel = compression == null
+          ? CompressionLevel.medium
+          : CompressionLevel.values[compression as int];
+      _themeMode = theme == null
+          ? ThemeMode.dark
+          : ThemeMode.values[theme as int];
+      _customDataPath = path as String?;
+      _minimizeToTrayOnClose = tray as bool? ?? Platform.isWindows;
+      themeModeNotifier.value = _themeMode;
+      attachmentPerformanceNotifier.value = performance;
+    } catch (_) {
+      throw const SettingsPersistenceFailure(OperationOutcome.recoveryRequired);
+    }
   }
 
   Future<void> _loadSettings() async {

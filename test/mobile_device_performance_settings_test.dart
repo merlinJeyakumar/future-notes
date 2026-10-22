@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_application_1/core/operations/operation_result.dart';
@@ -6,14 +7,15 @@ import 'package:flutter_application_1/core/storage/attachment_performance.dart';
 import 'package:flutter_application_1/core/storage/storage_environment.dart';
 import 'package:flutter_application_1/features/dashboard/mobile/app_settings_dialog.dart';
 import 'package:flutter_application_1/features/dashboard/services/settings_service.dart';
+import 'package:path/path.dart' as p;
 
 class _Settings extends SettingsService {
-  _Settings()
+  _Settings(Directory root)
     : super.withStorage(
         storage: StorageEnvironment.validation(
-          validationRoot: 'D:/future-notes-validation-native-ui',
-          dataRoot: 'D:/future-notes-validation-native-ui/library',
-          settingsFile: 'D:/future-notes-validation-native-ui/settings.json',
+          validationRoot: root.path,
+          dataRoot: p.join(root.path, 'library'),
+          settingsFile: p.join(root.path, 'settings.json'),
         ),
       );
   Completer<void>? write;
@@ -34,7 +36,13 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
-      final settings = _Settings();
+      final root = Directory(
+        Directory.systemTemp
+            .createTempSync('future-notes-validation-native-ui-')
+            .resolveSymbolicLinksSync(),
+      );
+      addTearDown(() => root.deleteSync(recursive: true));
+      final settings = _Settings(root);
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(

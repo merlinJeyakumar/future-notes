@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
@@ -14,6 +15,7 @@ class CommitRecord {
     required this.expected,
     required this.staged,
     this.windowsObjectPaths = false,
+    this.caseSensitiveObjectPaths,
   }) {
     _validateIdentity(transactionId);
     _validateTarget(target);
@@ -33,10 +35,18 @@ class CommitRecord {
   /// The target name and the encoded record remain byte-for-byte unchanged.
   final bool windowsObjectPaths;
 
+  /// Explicit decode mode for strict portable compatibility fixtures. Null
+  /// preserves the established host behavior for every existing caller.
+  final bool? caseSensitiveObjectPaths;
+
   static String objectIdentity(String target) => sha256
       .convert(utf8.encode(p.separator == '\\' ? target.toLowerCase() : target))
       .toString();
-  String get objectId => windowsObjectPaths
+  static String windowsObjectIdentity(String target) =>
+      sha256.convert(utf8.encode(target.toLowerCase())).toString();
+  String get objectId => caseSensitiveObjectPaths == true
+      ? sha256.convert(utf8.encode(target)).toString()
+      : windowsObjectPaths
       ? sha256.convert(utf8.encode(target.toLowerCase())).toString()
       : objectIdentity(target);
   String get stagePath => '.future-notes-storage/staging/$transactionId.staged';
@@ -61,7 +71,11 @@ class CommitRecord {
     'staged': _revisionJson(staged),
   });
 
-  static CommitRecord decode(String source, {bool windowsObjectPaths = false}) {
+  static CommitRecord decode(
+    String source, {
+    bool windowsObjectPaths = false,
+    bool? caseSensitiveObjectPaths,
+  }) {
     try {
       final map = _boundedJson(source);
       if (map['version'] != 1 ||
@@ -75,6 +89,7 @@ class CommitRecord {
         expected: _readRevision(map['expected']),
         staged: _readRevision(map['staged']),
         windowsObjectPaths: windowsObjectPaths,
+        caseSensitiveObjectPaths: caseSensitiveObjectPaths,
       );
       // Check derived paths and exact canonical shape, including duplicate keys,
       // unknown fields and unsupported versions. Never trust recorded paths.
@@ -84,6 +99,22 @@ class CommitRecord {
       return record;
     } catch (_) {
       throw const FormatException('Invalid or unsupported transaction record.');
+    }
+  }
+
+  /// Accept either exact canonical desktop authorship, retaining its original
+  /// derived paths and receipt hash. Never rewrite the target or stored JSON.
+  static CommitRecord decodeDesktopCompatible(
+    String source, {
+    bool? caseSensitiveObjectPaths,
+  }) {
+    if (!(caseSensitiveObjectPaths ?? (Platform.isMacOS || Platform.isLinux))) {
+      return decode(source);
+    }
+    try {
+      return decode(source, caseSensitiveObjectPaths: true);
+    } on FormatException {
+      return decode(source, windowsObjectPaths: true);
     }
   }
 

@@ -8,6 +8,10 @@ import 'package:pdfrx/pdfrx.dart';
 import 'package:html/parser.dart' as html;
 import 'package:flutter_application_1/features/dashboard/widgets/attachment_document_preview.dart';
 
+void _setFixturePdfiumModulePath(String path) {
+  Pdfrx.pdfiumModulePath = path;
+}
+
 void main() {
   test(
     'Office table styling preserves header roles and alternates existing rows',
@@ -35,6 +39,16 @@ void main() {
   final dll =
       Platform.environment['FN_OFFICE_PREVIEW_DLL'] ??
       'build/windows/x64/runner/Release/office_oxide.dll';
+  // Mac fixture runs use the already-built pinned dylib explicitly. The normal
+  // app continues resolving its statically linked engine from process symbols.
+  final nativeOfficeHost =
+      Platform.isWindows ||
+      (Platform.isMacOS &&
+          Platform.environment['FN_OFFICE_PREVIEW_DLL']?.isNotEmpty == true);
+  final nativePdfHost =
+      Platform.isWindows ||
+      (Platform.isMacOS &&
+          Platform.environment['PDFIUM_PATH']?.isNotEmpty == true);
   test('HTML is passive, preserves text/tables and cannot load resources', () {
     final result = sanitizeOfficePreview(
       '<p onclick="bad()" style="font-weight:bold;background:url(https://invalid)">Hello</p><table><tr><td colspan="2">Cell</td></tr></table><a href="file:///private">&lt;img src=x&gt;</a><img src="https://invalid"><script>secret()</script><iframe src="https://invalid"></iframe>',
@@ -140,7 +154,7 @@ void main() {
           root.deleteSync(recursive: true);
         }
       },
-      skip: !Platform.isWindows,
+      skip: !nativeOfficeHost,
     );
   }
 
@@ -164,7 +178,7 @@ void main() {
         root.deleteSync(recursive: true);
       }
     },
-    skip: !Platform.isWindows,
+    skip: !nativeOfficeHost,
   );
 
   test(
@@ -186,6 +200,14 @@ void main() {
           File('build/windows/x64/runner/Release/pdfium.dll').absolute.path;
       Pdfrx.pdfiumModulePath = pdfium;
       Pdfrx.getCacheDirectory = () => Directory.systemTemp.path;
+      if (Platform.isMacOS) {
+        // The standalone test host does not link the app's PDFium framework.
+        // Set its explicit path in the PDF worker before native initialization.
+        await PdfrxEntryFunctions.instance.compute(
+          _setFixturePdfiumModulePath,
+          pdfium,
+        );
+      }
       await initializeAttachmentPdf(libraryPath: pdfium);
       final root = Directory.systemTemp.createTempSync(
         'future-notes-validation-documents-',
@@ -223,6 +245,6 @@ void main() {
         root.deleteSync(recursive: true);
       }
     },
-    skip: !Platform.isWindows,
+    skip: !nativePdfHost,
   );
 }

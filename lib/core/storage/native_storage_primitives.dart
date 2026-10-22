@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../operations/operation_result.dart';
 import 'storage_environment.dart';
+import 'desktop_posix_native.dart';
 
 /// Content and filesystem identity used for optimistic conflict checks.
 /// This is a checked read, not an atomic snapshot or a filesystem transaction.
@@ -47,6 +48,47 @@ class NativeStoragePrimitives {
   final StorageEnvironment environment;
   static const ioWindow = 1024 * 1024;
   static final _localOwners = <String>{};
+
+  /// POSIX needs directory persistence as well as a flushed file. Only newly
+  /// created directories are synced; this never reads a note or attachment.
+  /// Existing Windows/mobile creation semantics remain unchanged.
+  Future<void> prepareParent(String location) async {
+    await _verify(location);
+    if (!DesktopPosixNative.supportedHost) {
+      await File(location).parent.create(recursive: true);
+      await _verify(location);
+      return;
+    }
+    final missing = <String>[];
+    var cursor = p.dirname(location);
+    while (true) {
+      final type = await FileSystemEntity.type(cursor, followLinks: false);
+      if (type == FileSystemEntityType.directory) break;
+      if (type != FileSystemEntityType.notFound ||
+          p.dirname(cursor) == cursor) {
+        throw const FileSystemException(
+          'A regular storage directory is required.',
+        );
+      }
+      await environment.verifyLocation(cursor);
+      missing.add(cursor);
+      cursor = p.dirname(cursor);
+    }
+    final native = DesktopPosixNative();
+    for (final directory in missing.reversed) {
+      await _verify(directory);
+      await Directory(directory).create();
+      await _verify(directory);
+      native.syncDirectory(p.dirname(directory));
+    }
+    await _verify(location);
+  }
+
+  Future<void> persistParent(String location) async {
+    if (!DesktopPosixNative.supportedHost) return;
+    await _verify(location);
+    DesktopPosixNative().syncDirectory(p.dirname(location));
+  }
 
   Future<void> _verify(String location) async {
     if (!p.isAbsolute(location) || p.split(location).contains('..')) {
@@ -163,8 +205,32 @@ class NativeStoragePrimitives {
     RandomAccessFile? handle;
     var transferred = false;
     try {
-      await File(location).parent.create(recursive: true);
+      await prepareParent(location);
       await _verify(location);
+      if (DesktopPosixNative.supportedHost) {
+        if (await FileSystemEntity.type(location, followLinks: false) ==
+            FileSystemEntityType.notFound) {
+          try {
+            await File(location).create(exclusive: true);
+          } on FileSystemException {
+            // Another cooperating owner may have created the lock; the native
+            // open-description lock below decides ownership without unlinking.
+          }
+        }
+        await _verify(location);
+        if (await FileSystemEntity.type(location, followLinks: false) !=
+            FileSystemEntityType.file) {
+          throw const FileSystemException('A regular lock file is required.');
+        }
+        final native = DesktopPosixNative().lock(location);
+        transferred = true;
+        return OperationResult.success(
+          WriterLease._native(
+            native.close,
+            () => _localOwners.remove(identity),
+          ),
+        );
+      }
       handle = await File(location).open(mode: FileMode.append);
       try {
         await handle.lock(FileLock.exclusive);
@@ -177,7 +243,14 @@ class NativeStoragePrimitives {
       final lease = WriterLease._(handle, () => _localOwners.remove(identity));
       transferred = true;
       return OperationResult.success(lease);
-    } on FileSystemException {
+    } on FileSystemException catch (error) {
+      if (DesktopPosixNative.supportedHost &&
+          DesktopPosixNative.isLockBusy(error.osError?.errorCode)) {
+        return const OperationResult.failure(
+          OperationOutcome.conflict,
+          'Storage writer lease is unavailable.',
+        );
+      }
       return const OperationResult.failure(
         OperationOutcome.ioFailure,
         'Storage writer lease could not be opened.',
@@ -197,20 +270,28 @@ class NativeStoragePrimitives {
 /// Keeps the same handle locked until explicit release. Never delete lock files:
 /// unlinking them can let another writer lock a different filesystem object.
 class WriterLease {
-  WriterLease._(this._handle, this._releaseOwner);
+  WriterLease._(this._handle, this._releaseOwner) : _nativeClose = null;
+  WriterLease._native(this._nativeClose, this._releaseOwner) : _handle = null;
 
-  final RandomAccessFile _handle;
+  final RandomAccessFile? _handle;
+  final Future<void> Function()? _nativeClose;
   final void Function() _releaseOwner;
   Future<void>? _closing;
 
   Future<void> close() => _closing ??= _close();
 
   Future<void> _close() async {
+    if (_nativeClose != null) {
+      await _nativeClose();
+      _releaseOwner();
+      return;
+    }
+    final handle = _handle!;
     try {
-      await _handle.unlock();
+      await handle.unlock();
     } finally {
       // Keep ownership reserved if closing the handle fails.
-      await _handle.close();
+      await handle.close();
       _releaseOwner();
     }
   }

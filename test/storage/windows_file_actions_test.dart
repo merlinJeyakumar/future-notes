@@ -13,7 +13,7 @@ void main() {
   late String root;
   late WindowsFileActions moves;
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     root = p.join(run.path, 'library');
     await Directory(root).create();
     moves = WindowsFileActions(

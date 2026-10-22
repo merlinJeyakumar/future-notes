@@ -38,9 +38,7 @@ void main() {
     for (final path in [envelope, attachment]) {
       OwnedWriteReceipt? receipt;
       if (!verify) {
-        final run = await Directory.systemTemp.createTemp(
-          'future-notes-validation-',
-        );
+        final run = await createValidationRun();
         runs.add(run);
         final output = await OwnedStreamWriter.open('${run.path}/payload');
         await output.add(utf8.encode('new-${path.last}'));

@@ -21,7 +21,7 @@ void main() {
   late StreamingFileSource source;
   final caches = <AttachmentOpenCache>[];
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     root = await Directory(p.join(run.path, 'cache')).create();
     final binding = StorageBinding(p.join(run.path, 'library'), 0);
     note = NoteReference(

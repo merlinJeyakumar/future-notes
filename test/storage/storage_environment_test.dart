@@ -12,7 +12,7 @@ void main() {
   late String settings;
 
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     library = p.join(run.path, 'library');
     settings = p.join(run.path, 'configuration', 'settings.json');
   });

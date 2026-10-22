@@ -1,0 +1,63 @@
+{
+  "date": "2026-10-21",
+  "analysisValidation": "passed",
+  "completedDistinctReviewPasses": 10,
+  "platformsReviewed": [
+    "macOS",
+    "Linux",
+    "Android",
+    "iOS"
+  ],
+  "requirementAudit": {
+    "brokenDownAnalysis": "README G01-G13 and four detailed appendices",
+    "proposedFixes": "README stages A-G with preservation and host acceptance gates",
+    "tenValidationPasses": "validation-ledger.json IDs1-10, all completed, plus independent pass10 reviews",
+    "compatibilityClassification": "per-feature and per-pass matrices for all four targets, native unknowns/pending explicit"
+  },
+  "matchedCoreSourceAnchors": 24,
+  "reproducedStaticTestCounts": {
+    "dartTestFiles": 124,
+    "windowsSkipExpressions": 64,
+    "windowsTargetVariantExpressions": 7,
+    "driveLiterals": 32,
+    "filesWithDriveLiterals": 11
+  },
+  "jsonAndMarkdownChecks": "passed",
+  "existingChangedFilesByteIdentical": true,
+  "sourceHeadUnchanged": true,
+  "applicationCodeChangedForAnalysis": false,
+  "newNativeBuildsOrApplicationTestsRun": false,
+  "nativeRepairAcceptance": "pending implementation and actual hosts; not claimed by these review passes",
+  "resolvedAnalysisIssues": [
+    "mobile library-events source anchor corrected from line15 to14",
+    "Mac bundle identifier citation corrected from line14 to11"
+  ],
+  "remainingEvidenceLimits": [
+    "Mac audit raw event logs/exact source manifest not supplied",
+    "No Mac/Linux GUI/iOS host validation performed here",
+    "Existing Android evidence covers selected API31 workflows only"
+  ],
+  "permissionFollowup": {
+    "date": "2026-10-21",
+    "annotationIndex": 1,
+    "updated": [
+      "README.md G11 permission flow, stages and Mac gates",
+      "host-integration-review.md permission follow-up",
+      "validation-ledger.json pass9 clarification"
+    ],
+    "entitlementInspection": {
+      "macos\\Runner\\DebugProfile.entitlements": {
+        "sandbox": true,
+        "selectedFileAccessAbsent": true
+      },
+      "macos\\Runner\\Release.entitlements": {
+        "sandbox": true,
+        "selectedFileAccessAbsent": true
+      }
+    },
+    "independentSourceAndContractReview": "passed",
+    "documentationChecks": "passed",
+    "permissionImplementation": "proposed only; no application/native entitlement change",
+    "nativeMacValidation": "pending"
+  }
+}

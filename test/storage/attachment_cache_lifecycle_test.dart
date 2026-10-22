@@ -23,7 +23,7 @@ void main() {
   setUp(() async {
     decisions.clear();
     decision = DraftDecision.cancel;
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     app = OwnedAppServices(
       environment: StorageEnvironment.validation(
         validationRoot: run.path,

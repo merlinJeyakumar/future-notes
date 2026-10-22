@@ -68,7 +68,7 @@ void main() {
   late FailingCipher cipher;
   late List<String> ids;
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     app = OwnedAppServices(
       environment: StorageEnvironment.validation(
         validationRoot: run.path,

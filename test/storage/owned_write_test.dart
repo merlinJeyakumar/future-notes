@@ -8,10 +8,7 @@ import '../support/validation_directory.dart';
 
 void main() {
   late Directory run;
-  setUp(
-    () async =>
-        run = await Directory.systemTemp.createTemp('future-notes-validation-'),
-  );
+  setUp(() async => run = await createValidationRun());
   tearDown(() => deleteValidationRun(run));
   for (final verify in [false, true]) {
     test(

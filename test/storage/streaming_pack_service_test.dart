@@ -17,7 +17,7 @@ void main() {
   late Directory run;
   final encryption = EncryptionService();
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
   });
   tearDown(() => deleteValidationRun(run));
   Map<String, dynamic> metadata({bool duplicateNames = false}) => {

@@ -11,6 +11,7 @@ import 'attachment_transform_worker.dart';
 import 'streaming_file_cipher.dart';
 import 'owned_write.dart';
 import 'attachment_performance.dart';
+import 'desktop_posix_native.dart';
 
 typedef AttachmentSourceResolver =
     Future<StreamingFileSource> Function(NoteReference reference, String id);
@@ -97,6 +98,7 @@ class AttachmentOpenCache {
   final _ownedFiles = <String>{};
   Directory? _session;
   RandomAccessFile? _lease;
+  DesktopPosixLease? _desktopLease;
   Future<void>? _initialization;
   bool _closed = false;
   Future<void> _manifestTail = Future.value();
@@ -131,8 +133,10 @@ class AttachmentOpenCache {
   ) async {
     try {
       await _lease?.close();
+      await _desktopLease?.close();
     } catch (_) {}
     _lease = null;
+    _desktopLease = null;
     _session = null;
     _initialization = null;
     Error.throwWithStackTrace(error, stack);
@@ -151,12 +155,17 @@ class AttachmentOpenCache {
     await for (final entity in root.list(followLinks: false)) {
       if (entity is! Directory || !_uuid(p.basename(entity.path))) continue;
       RandomAccessFile? lease;
+      DesktopPosixLease? desktopLease;
       try {
         await _safe(entity.path);
         final leaseFile = File(p.join(entity.path, 'owner.lease'));
         if (!await leaseFile.exists()) continue;
-        lease = await leaseFile.open(mode: FileMode.append);
-        await lease.lock(FileLock.exclusive);
+        if (DesktopPosixNative.supportedHost) {
+          desktopLease = DesktopPosixNative().lock(leaseFile.path);
+        } else {
+          lease = await leaseFile.open(mode: FileMode.append);
+          await lease.lock(FileLock.exclusive);
+        }
         final manifest = File(p.join(entity.path, 'cleanup.json'));
         await _safe(manifest.path);
         final names = <String>{};
@@ -194,6 +203,9 @@ class AttachmentOpenCache {
       } catch (_) {
         /* Other owner, sharing violation or unknown manifest. */
       } finally {
+        try {
+          await desktopLease?.close();
+        } catch (_) {}
         if (lease != null) {
           try {
             await lease.close();
@@ -204,10 +216,16 @@ class AttachmentOpenCache {
     final session = Directory(p.join(root.path, const Uuid().v4()));
     await session.create();
     _session = session;
-    _lease = await File(
-      p.join(session.path, 'owner.lease'),
-    ).open(mode: FileMode.append);
-    await _lease!.lock(FileLock.exclusive);
+    if (DesktopPosixNative.supportedHost) {
+      final file = File(p.join(session.path, 'owner.lease'));
+      await file.create(exclusive: true);
+      _desktopLease = DesktopPosixNative().lock(file.path);
+    } else {
+      _lease = await File(
+        p.join(session.path, 'owner.lease'),
+      ).open(mode: FileMode.append);
+      await _lease!.lock(FileLock.exclusive);
+    }
     await _manifest();
   }
 
@@ -511,7 +529,9 @@ class AttachmentOpenCache {
       await _removeOwned(path);
     }
     await _lease?.close();
+    await _desktopLease?.close();
     _lease = null;
+    _desktopLease = null;
     return CacheCleanupResult(_ownedFiles.length);
   }
 }

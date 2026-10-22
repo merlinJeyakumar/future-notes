@@ -9,7 +9,7 @@ import 'package:flutter_application_1/core/storage/owned_stream_writer.dart';
 void main() {
   late Directory root;
   setUp(() async {
-    root = await Directory.systemTemp.createTemp('future-notes-validation-');
+    root = await createValidationRun();
   });
   tearDown(() async {
     await deleteValidationRun(root);

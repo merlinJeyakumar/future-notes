@@ -18,7 +18,7 @@ void main() {
   late StorageEnvironment environment;
   late List<StorageOwnerWorker> workers;
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     root = p.join(run.path, 'library');
     environment = StorageEnvironment.validation(
       validationRoot: run.path,

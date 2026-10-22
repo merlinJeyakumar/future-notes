@@ -472,7 +472,7 @@ Future<T> _joinLibraryOperation<T>(
 
 class _Fixture {
   _Fixture() {
-    run = Directory.systemTemp.createTempSync('future-notes-validation-');
+    run = createValidationRunSync();
     originalRoot = p.join(run.path, 'library');
     nextRoot = p.join(run.path, 'other');
     final environment = StorageEnvironment.validation(

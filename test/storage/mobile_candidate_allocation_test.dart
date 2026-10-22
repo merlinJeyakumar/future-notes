@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_application_1/core/platform/library_documents.dart';
 import 'package:flutter_application_1/core/platform/mobile_library_documents.dart';
@@ -33,9 +32,7 @@ void main() {
   test(
     'concurrent first-file candidates share one folder without payload reads',
     () async {
-      final run = await Directory.systemTemp.createTemp(
-        'future-notes-validation-',
-      );
+      final run = await createValidationRun();
       final docs = _Documents();
       const library = LibraryLocation(
         kind: LibraryLocationKind.appleBookmark,

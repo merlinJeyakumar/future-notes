@@ -12,7 +12,7 @@ void main() {
   late Directory run;
   final destinations = <String>[];
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     destinations.clear();
   });
   tearDown(() async {

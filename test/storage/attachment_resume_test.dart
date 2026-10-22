@@ -122,7 +122,7 @@ void main() {
   late StorageEnvironment environment;
   late StorageOwnerWorker worker;
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     environment = StorageEnvironment.validation(
       validationRoot: run.path,
       dataRoot: '${run.path}/library',

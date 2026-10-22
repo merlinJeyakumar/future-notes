@@ -17,7 +17,7 @@ void main() {
   late String library;
 
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     library = p.join(run.path, 'library');
     settings = SettingsService.withStorage(
       storage: StorageEnvironment.validation(

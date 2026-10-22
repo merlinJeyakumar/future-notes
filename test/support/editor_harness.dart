@@ -71,7 +71,7 @@ class EditorHarness {
   }) async {
     // Widget tests run in fake async. Synchronous creation of this empty,
     // disposable directory avoids an OS future that fake async cannot resolve.
-    final run = Directory.systemTemp.createTempSync('future-notes-validation-');
+    final run = createValidationRunSync();
     final library = p.join(run.path, 'library');
     final settings = SettingsService.withStorage(
       storage: StorageEnvironment.validation(

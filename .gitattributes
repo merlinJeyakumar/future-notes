@@ -1,2 +1,3 @@
 # Preserve synthetic Office/PDF fixtures byte-for-byte, including PDF xref offsets.
 /test/fixtures/documents/* binary
+/tools/build-desktop-office.sh text eol=lf

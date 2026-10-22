@@ -14,14 +14,15 @@ import 'recoverable_store.dart';
 import 'storage_environment.dart';
 import 'storage_owner_worker.dart';
 import 'attachment_transform_worker.dart';
+import 'desktop_storage_host.dart';
 
 /// Injected library owner. Exact references carry both their
 /// observed revision and worker capability; no mutable settings are consulted.
 class OwnedNotePersistence {
   OwnedNotePersistence({required this.environment, required this.owner}) {
-    if (!environment.hasOwnedStorage || !Platform.isWindows) {
+    if (!environment.hasOwnedStorage || !isOwnedDesktopHost) {
       throw ArgumentError(
-        'Owned notes require explicitly bound Windows storage.',
+        'Owned notes require explicitly bound desktop storage.',
       );
     }
   }

@@ -49,9 +49,7 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
-      final run = Directory.systemTemp.createTempSync(
-        'future-notes-validation-',
-      );
+      final run = createValidationRunSync();
       final app = OwnedAppServices(
         environment: StorageEnvironment.validation(
           validationRoot: run.path,

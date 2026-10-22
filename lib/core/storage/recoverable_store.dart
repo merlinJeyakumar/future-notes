@@ -7,9 +7,13 @@ import 'package:path/path.dart' as p;
 
 import '../operations/operation_result.dart';
 import 'commit_record.dart';
+import 'desktop_posix_native.dart';
 import 'native_storage_primitives.dart';
 import 'permanent_deletion.dart';
 import 'storage_environment.dart';
+import 'desktop_storage_host.dart';
+import 'desktop_storage_admission.dart';
+import 'storage_file_actions_factory.dart';
 import 'windows_file_actions.dart';
 import 'owned_write.dart';
 
@@ -81,6 +85,7 @@ class RecoverableStore {
     this._lease,
     this._fault,
     this._identity,
+    this._caseSensitive,
   );
 
   final String root;
@@ -90,6 +95,7 @@ class RecoverableStore {
   final WriterLease _lease;
   final CommitFaultHook? _fault;
   final String Function() _identity;
+  final bool _caseSensitive;
   final _blocked = <String>{};
   final _deletedTransactions = <String>{};
   final _pendingDeletions = <String, DeletionIntent>{};
@@ -126,13 +132,13 @@ class RecoverableStore {
   }) async {
     // Refuse before any I/O; root admission never follows mutable settings.
     if (!environment.hasOwnedStorage ||
-        !Platform.isWindows ||
+        !isOwnedDesktopHost ||
         !p.isAbsolute(root) ||
         p.split(root).contains('..') ||
         !environment.permitsOwnerRoot(root)) {
       return const OperationResult.failure(
         OperationOutcome.rejectedInput,
-        'Recoverable storage requires an explicitly admitted Windows location.',
+        'Recoverable storage requires an explicitly admitted desktop location.',
       );
     }
     WriterLease? lease;
@@ -147,14 +153,19 @@ class RecoverableStore {
         return OperationResult.failure(acquired.outcome, acquired.message);
       }
       lease = acquired.value!;
+      final caseSensitive = await DesktopStorageAdmission.verify(
+        root,
+        environment,
+      );
       final store = RecoverableStore._(
         p.normalize(root),
         environment,
-        fileActions ?? WindowsFileActions(root: root, environment: environment),
+        fileActions ?? storageFileActions(root: root, environment: environment),
         primitives,
         lease,
         faultHook,
         transactionIdentity ?? _newIdentity,
+        caseSensitive,
       );
       await store._recover();
       return OperationResult.success(store);
@@ -453,7 +464,7 @@ class RecoverableStore {
         written: CommitBoundary.intentWritten,
         flushed: CommitBoundary.intentFlushed,
       );
-      if (CommitRecord.decode(
+      if (CommitRecord.decodeDesktopCompatible(
             await _readSmall(await _location(record.recordPath)),
           ).encode() !=
           record.encode()) {
@@ -563,7 +574,9 @@ class RecoverableStore {
           continue;
         }
         try {
-          final record = CommitRecord.decode(await _readSmall(entry.path));
+          final record = CommitRecord.decodeDesktopCompatible(
+            await _readSmall(entry.path),
+          );
           if (name != '${record.transactionId}.json') {
             throw const FormatException();
           }
@@ -703,9 +716,18 @@ class RecoverableStore {
         await _copy(previous, restoredStage, prior, record.transactionId);
         // Preserve the captured filesystem revision so recovery can resume if
         // interrupted after restoration but before its resolution receipt.
-        await File(restoredStage).setLastModified(
-          DateTime.fromMicrosecondsSinceEpoch(record.expected.modifiedMicros!),
-        );
+        if (Platform.isMacOS) {
+          DesktopPosixNative().setLastModifiedMicros(
+            restoredStage,
+            record.expected.modifiedMicros!,
+          );
+        } else {
+          await File(restoredStage).setLastModified(
+            DateTime.fromMicrosecondsSinceEpoch(
+              record.expected.modifiedMicros!,
+            ),
+          );
+        }
         if (!(await _primitives.captureRevision(
           restoredStage,
         )).matches(record.expected)) {
@@ -781,7 +803,7 @@ class RecoverableStore {
             encoded) {
       throw const FormatException('Invalid baseline receipt.');
     }
-    final original = CommitRecord.decode(
+    final original = CommitRecord.decodeDesktopCompatible(
       await _readSmall(
         await _location(
           '.future-notes-storage/transactions/${proof['transactionId']}.json',
@@ -933,6 +955,7 @@ class RecoverableStore {
     } finally {
       await handle.close();
     }
+    await _primitives.persistParent(location);
     if (await _readSmall(location) != value) {
       throw const _Changed();
     }
@@ -992,9 +1015,7 @@ class RecoverableStore {
   }
 
   Future<void> _parent(String location) async {
-    await environment.verifyLocation(location);
-    await File(location).parent.create(recursive: true);
-    await environment.verifyLocation(location);
+    await _primitives.prepareParent(location);
   }
 
   Future<void> _move(String source, String destination) async {
@@ -1027,8 +1048,7 @@ class RecoverableStore {
     ).join();
   }
 
-  static String _key(String target) =>
-      Platform.isWindows ? target.toLowerCase() : target;
+  String _key(String target) => _caseSensitive ? target : target.toLowerCase();
   static bool _sameContent(StorageRevision a, StorageRevision b) =>
       a.exists == b.exists &&
       a.length == b.length &&

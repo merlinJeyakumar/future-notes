@@ -1,0 +1,41 @@
+{
+  "pass": 10,
+  "reviewMode": "read-only independent adversarial review",
+  "reviews": [
+    {
+      "area": "storage/native recovery",
+      "result": "No material corrections after independent source recheck",
+      "checks": [
+        "completed-baseline payload reads",
+        "Windows move flags",
+        "mobile-only POSIX guard",
+        "path/isolate leases",
+        "Windows-authored journal identity",
+        "Swift typed error mismatch"
+      ]
+    },
+    {
+      "area": "mobile/data policy",
+      "result": "No material corrections",
+      "checks": [
+        "Android bounded evidence vs all-API claim",
+        "iOS admission and sharing target wiring",
+        "finite UIKit runtime",
+        "default-off policy",
+        "receipt/fallback/cache preservation"
+      ]
+    },
+    {
+      "area": "packaging/tests",
+      "result": "No material corrections; one citation-only correction applied",
+      "checks": [
+        "SDK and lock floors",
+        "native artifact claims",
+        "Linux sharing/media limits",
+        "static-expression vs test-instance counts",
+        "AppInfo bundle ID citation corrected from line14 to11"
+      ]
+    }
+  ],
+  "applicationEdits": false
+}

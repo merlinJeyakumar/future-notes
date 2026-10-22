@@ -1,0 +1,22 @@
+[
+  {
+    "path": "RULESBOOK.md",
+    "sha256": "e51c6ca37d49a56af071c653ad9ac5ca9a44fbcb42c3a2e1f300a889ceae515a"
+  },
+  {
+    "path": "lib/features/dashboard/viewmodels/content_viewmodel.dart",
+    "sha256": "948042189871b980799aab5130677debb77184bf14a3c6613bfd5e37950ba066"
+  },
+  {
+    "path": "linux/flutter/generated_plugin_registrant.h",
+    "sha256": "00f93bb5b1faefdede8f6065df327522900fb0b8efee86bacf424fd947ed14bb"
+  },
+  {
+    "path": "windows/flutter/generated_plugin_registrant.h",
+    "sha256": "dbc11635d7b1ba1887adf40df5b83d634e9c3ab0bee34510c71528bb4d73602a"
+  },
+  {
+    "path": "test/mobile_shared_protection_test.dart",
+    "sha256": "8f47ebcb3421d91a71f398e4dbff353ffeae6c3c067e748de3f9909884993000"
+  }
+]

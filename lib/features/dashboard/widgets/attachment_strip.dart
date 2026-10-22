@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../../core/platform/directory_attachment_export.dart';
+import '../../../core/platform/macos_file_access.dart';
 import '../../../core/operations/operation_result.dart';
 import '../models/attachment_job.dart';
 import '../models/note_model.dart';
@@ -804,10 +805,16 @@ class _AttachmentGalleryState extends State<_AttachmentGallery> {
       _actionError = null;
     });
     DirectoryAttachmentExport? output;
+    MacosPathGrant? directoryAccess;
     try {
-      final parent = await FilePicker.platform.getDirectoryPath(
-        dialogTitle: 'Choose folder for selected attachments',
-      );
+      if (Platform.isMacOS) {
+        directoryAccess = await const MacosFileAccess().chooseExportDirectory();
+      }
+      final parent = Platform.isMacOS
+          ? directoryAccess?.path
+          : await FilePicker.platform.getDirectoryPath(
+              dialogTitle: 'Choose folder for selected attachments',
+            );
       if (parent == null || !_current()) return;
       output = await DirectoryAttachmentExport.create(parent);
       if (!_current()) return;
@@ -838,6 +845,7 @@ class _AttachmentGalleryState extends State<_AttachmentGallery> {
         );
     } finally {
       await output?.cleanup(const []);
+      await directoryAccess?.close();
       if (mounted) setState(() => _busy = false);
     }
   }

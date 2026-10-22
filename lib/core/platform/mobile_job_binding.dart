@@ -14,7 +14,12 @@ import '../storage/attachment_scheduler.dart';
 /// One UI binding to the application-owned native job host. It observes existing
 /// jobs and forwards cancellation to their existing coordinator.
 class MobileJobBinding {
-  MobileJobBinding(this.model, {this.onNotification, this.additional}) {
+  MobileJobBinding(
+    this.model, {
+    this.onNotification,
+    this.additional,
+    String? operatingSystem,
+  }) : _operatingSystem = operatingSystem ?? Platform.operatingSystem {
     _owner = this;
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'memoryPressure') {
@@ -58,7 +63,9 @@ class MobileJobBinding {
         await _cancelSafeJobs();
         if (call.method == 'timeout')
           _report(
-            'Android ended this background-processing window. Reopen the app to recover or retry unfinished work.',
+            Platform.isAndroid
+                ? 'Android ended this background-processing window. Reopen the app to recover or retry unfinished work.'
+                : 'The system ended this background-processing window. Reopen the app to recover or retry unfinished work.',
           );
       }
     });
@@ -69,6 +76,7 @@ class MobileJobBinding {
   static const _channel = MethodChannel('future_notes/jobs');
   final ContentViewModel model;
   final AdditionalMobileJobs? additional;
+  final String _operatingSystem;
   final allJobs = ValueNotifier<List<AttachmentJobState>>([]);
   Future<void> cancel(String id) =>
       additional?.jobs.value.any((j) => j.progress.value.id == id) == true
@@ -112,7 +120,10 @@ class MobileJobBinding {
   }
 
   Future<void> _takeNotification() async {
-    if (_closed || !_ready || !Platform.isAndroid) return;
+    if (_closed ||
+        !_ready ||
+        (_operatingSystem != 'android' && _operatingSystem != 'ios'))
+      return;
     try {
       final id = await _channel.invokeMethod<String>('takeNotification');
       if (!_closed && id != null) onNotification?.call(id);

@@ -27,9 +27,7 @@ void main() {
   test(
     'unchanged mobile packages reuse the owned file; edits/options/lock invalidate reuse',
     () async {
-      final run = await Directory.systemTemp.createTemp(
-        'future-notes-validation-',
-      );
+      final run = await createValidationRun();
       final cache = await Directory(p.join(run.path, 'cache')).create();
       const paths = MethodChannel('plugins.flutter.io/path_provider');
       final messenger =

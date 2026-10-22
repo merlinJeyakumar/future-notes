@@ -435,7 +435,7 @@ class _FilterJob {
 
 class _Fixture {
   _Fixture({bool metadata = false}) {
-    run = Directory.systemTemp.createTempSync('future-notes-validation-');
+    run = createValidationRunSync();
     environment = StorageEnvironment.validation(
       validationRoot: run.path,
       dataRoot: p.join(run.path, 'library'),

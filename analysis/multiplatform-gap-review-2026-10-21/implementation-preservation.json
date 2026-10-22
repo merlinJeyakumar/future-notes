@@ -1,0 +1,28 @@
+{
+  "existingDirtyFiles": [
+    {
+      "path": "RULESBOOK.md",
+      "preserved": true
+    },
+    {
+      "path": "linux/flutter/generated_plugin_registrant.h",
+      "preserved": true
+    },
+    {
+      "path": "windows/flutter/generated_plugin_registrant.h",
+      "preserved": true
+    },
+    {
+      "path": "test/mobile_shared_protection_test.dart",
+      "preserved": true
+    }
+  ],
+  "pendingSharedProtectionFixRetained": true,
+  "dependencyLockUnchanged": true,
+  "branch": "development",
+  "head": "a5be98cd520d501eb8f31e19bacb7bcd4cc8f4e6",
+  "notesInspectedOrMutated": false,
+  "publishedReleasesChanged": false,
+  "committed": false,
+  "pushed": false
+}

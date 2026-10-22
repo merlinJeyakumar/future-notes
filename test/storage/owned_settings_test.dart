@@ -110,7 +110,7 @@ void main() {
   );
 
   setUp(() async {
-    run = await Directory.systemTemp.createTemp('future-notes-validation-');
+    run = await createValidationRun();
     environment = StorageEnvironment.validation(
       validationRoot: run.path,
       dataRoot: p.join(run.path, 'library'),

@@ -74,12 +74,19 @@ class _ContentAreaState extends State<ContentArea> {
     if (_findOpen || !mounted || viewModel.isLocked) return;
     _findOpen = true;
     final controller = viewModel.quillController;
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final route = DialogRoute<void>(
+      context: context,
+      themes: InheritedTheme.capture(from: context, to: navigator.context),
+      barrierColor: Colors.transparent,
+      traversalEdgeBehavior: TraversalEdgeBehavior.closedLoop,
+      builder: (_) => MacosNoteFindDialog(controller: controller),
+    );
     try {
-      await showDialog<void>(
-        context: context,
-        barrierColor: Colors.transparent,
-        builder: (_) => MacosNoteFindDialog(controller: controller),
-      );
+      await navigator.push(route);
+      // The pop result precedes overlay removal. Restore the editor only once
+      // the dialog's focus scope has finished its exit transition.
+      await route.completed;
     } finally {
       _findOpen = false;
       if (mounted && identical(viewModel.quillController, controller)) {

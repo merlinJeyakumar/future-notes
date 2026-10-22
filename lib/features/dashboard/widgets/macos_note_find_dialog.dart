@@ -3,8 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 
-/// The Mac Find input keeps focus when the platform submits a search.
-/// Quill's default input treats submission as Done and unfocuses the field.
+/// Mac Find accepts the highlighted match on Enter before returning to editing.
 class MacosNoteFindDialog extends StatefulWidget {
   const MacosNoteFindDialog({super.key, required this.controller});
 
@@ -88,7 +87,8 @@ class _MacosNoteFindDialogState extends State<MacosNoteFindDialog> {
     if (_text.value.composing.isValid && !_text.value.composing.isCollapsed) {
       return;
     }
-    _move(1);
+    if (_searchTimer?.isActive ?? false) _find();
+    if (_offsets.isNotEmpty) Navigator.of(context).pop();
   }
 
   @override

@@ -17,17 +17,28 @@ void main() {
       MaterialApp(
         localizationsDelegates:
             FlutterQuillLocalizations.localizationsDelegates,
-        home: Scaffold(body: MacosNoteFindDialog(controller: controller)),
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (_) => MacosNoteFindDialog(controller: controller),
+              ),
+              child: const Text('Open Find'),
+            ),
+          ),
+        ),
       ),
     );
+    await tester.tap(find.text('Open Find'));
     await tester.pumpAndSettle();
     return tester.widget<EditableText>(find.byType(EditableText));
   }
 
-  testWidgets('Done keeps focus and cycles matches without editing the note', (
+  testWidgets('Enter accepts the highlighted match without editing the note', (
     tester,
   ) async {
-    final field = await openFind(tester);
+    await openFind(tester);
     final original = controller.document.toDelta();
     tester.testTextInput.enterText('alpha');
     await tester.pump(const Duration(milliseconds: 350));
@@ -36,12 +47,14 @@ void main() {
       const TextSelection(baseOffset: 0, extentOffset: 5),
     );
     for (final offset in [6, 12, 0]) {
-      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.tap(find.byIcon(Icons.keyboard_arrow_down));
       await tester.pump();
-      expect(field.focusNode.hasFocus, isTrue);
-      expect(field.controller.text, 'alpha');
       expect(controller.selection.baseOffset, offset);
     }
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.byType(MacosNoteFindDialog), findsNothing);
+    expect(controller.selection.baseOffset, 0);
     expect(controller.document.toDelta(), original);
   });
 
@@ -50,8 +63,7 @@ void main() {
   ) async {
     final field = await openFind(tester);
     tester.testTextInput.enterText('alpha');
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
     expect(controller.selection.baseOffset, 0);
     expect(controller.selection.extentOffset, 5);
     tester.testTextInput.enterText('alphabet');
@@ -67,6 +79,12 @@ void main() {
       expect(field.controller.text, query);
       expect(controller.selection.isCollapsed, isTrue);
     }
+    tester.testTextInput.enterText('alphabet');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.byType(MacosNoteFindDialog), findsNothing);
+    expect(controller.selection.baseOffset, 12);
+    expect(controller.selection.extentOffset, 20);
     expect(tester.takeException(), isNull);
   });
 

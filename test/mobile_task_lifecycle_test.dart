@@ -9,6 +9,45 @@ import 'package:flutter_application_1/features/dashboard/models/attachment_job.d
 import 'support/editor_harness.dart';
 
 void main() {
+  testWidgets('only mobile hosts take a pending native job notification', (
+    tester,
+  ) async {
+    const channel = MethodChannel('future_notes/jobs');
+    for (final platform in ['ios', 'android', 'macos']) {
+      final h = await EditorHarness.create();
+      final calls = <String>[];
+      String? opened;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call.method);
+            if (call.method == 'interruptedJobs') return '[]';
+            if (call.method == 'takeNotification') return '$platform-job';
+            return null;
+          });
+      final binding = MobileJobBinding(
+        h.editor,
+        operatingSystem: platform,
+        onNotification: (id) => opened = id,
+      );
+      await binding.interrupted;
+      await tester.pump();
+      try {
+        if (platform == 'macos') {
+          expect(opened, isNull);
+          expect(calls, isNot(contains('takeNotification')));
+        } else {
+          expect(opened, '$platform-job');
+          expect(calls, contains('takeNotification'));
+        }
+      } finally {
+        binding.dispose();
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+        await tester.runAsync(h.dispose);
+      }
+    }
+  });
+
   testWidgets(
     'removing an active job clears its open-panel progress snapshot',
     (tester) async {

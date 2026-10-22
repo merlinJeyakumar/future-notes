@@ -5,23 +5,28 @@ A local-first Flutter notes application. The Dart package name remains
 
 ## Toolchain baseline
 
-Use the pinned Flutter SDK before resolving dependencies, analyzing, testing or
-building. `.flutter-version` records the release; the complete baseline is:
+The `codex/apple-monterey-compat` branch uses a separate Apple compatibility
+baseline for the current Intel Mac running macOS Monterey. Before resolving
+dependencies, analyzing, testing or building this branch, use:
 
-| Component | Pinned value |
+| Component | Apple/Monterey value |
 | --- | --- |
-| Flutter | `3.41.5` (stable) |
-| Framework revision | `2c9eb20739dfec95e2c74bd3dfa4601b0a8a36aa` |
-| Bundled Dart | `3.11.3` |
+| Flutter | `3.38.3` |
+| Framework revision | `19074d12f7eaf6a8180cd4036a430c1d76de904e` |
+| Bundled Dart | `3.10.1` |
 
 Run `flutter --version --machine` and check `frameworkVersion`,
-`frameworkRevision` and `dartSdkVersion` against this table. Configure the same
-SDK in the editor and on build hosts; do not substitute an older SDK or temporary
-API shims. The resolved lock requires Dart `>=3.11.0`; the package SDK constraint
-now reflects that floor. The exact build baseline remains Dart `3.11.3`.
+`frameworkRevision` and `dartSdkVersion` against this table. `.flutter-version`
+records this branch-specific Flutter release, and the package SDK constraint
+allows its bundled Dart SDK.
 
-Keep `pubspec.lock` and the pinned dependency versions unchanged when setting up
-a host:
+The accepted Windows/Android parent branch remains pinned separately to Flutter
+`3.41.5`, framework revision
+`2c9eb20739dfec95e2c74bd3dfa4601b0a8a36aa`, and Dart `3.11.3`. This Apple
+compatibility branch does not change that accepted baseline.
+
+Keep `pubspec.lock` and the pinned dependency versions unchanged after resolving
+the approved Apple compatibility lock on this branch:
 
 ```sh
 flutter pub get --enforce-lockfile

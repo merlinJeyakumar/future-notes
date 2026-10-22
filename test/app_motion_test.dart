@@ -1,3 +1,6 @@
+import 'dart:ui';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_application_1/core/theme/app_dialog.dart';
@@ -237,23 +240,177 @@ void main() {
     },
   );
 
-  testWidgets('app tooltip retains Material semantics and calibrated motion', (
+  testWidgets(
+    'app tooltip keeps semantics, themed placement, hover timing and rebuild state',
+    (tester) async {
+      const message = 'Synthetic filename';
+      const waitDuration = Duration(milliseconds: 200);
+      const decoration = BoxDecoration(color: Color(0xff123456));
+      final focus = FocusNode();
+      addTearDown(focus.dispose);
+      late StateSetter rebuild;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(
+            tooltipTheme: const TooltipThemeData(
+              decoration: decoration,
+              textStyle: TextStyle(color: Color(0xffabcdef)),
+              preferBelow: false,
+              verticalOffset: 18,
+            ),
+          ),
+          home: Scaffold(
+            body: Center(
+              child: StatefulBuilder(
+                builder: (context, setState) {
+                  rebuild = setState;
+                  return AppTooltip(
+                    message: message,
+                    waitDuration: waitDuration,
+                    showDuration: const Duration(milliseconds: 400),
+                    child: SizedBox(
+                      width: 180,
+                      child: TextField(
+                        focusNode: focus,
+                        decoration: const InputDecoration(
+                          labelText: 'Hover file',
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byTooltip(message), findsOneWidget);
+      final tooltipState = tester.state<TooltipState>(find.byType(AppTooltip));
+      final fieldState = tester.state(find.byType(TextField));
+      focus.requestFocus();
+      await tester.pump();
+      expect(focus.hasFocus, isTrue);
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(tester.getCenter(find.byType(AppTooltip)));
+      await tester.pump();
+      await tester.pump(waitDuration - const Duration(milliseconds: 1));
+      expect(find.text(message), findsNothing);
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pump(const Duration(milliseconds: 150));
+      expect(find.text(message), findsOneWidget);
+
+      final tooltipText = tester.widget<Text>(find.text(message));
+      expect(tooltipText.style?.color, const Color(0xffabcdef));
+      final tooltipContainer = find
+          .ancestor(of: find.text(message), matching: find.byType(Container))
+          .first;
+      expect(tester.widget<Container>(tooltipContainer).decoration, decoration);
+      final targetCenter = tester.getCenter(find.byType(AppTooltip));
+      final tooltipBox = tester.renderObject<RenderBox>(tooltipContainer);
+      expect(
+        tooltipBox.localToGlobal(tooltipBox.size.center(Offset.zero)).dy,
+        lessThan(targetCenter.dy),
+      );
+
+      rebuild(() {});
+      await tester.pump();
+      expect(
+        tester.state<TooltipState>(find.byType(AppTooltip)),
+        same(tooltipState),
+      );
+      expect(tester.state(find.byType(TextField)), same(fieldState));
+      expect(focus.hasFocus, isTrue);
+
+      await mouse.moveTo(Offset.zero);
+      await tester.pump(const Duration(milliseconds: 99));
+      expect(find.text(message), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.text(message), findsNothing);
+    },
+  );
+
+  testWidgets('app tooltip honors configured touch show duration', (
     tester,
   ) async {
+    const message = 'Touch tooltip';
+    const showDuration = Duration(milliseconds: 300);
     await tester.pumpWidget(
       const MaterialApp(
         home: Scaffold(
-          body: AppTooltip(
-            message: 'Synthetic filename',
-            child: Text('Hover file'),
+          body: Center(
+            child: AppTooltip(
+              message: message,
+              showDuration: showDuration,
+              child: Text('Press target'),
+            ),
           ),
         ),
       ),
     );
-    expect(find.byTooltip('Synthetic filename'), findsOneWidget);
-    final raw = tester.widget<RawTooltip>(find.byType(RawTooltip));
-    expect(raw.semanticsTooltip, 'Synthetic filename');
-    expect(raw.animationStyle.duration, AppMotion.quickIn);
-    expect(raw.animationStyle.reverseDuration, AppMotion.quickOut);
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(AppTooltip)),
+    );
+    await tester.pump(kLongPressTimeout);
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(find.text(message), findsOneWidget);
+    await gesture.up();
+    await tester.pump(showDuration - const Duration(milliseconds: 1));
+    expect(find.text(message), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pumpAndSettle();
+    expect(find.text(message), findsNothing);
+  });
+
+  testWidgets('app tooltip settles quickly for platform reduced motion', (
+    tester,
+  ) async {
+    const message = 'Reduced tooltip';
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAllTestValues);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: AppTooltip(
+              message: message,
+              waitDuration: Duration.zero,
+              child: SizedBox(width: 100, height: 40),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(tester.getCenter(find.byType(AppTooltip)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(find.text(message), findsOneWidget);
+    final fade = tester.widget<FadeTransition>(
+      find
+          .ancestor(
+            of: find.text(message),
+            matching: find.byType(FadeTransition),
+          )
+          .first,
+    );
+    expect(fade.opacity.value, 1);
+
+    await mouse.moveTo(Offset.zero);
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 4));
+    expect(find.text(message), findsNothing);
   });
 }

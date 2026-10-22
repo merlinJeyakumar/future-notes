@@ -67,9 +67,33 @@ void main() {
             }
 
             await searchShortcut();
-            if (!Platform.isMacOS && fromEditor) {
-              // Preserve the accepted Windows editor-local Find dialog.
-              expect(find.byType(ModalBarrier), findsWidgets);
+            if (fromEditor) {
+              // Find inside the note owns its input, without a mouse click.
+              final searchRow = find.ancestor(
+                of: find.byIcon(Icons.keyboard_arrow_up),
+                matching: find.byType(Row),
+              );
+              final input = find.descendant(
+                of: searchRow,
+                matching: find.byType(EditableText),
+              );
+              expect(input, findsOneWidget);
+              final field = tester.widget<EditableText>(input);
+              expect(field.focusNode.hasFocus, isTrue);
+              tester.testTextInput.enterText('synthetic query');
+              await tester.pump(const Duration(milliseconds: 500));
+              expect(field.controller.text, 'synthetic query');
+              expect(field.focusNode.hasFocus, isTrue);
+              await tester.tap(
+                find.descendant(
+                  of: searchRow,
+                  matching: find.byIcon(Icons.close),
+                ),
+              );
+              await tester.pump();
+              await tester.pump(const Duration(milliseconds: 350));
+              await tester.pump();
+              expect(area.viewModel.focusNode.hasFocus, isTrue);
               expect(area.viewModel.quillController.document, same(document));
               expect(h.files.writeAttempts, 0);
               expect(tester.takeException(), isNull);

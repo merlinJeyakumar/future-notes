@@ -135,6 +135,18 @@ For runtime features, verify visible startup, logs, error handling, latency, res
 
 If validation fails, stop dependent actions, report the exact command and failure, diagnose the cause, and make narrowly scoped corrections within the already authorized task. Rerun only the relevant failed gate without requesting repeated approval. Ask before proceeding only when the correction crosses an approval boundary above, enables an unvalidated replacement on real data, or materially changes scope or risk. Preserve the last validated path. If a required check cannot run, state the reason and mark the work as pending validation.
 
+## Release assets and preservation
+
+Future releases must publish only these three application downloads:
+
+- Android: the protected APK directly, without an additional ZIP wrapper.
+- macOS: the DMG directly, without an additional ZIP wrapper.
+- Windows: one ZIP containing the complete protected portable folder, including the EXE, DLLs, data, runtimes, licenses and instructions needed to run it.
+
+Do not upload loose Windows files, downloader scripts, checksums, manifests or provenance as additional release assets. Include supporting files inside the appropriate package or provide checksums and provenance in the release description. GitHub-generated source archives are separate from these uploaded application assets. Validate package contents and the final uploaded asset inventory before declaring the release complete.
+
+Preserve all existing releases, their assets and existing tags. A new release or promotion does not authorize deleting older releases, pruning older local release builds, replacing existing release assets, or moving, overwriting or deleting tags. Perform such cleanup only when the user explicitly requests that specific change. Preserve notes and unrelated files throughout.
+
 ## Existing validation limitations
 
 These observations come from source inspection when this rulesbook was created; recheck them before relying on them:

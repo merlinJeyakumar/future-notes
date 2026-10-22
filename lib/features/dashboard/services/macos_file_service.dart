@@ -116,6 +116,13 @@ class MacosFileService extends FileService implements PickedSourceOwner {
   Future<FilePickerResult?> pickAttachments() => _pick(multiple: true);
 
   @override
+  Future<List<String>> getRecentFiles() async => (await super.getRecentFiles())
+      // Finder bookkeeping is not a note envelope. Exclude it before UID
+      // resolution so binary metadata never enters owned note reads.
+      .where((name) => name != '.DS_Store' && !name.startsWith('._'))
+      .toList();
+
+  @override
   String? sourceDisplayName(String path) => _inputs[path]?.first.name;
 
   @override

@@ -3,6 +3,7 @@ import '../../../core/theme/app_dialog.dart';
 import '../models/save_ui_state.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import '../viewmodels/content_viewmodel.dart';
 import 'attachment_job_panel.dart';
@@ -37,6 +38,10 @@ class _ContentColors {
   Color get textSecondary => theme.appTextSecondary;
 }
 
+class _SearchNotesIntent extends Intent {
+  const _SearchNotesIntent();
+}
+
 class ContentArea extends StatefulWidget {
   final ContentViewModel viewModel;
 
@@ -44,8 +49,11 @@ class ContentArea extends StatefulWidget {
     super.key,
     required this.viewModel,
     this.onBackgroundTasks,
+    this.onSearchNotes,
   });
   final VoidCallback? onBackgroundTasks;
+  // Supplied only by the Mac dashboard; other platforms retain editor Find.
+  final VoidCallback? onSearchNotes;
 
   @override
   State<ContentArea> createState() => _ContentAreaState();
@@ -119,6 +127,22 @@ class _ContentAreaState extends State<ContentArea> {
       // Optimization: Disable some heavy features if not needed
       enableInteractiveSelection: true,
       enableSelectionToolbar: true,
+      customShortcuts: widget.onSearchNotes == null
+          ? null
+          : const {
+              SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+                  _SearchNotesIntent(),
+            },
+      customActions: widget.onSearchNotes == null
+          ? null
+          : {
+              _SearchNotesIntent: CallbackAction<_SearchNotesIntent>(
+                onInvoke: (_) {
+                  widget.onSearchNotes?.call();
+                  return null;
+                },
+              ),
+            },
     );
   }
 

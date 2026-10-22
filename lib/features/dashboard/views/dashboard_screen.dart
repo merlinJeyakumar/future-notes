@@ -975,6 +975,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   child: ContentArea(
                                     viewModel: _viewModel,
                                     onBackgroundTasks: _showBackgroundTasks,
+                                    onSearchNotes: Platform.isMacOS
+                                        ? _focusSearch
+                                        : null,
                                   ),
                                 ),
                               ],

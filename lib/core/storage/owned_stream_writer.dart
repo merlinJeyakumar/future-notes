@@ -29,9 +29,10 @@ class OwnedStreamWriter {
   static Future<OwnedStreamWriter> open(
     String path, {
     bool Function()? cancelled,
+    int macDiagnosticStage = 0,
   }) async {
     final target = OwnedWriteTarget.forPath(path);
-    await target.validate(path);
+    await target.validate(path, macDiagnosticStage: macDiagnosticStage);
     final file = File(path);
     await file.create(exclusive: true);
     final digest = _Digest();

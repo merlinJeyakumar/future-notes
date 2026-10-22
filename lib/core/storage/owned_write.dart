@@ -4,6 +4,15 @@ import 'package:uuid/uuid.dart';
 import '../platform/library_documents.dart';
 import '../platform/mobile_library_documents.dart';
 
+int _diagnosticType(FileSystemEntityType? type) {
+  if (type == null) return -1;
+  if (type == FileSystemEntityType.notFound) return 0;
+  if (type == FileSystemEntityType.file) return 1;
+  if (type == FileSystemEntityType.directory) return 2;
+  if (type == FileSystemEntityType.link) return 3;
+  return 9;
+}
+
 /// An intent to create a NEW output, never permission to overwrite an input.
 /// Writers still create exclusively. Instances cannot be reconstructed from
 /// document metadata, recovery JSON or a picked-source descriptor.
@@ -26,7 +35,10 @@ class OwnedWriteTarget {
   final LibraryOutputSinkLease? sink;
   bool _validated = false;
   bool _completed = false;
-  Future<void> validate(String destination) async {
+  Future<void> validate(
+    String destination, {
+    int macDiagnosticStage = 0,
+  }) async {
     if (_validated || _completed)
       throw StateError('Output lease already used.');
     if (sink != null) {
@@ -37,6 +49,36 @@ class OwnedWriteTarget {
           doc.token != sink!.document.token ||
           doc.length != 0) {
         throw const FormatException('Provider output lease changed.');
+      }
+      _validated = true;
+      return;
+    }
+    if (Platform.isMacOS) {
+      Never reject(int predicate, [FileSystemEntityType? type]) {
+        print(
+          'FN_OWNED_WRITE_GUARD '
+          'stage=$macDiagnosticStage '
+          'predicate=$predicate '
+          'type=${_diagnosticType(type)}',
+        );
+        throw const FormatException(
+          'Output has no exclusive owned write target.',
+        );
+      }
+
+      if (!p.equals(path, p.normalize(destination))) {
+        reject(1);
+      }
+      final outputType = await FileSystemEntity.type(path, followLinks: false);
+      if (outputType != FileSystemEntityType.notFound) {
+        reject(2, outputType);
+      }
+      final rootType = await FileSystemEntity.type(root, followLinks: false);
+      if (rootType != FileSystemEntityType.directory) {
+        reject(3, rootType);
+      }
+      if (!p.equals(await Directory(root).resolveSymbolicLinks(), root)) {
+        reject(4);
       }
       _validated = true;
       return;

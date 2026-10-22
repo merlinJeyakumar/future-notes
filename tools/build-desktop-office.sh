@@ -69,7 +69,8 @@ if [[ "$host" == Darwin ]]; then
     "$source_root/target/aarch64-apple-darwin/release/liboffice_oxide.a" \
     "$source_root/target/x86_64-apple-darwin/release/liboffice_oxide.a" -output "$universal"
   for arch in arm64 x86_64; do
-    xcrun nm -arch "$arch" -g -U "$universal" | awk '{print $NF}' > "$build_root/$arch.symbols"
+    # Check native symbols while skipping newer LLVM bitcode for older Xcode inspectors.
+    xcrun nm -arch "$arch" -g -U --no-llvm-bc "$universal" | awk '{print $NF}' > "$build_root/$arch.symbols"
     for symbol in "${symbols[@]}"; do grep -Fqx "_$symbol" "$build_root/$arch.symbols"; done
   done
   xcodebuild -create-xcframework -library "$universal" -headers "$source_root/include" \

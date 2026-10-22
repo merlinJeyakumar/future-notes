@@ -210,7 +210,7 @@ final class NativeFileAccess {
       // publication adapter must retain this lease for its complete handoff.
       let parent = url.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
       var info = stat()
-      guard Darwin.stat(parent.path, &info) == 0 else {
+      guard Darwin.stat(_:_:)(parent.path, &info) == 0 else {
         throw AccessFailure(code: "access_unavailable", message: "The save destination is unavailable.")
       }
       let path = parent.appendingPathComponent(url.lastPathComponent).path
@@ -428,7 +428,7 @@ final class NativeFileAccess {
       }
     }
     var info = stat()
-    guard Darwin.stat(path, &info) == 0 else {
+    guard Darwin.stat(_:_:)(path, &info) == 0 else {
       throw AccessFailure(code: "access_unavailable", message: "The selected location is unavailable.")
     }
     let isDirectory = info.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR)
@@ -465,7 +465,7 @@ final class NativeFileAccess {
     }
     if !grant.bookmark.isEmpty {
       var info = stat()
-      guard Darwin.stat(grant.path, &info) == 0,
+      guard Darwin.stat(_:_:)(grant.path, &info) == 0,
         "\(info.st_dev):\(info.st_ino)" == grant.identity else {
         throw AccessFailure(code: "library_changed",
           message: "The selected location has changed. Choose it again to restore access.")

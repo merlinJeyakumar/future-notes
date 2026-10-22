@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path/path.dart' as p;
 
 import '../../../core/operations/operation_result.dart';
@@ -45,6 +46,14 @@ class DiscoveryRequest {
       directoryPath == other.directoryPath &&
       rootGeneration == other.rootGeneration &&
       requestId == other.requestId;
+}
+
+/// Copies already-admitted roots into the read-only worker at dispatch time.
+/// The worker still verifies the requested location before reading it.
+class _ScopedDiscoveryRequest extends DiscoveryRequest {
+  _ScopedDiscoveryRequest(DiscoveryRequest request, this.environment)
+    : super(request.directoryPath, request.rootGeneration, request.requestId);
+  final StorageEnvironment environment;
 }
 
 class DiscoverySnapshot {
@@ -92,15 +101,21 @@ class BackgroundService implements LibraryDiscovery {
     StorageEnvironment environment = const StorageEnvironment.production(),
     BackgroundWorkerLauncher? launcher,
     Duration startupTimeout = const Duration(seconds: 10),
+    bool? refreshStorageContext,
   }) : _environment = environment,
        _launcher = launcher ?? _launch,
-       _startupTimeout = startupTimeout {
+       _startupTimeout = startupTimeout,
+       // Keep accepted other-platform discovery messages unchanged. Mac folder
+       // grants can be admitted after this worker has started.
+       _refreshStorageContext =
+           refreshStorageContext ?? (!kIsWeb && Platform.isMacOS) {
     _receivePort.listen(_receive);
   }
 
   final StorageEnvironment _environment;
   final BackgroundWorkerLauncher _launcher;
   final Duration _startupTimeout;
+  final bool _refreshStorageContext;
   Isolate? _isolate;
   SendPort? _sendPort;
   final ReceivePort _receivePort = ReceivePort();
@@ -279,7 +294,11 @@ class BackgroundService implements LibraryDiscovery {
     }
     _active = _pending;
     _pending = null;
-    _sendPort!.send(_active!);
+    _sendPort!.send(
+      _refreshStorageContext
+          ? _ScopedDiscoveryRequest(_active!, _environment)
+          : _active!,
+    );
   }
 
   void loadRecentFiles(String directoryPath) {
@@ -329,7 +348,15 @@ class BackgroundService implements LibraryDiscovery {
         final request = pending!;
         pending = null;
         try {
-          await start.environment.verifyLocation(request.directoryPath);
+          final environment = request is _ScopedDiscoveryRequest
+              ? request.environment
+              : start.environment;
+          if (environment.dataRoot != start.environment.dataRoot ||
+              environment.settingsFile != start.environment.settingsFile ||
+              environment.validationRoot != start.environment.validationRoot) {
+            throw const FormatException('Discovery storage context changed.');
+          }
+          await environment.verifyLocation(request.directoryPath);
           await _processRecentFiles(request, start.replies);
         } catch (_) {
           start.replies.send(DiscoveryScanFailure(request));

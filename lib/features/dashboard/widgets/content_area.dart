@@ -2,7 +2,9 @@ import '../../../core/theme/app_motion.dart';
 import '../../../core/theme/app_dialog.dart';
 import '../models/save_ui_state.dart';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import '../viewmodels/content_viewmodel.dart';
 import 'attachment_job_panel.dart';
@@ -16,6 +18,7 @@ import '../../../core/routing/fnotes_uri.dart';
 import '../models/note_model.dart';
 import 'password_dialog.dart';
 import 'note_unlock_form.dart';
+import 'macos_note_find_dialog.dart';
 import '../../../core/theme/app_theme.dart';
 
 import 'package:code_text_field/code_text_field.dart';
@@ -51,6 +54,10 @@ class ContentArea extends StatefulWidget {
   State<ContentArea> createState() => _ContentAreaState();
 }
 
+class _MacNoteFindIntent extends Intent {
+  const _MacNoteFindIntent();
+}
+
 class _ContentAreaState extends State<ContentArea> {
   late final AttachmentEmbedBuilder _embedBuilder;
   late final QuillEditorConfig _editorConfig;
@@ -61,6 +68,25 @@ class _ContentAreaState extends State<ContentArea> {
   final _attachmentCollapseRequests = ValueNotifier<int>(0);
   final _richEditorKey = GlobalKey<EditorState>();
   final _htmlEditorKey = GlobalKey();
+  bool _findOpen = false;
+
+  Future<void> _openMacFind() async {
+    if (_findOpen || !mounted || viewModel.isLocked) return;
+    _findOpen = true;
+    final controller = viewModel.quillController;
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierColor: Colors.transparent,
+        builder: (_) => MacosNoteFindDialog(controller: controller),
+      );
+    } finally {
+      _findOpen = false;
+      if (mounted && identical(viewModel.quillController, controller)) {
+        _restoreEditorFocus();
+      }
+    }
+  }
 
   void _collapseAttachments() => _attachmentCollapseRequests.value++;
 
@@ -86,6 +112,22 @@ class _ContentAreaState extends State<ContentArea> {
     _htmlFocusNode.addListener(_onEditorFocus);
 
     _editorConfig = QuillEditorConfig(
+      customShortcuts: !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
+          ? const {
+              SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+                  _MacNoteFindIntent(),
+            }
+          : null,
+      customActions: !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
+          ? {
+              _MacNoteFindIntent: CallbackAction<_MacNoteFindIntent>(
+                onInvoke: (_) {
+                  unawaited(_openMacFind());
+                  return null;
+                },
+              ),
+            }
+          : null,
       editorKey: _richEditorKey,
       customLinkPrefixes: const ['fnotes://', 'note://'],
       autoFocus: false,

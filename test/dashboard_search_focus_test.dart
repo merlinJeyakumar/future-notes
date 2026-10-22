@@ -84,6 +84,12 @@ void main() {
               await tester.pump(const Duration(milliseconds: 500));
               expect(field.controller.text, 'synthetic query');
               expect(field.focusNode.hasFocus, isTrue);
+              if (Platform.isMacOS) {
+                await tester.testTextInput.receiveAction(TextInputAction.done);
+                await tester.pump();
+                expect(field.focusNode.hasFocus, isTrue);
+                expect(field.controller.text, 'synthetic query');
+              }
               await tester.tap(
                 find.descendant(
                   of: searchRow,

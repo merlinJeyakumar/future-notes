@@ -35,8 +35,13 @@ FIXTURES = r'''
       save.attempted = true
       try replacement.write(to: save.candidate, options: .withoutOverwriting)
       let candidate = try fileStamp(save.candidate)!
+      // Match chooseSaveTarget's Foundation-normalized exact destination grant;
+      // Darwin realpath and Foundation can spell /private/var differently.
+      let grantedParent = destination.deletingLastPathComponent().standardizedFileURL
+        .resolvingSymlinksInPath()
+      let grantedPath = grantedParent.appendingPathComponent(destination.lastPathComponent).path
       let grant = Grant(url: destination, bookmark: Data(), identity: "synthetic",
-        path: destination.path, library: false)
+        path: grantedPath, library: false)
       grant.save = save
       let changed = Data([5, 10, 15, 20, 25, 30, 35])
       if name == "changed-destination" { try changed.write(to: destination) }
@@ -56,8 +61,17 @@ FIXTURES = r'''
         require(manager.fileExists(atPath: save.candidate.path), "conflict retains candidate")
         require(manager.fileExists(atPath: staging.path), "conflict retains staging")
       } else {
-        try publish(grant, save: save, length: candidate.size,
-          modified: candidate.modifiedMicros, changed: candidate.changedMicros)
+        do {
+          try publish(grant, save: save, length: candidate.size,
+            modified: candidate.modifiedMicros, changed: candidate.changedMicros)
+        } catch let failure as AccessFailure {
+          let destinationNow = try fileStamp(destination)
+          let candidateNow = try fileStamp(save.candidate)
+          print("failure_code=\(failure.code)")
+          print("destination_revision_matches=\(destinationNow == save.expected)")
+          print("candidate_revision_matches=\(candidateNow == candidate)")
+          throw failure
+        }
         let published = try Data(contentsOf: destination)
         require(published == replacement, "published replacement bytes")
         require(!manager.fileExists(atPath: save.candidate.path), "candidate consumed")

@@ -273,7 +273,7 @@ class StreamingPackService {
           progress,
         );
       final target = OwnedWriteTarget.forPath(destination);
-      await target.validate(destination, macDiagnosticStage: 2);
+      await target.validate(destination);
       final ioCounts = await _export(
         metadata,
         attachments,
@@ -525,7 +525,6 @@ class StreamingPackService {
     final output = await OwnedStreamWriter.open(
       destination,
       cancelled: () => cancel != null && File(cancel).existsSync(),
-      macDiagnosticStage: 1,
     );
     final encrypted = password != null && password.isNotEmpty;
     Future<void> copy(
@@ -1606,7 +1605,7 @@ class StreamingPackService {
         if (metadataOnly && record.name != 'note.json') continue;
         final outputPath = p.join(directory, '${const Uuid().v4()}.record');
         final target = OwnedWriteTarget.forPath(outputPath);
-        await target.validate(outputPath, macDiagnosticStage: 3);
+        await target.validate(outputPath);
         final outputFile = File(outputPath);
         await outputFile.create(exclusive: true);
         final output = outputFile.openSync(mode: FileMode.writeOnly);

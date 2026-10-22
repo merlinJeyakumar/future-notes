@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
@@ -197,10 +198,17 @@ void main() {
       final output = await choose();
       final prepared = await receipt(candidate);
       failPublish = true;
-      expect(
-        (await output.publish(prepared)).outcome,
-        OperationOutcome.recoveryRequired,
+      final diagnostics = <String>[];
+      await runZoned(
+        () async => expect(
+          (await output.publish(prepared)).outcome,
+          OperationOutcome.recoveryRequired,
+        ),
+        zoneSpecification: ZoneSpecification(
+          print: (_, _, _, line) => diagnostics.add(line),
+        ),
       );
+      expect(diagnostics, ['FN_MAC_EXPORT_PUBLISH failure=5']);
       expect(output.retainCandidate, isTrue);
       await output.close();
       expect(await File(candidate).readAsBytes(), [1, 2, 3, 4]);

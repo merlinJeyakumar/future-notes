@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../operations/operation_result.dart';
@@ -44,7 +45,19 @@ class MacosExportTarget {
         changedMicros: receipt.changedMicros,
       );
       return const OperationResult.success();
-    } catch (_) {
+    } catch (error) {
+      // Fixed numeric reasons only: no exception messages or destination paths.
+      final reason = error is PlatformException
+          ? const {
+                  'conflict': 1,
+                  'access_denied': 2,
+                  'access_unavailable': 3,
+                  'invalid_grant': 4,
+                  'recovery_required': 5,
+                }[error.code] ??
+                0
+          : 0;
+      print('FN_MAC_EXPORT_PUBLISH failure=$reason');
       return const OperationResult.failure(
         OperationOutcome.recoveryRequired,
         'The export could not be acknowledged. Retained files require recovery.',

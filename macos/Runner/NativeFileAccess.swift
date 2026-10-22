@@ -47,8 +47,15 @@ final class NativeFileAccess {
       modifiedSeconds = info.st_mtimespec.tv_sec; modifiedNanos = info.st_mtimespec.tv_nsec
       changedSeconds = info.st_ctimespec.tv_sec; changedNanos = info.st_ctimespec.tv_nsec
     }
-    var modifiedMicros: Int64 { Int64(modifiedSeconds) * 1_000_000 + Int64(modifiedNanos / 1000) }
-    var changedMicros: Int64 { Int64(changedSeconds) * 1_000_000 + Int64(changedNanos / 1000) }
+    // Dart FileStat exposes whole milliseconds, even when its DateTime is read
+    // as microseconds. Match that receipt precision only at the Dart boundary;
+    // Equatable still compares the full native nanoseconds during publication.
+    var modifiedMicros: Int64 {
+      Int64(modifiedSeconds) * 1_000_000 + Int64(modifiedNanos / 1_000_000) * 1000
+    }
+    var changedMicros: Int64 {
+      Int64(changedSeconds) * 1_000_000 + Int64(changedNanos / 1_000_000) * 1000
+    }
   }
 
   private final class SaveState {

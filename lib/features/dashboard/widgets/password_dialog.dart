@@ -9,6 +9,7 @@ class PasswordDialog extends StatefulWidget {
   final Future<bool> Function(String)? onVerifyCurrent;
   final String? title;
   final String? description;
+  final bool preventDuplicateSubmissions;
 
   const PasswordDialog({
     super.key,
@@ -17,6 +18,7 @@ class PasswordDialog extends StatefulWidget {
     this.onVerifyCurrent,
     this.title,
     this.description,
+    this.preventDuplicateSubmissions = false,
   });
 
   @override
@@ -30,6 +32,7 @@ class _PasswordDialogState extends State<PasswordDialog> {
 
   bool _obscureText = true;
   bool _isVerifying = false;
+  bool _submitted = false;
   String? _errorText;
 
   @override
@@ -41,6 +44,9 @@ class _PasswordDialogState extends State<PasswordDialog> {
   }
 
   Future<void> _submit() async {
+    if (widget.preventDuplicateSubmissions && (_isVerifying || _submitted)) {
+      return;
+    }
     setState(() {
       _errorText = null;
       _isVerifying = true;
@@ -100,6 +106,7 @@ class _PasswordDialogState extends State<PasswordDialog> {
       final result = _passwordController.text;
 
       if (result.isNotEmpty) {
+        _submitted = true;
         widget.onConfirm(result);
         if (mounted) Navigator.pop(context, result);
       }

@@ -7,6 +7,7 @@ import '../views/mobile_library_startup.dart';
 import 'mobile_theme.dart';
 import '../../../core/platform/mobile_diagnostics.dart';
 import '../../../core/platform/android_native_cipher.dart';
+import '../../../core/platform/mobile_export.dart';
 import 'dart:async';
 
 /// No desktop frame, density adjustment or desktop theme mutation lives here.
@@ -24,6 +25,13 @@ class _MobileAppState extends State<MobileApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(
+      MobileExport.initialize().catchError((Object _) {
+        MobileDiagnostics.record(MobileDiagnostic.jobChannelFailed, {
+          'stage': 3,
+        });
+      }),
+    );
     didChangeMetrics();
     widget.settings.themeModeNotifier.addListener(_changed);
     widget.settings.attachmentPerformanceNotifier.addListener(

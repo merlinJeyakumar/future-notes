@@ -13,6 +13,29 @@ class MobileExport {
   static const _files = MethodChannel('future_notes/files');
   static bool _saving = false;
   static final _initializations = <String, Future<void>>{};
+
+  static Future<Directory> _androidExportRoot() async {
+    final path = await _files.invokeMethod<String>('exportRoot');
+    if (path == null || !p.isAbsolute(path) || p.normalize(path) != path) {
+      throw StateError('Private export storage is unavailable.');
+    }
+    return Directory(path);
+  }
+
+  static Future<void> _initializeRoot(Directory root) async {
+    if (await root.resolveSymbolicLinks() != root.path) {
+      throw StateError('Export storage escaped its private root.');
+    }
+    await _initializations.putIfAbsent(root.path, () => _removeOrphans(root));
+  }
+
+  /// Retained Android files need process-start cleanup even when the user does
+  /// not start another export. Repeated app initialization shares the same pass.
+  static Future<void> initialize({String? operatingSystem}) async {
+    if ((operatingSystem ?? Platform.operatingSystem) != 'android') return;
+    await _initializeRoot(await _androidExportRoot());
+  }
+
   static Future<void> _removeOrphans(Directory root) async {
     await for (final item in root.list(followLinks: false)) {
       if (item is Directory &&
@@ -54,20 +77,26 @@ class MobileExport {
         false;
   }
 
-  static Future<String> destination(String fileName) async {
-    final temporary = await getTemporaryDirectory();
-    // Android/iOS may expose the app cache through an OS directory alias.
-    // Resolve the trusted platform root before allocating children; downstream
-    // revision/publication checks still reject links in export paths.
-    final cache = Directory(await temporary.resolveSymbolicLinks());
-    await _initializations.putIfAbsent(cache.path, () => _removeOrphans(cache));
-    final root = await Directory(
-      p.join(cache.path, 'prepared-exports'),
-    ).create();
-    if (await root.resolveSymbolicLinks() != root.path) {
-      throw StateError('Export cache escaped its private root.');
+  static Future<String> destination(
+    String fileName, {
+    String? operatingSystem,
+  }) async {
+    final Directory root;
+    if ((operatingSystem ?? Platform.operatingSystem) == 'android') {
+      // Active writes and ready exports must survive OS cache reclamation.
+      // Native ownership, sharing scope and backup exclusions cover this root.
+      root = await _androidExportRoot();
+    } else {
+      final temporary = await getTemporaryDirectory();
+      // Keep the accepted iOS and desktop-test cache behavior independent.
+      final cache = Directory(await temporary.resolveSymbolicLinks());
+      await _initializations.putIfAbsent(
+        cache.path,
+        () => _removeOrphans(cache),
+      );
+      root = await Directory(p.join(cache.path, 'prepared-exports')).create();
     }
-    await _initializations.putIfAbsent(root.path, () => _removeOrphans(root));
+    await _initializeRoot(root);
     final directory = await root.createTemp('future-notes-export-');
     final name = p
         .basename(fileName)

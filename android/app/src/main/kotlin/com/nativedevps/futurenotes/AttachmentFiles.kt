@@ -20,6 +20,9 @@ class AttachmentFiles(private val context: Context, messenger: BinaryMessenger) 
     private var activity: Activity? = null
     private val channel = MethodChannel(messenger, "future_notes/files")
     private val root = File(context.cacheDir, "attachment-previews")
+    // User-owned export work must not be reclaimed with the OS cache. The exact
+    // folder is excluded from backup and is the only new FileProvider scope.
+    private val exportRoot = File(context.filesDir, "prepared-exports")
     private val exportExecutor = Executors.newSingleThreadExecutor()
     private val settingsExecutor = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -114,6 +117,10 @@ class AttachmentFiles(private val context: Context, messenger: BinaryMessenger) 
                         if (!root.isDirectory && !root.mkdirs()) throw IllegalStateException()
                         result.success(root.canonicalPath)
                     }
+                    "exportRoot" -> {
+                        if (!exportRoot.isDirectory && !exportRoot.mkdirs()) throw IllegalStateException()
+                        result.success(exportRoot.canonicalPath)
+                    }
                     "privateAvailableBytes" -> result.success(android.os.StatFs(context.noBackupFilesDir.path).availableBytes)
                     "privateRoot" -> {
                         val privateRoot = File(context.noBackupFilesDir, "future-notes")
@@ -155,9 +162,11 @@ class AttachmentFiles(private val context: Context, messenger: BinaryMessenger) 
     }
     private fun ownedExport(path: String): File {
         val file = File(path)
-        val cache = File(context.cacheDir, "prepared-exports").canonicalFile
+        // Keep already-owned legacy handoffs valid, without admitting files
+        // elsewhere in cacheDir/filesDir or widening the provider grant.
+        val allowedRoots = listOf(exportRoot.canonicalFile, File(context.cacheDir, "prepared-exports").canonicalFile)
         require(file.isAbsolute && file.path == file.canonicalPath && file.isFile)
-        require(file.parentFile?.parentFile == cache && file.parentFile!!.name.startsWith("future-notes-export-"))
+        require(file.parentFile?.parentFile in allowedRoots && file.parentFile!!.name.startsWith("future-notes-export-"))
         return file
     }
     fun activityResult(request: Int, status: Int, data: Intent?): Boolean {

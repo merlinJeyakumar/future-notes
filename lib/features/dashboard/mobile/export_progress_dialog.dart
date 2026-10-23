@@ -120,6 +120,14 @@ Future<OperationResult<void>> _settled(
   }
 }
 
+String _exportFailureMessage(String? message) {
+  if (message == 'Owned output changed before acknowledgement.') {
+    return 'The export file became unavailable before it was ready. '
+        'Your note and attachments are unchanged. Try exporting again.';
+  }
+  return message ?? 'Export failed.';
+}
+
 class MobileExportProgressDialog extends StatefulWidget {
   const MobileExportProgressDialog({
     super.key,
@@ -285,9 +293,9 @@ class _MobileExportProgressDialogState
                                 ? 'Export complete'
                                 : cancelled
                                 ? 'Export cancelled'
-                                : result?.message ??
-                                      job?.error ??
-                                      'Export failed.')
+                                : _exportFailureMessage(
+                                    result?.message ?? job?.error,
+                                  ))
                           : job?.detail ??
                                 (job == null
                                     ? 'Preparing export…'

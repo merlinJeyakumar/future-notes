@@ -149,7 +149,7 @@ void main() {
             home: Scaffold(body: MobileContentArea(viewModel: h.editor)),
           ),
         );
-        h.editor.focusNode.requestFocus();
+        await tester.tap(find.byType(QuillEditor));
         h.editor.quillController.updateSelection(
           const TextSelection(baseOffset: 10, extentOffset: 18),
           ChangeSource.local,

@@ -5,6 +5,7 @@ import '../models/attachment_job.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import '../viewmodels/content_viewmodel.dart';
 import '../widgets/attachment_job_panel.dart';
@@ -14,6 +15,7 @@ import 'attachment_mentions.dart';
 import 'attachment_preview.dart';
 import 'expanding_formatting_bar.dart';
 import 'editor_panels.dart';
+import 'editor_focus.dart';
 import 'selection_toolbar.dart';
 import 'job_notifications.dart';
 import '../../../core/routing/fnotes_uri.dart';
@@ -82,7 +84,16 @@ class _MobileContentAreaState extends State<MobileContentArea>
     // Scaffold removes the consumed bottom inset from its body MediaQuery.
     // Observe the owning view, so both Rich text and HTML use the real IME.
     final visible = View.of(context).viewInsets.bottom > 0;
-    if (visible != _keyboardVisible) setState(() => _keyboardVisible = visible);
+    if (visible != _keyboardVisible) {
+      // Insets also disappear for hardware keyboards and transient resizing.
+      // Only actual focus, navigation or lifecycle changes end editing intent.
+      setState(() => _keyboardVisible = visible);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) _editorFocus.dismiss();
   }
 
   bool _exporting = false;
@@ -131,6 +142,7 @@ class _MobileContentAreaState extends State<MobileContentArea>
   late final ScrollController _scrollController;
   final _unlockFocusNode = FocusNode(debugLabel: 'Note unlock password');
   final _htmlFocusNode = FocusNode(debugLabel: 'HTML source');
+  late final MobileEditorFocus _editorFocus;
   final _panels = MobileEditorPanels();
   final _editorViewportKey = GlobalKey(debugLabel: 'mobile-editor-viewport');
   Object? _panelOwner;
@@ -141,6 +153,14 @@ class _MobileContentAreaState extends State<MobileContentArea>
   final _htmlEditorKey = GlobalKey();
 
   void _collapseAttachments() => _panels.collapse();
+
+  bool get _canEditBody =>
+      !_exporting &&
+      !viewModel.isLocked &&
+      !viewModel.isLibraryCutover &&
+      !viewModel.isImportCutover &&
+      !viewModel.isDeletingCurrent &&
+      viewModel.draftSession.canWrite;
 
   void _syncPanels() {
     final owner = (
@@ -153,6 +173,7 @@ class _MobileContentAreaState extends State<MobileContentArea>
     if (_panelOwner != owner) {
       _panelOwner = owner;
       _panels.collapse();
+      _editorFocus.dismiss();
     }
     final document = viewModel.quillController.document;
     if (!identical(document, _watchedDocument)) {
@@ -193,6 +214,7 @@ class _MobileContentAreaState extends State<MobileContentArea>
     // Cache local references to avoid property access in build/config
     _focusNode = viewModel.focusNode;
     _scrollController = viewModel.scrollController;
+    _editorFocus = MobileEditorFocus([_focusNode, _htmlFocusNode]);
     _focusNode.addListener(_onEditorFocus);
     _htmlFocusNode.addListener(_onEditorFocus);
     viewModel.addListener(_syncPanels);
@@ -206,6 +228,7 @@ class _MobileContentAreaState extends State<MobileContentArea>
       editorKey: _richEditorKey,
       customLinkPrefixes: const ['fnotes://', 'note://'],
       autoFocus: false,
+      onTapOutside: (_, _) => _editorFocus.dismiss(),
       scrollable: true,
       expands: true,
       padding:
@@ -276,6 +299,7 @@ class _MobileContentAreaState extends State<MobileContentArea>
     _bodyChanges?.cancel();
     widget.dismissPanels?.removeListener(_collapseAttachments);
     _panels.dispose();
+    _editorFocus.dispose();
     _unlockFocusNode.dispose();
     _htmlFocusNode.dispose();
     super.dispose();
@@ -285,6 +309,25 @@ class _MobileContentAreaState extends State<MobileContentArea>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     colors = _ContentColors(theme);
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (_, event) {
+        if (_canEditBody &&
+            event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.tab &&
+            !HardwareKeyboard.instance.isControlPressed &&
+            !HardwareKeyboard.instance.isAltPressed &&
+            !HardwareKeyboard.instance.isMetaPressed) {
+          _editorFocus.allowTraversal();
+        }
+        return KeyEventResult.ignored;
+      },
+      child: _buildLayout(context),
+    );
+  }
+
+  Widget _buildLayout(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         // Mobile presentation owns phone/tablet insets independently.
@@ -301,7 +344,10 @@ class _MobileContentAreaState extends State<MobileContentArea>
                   valueListenable: viewModel.isLockedNotifier,
                   builder: (context, isLocked, child) {
                     return Listener(
-                      onPointerDown: (_) => _panels.collapse(),
+                      onPointerDown: (_) {
+                        _panels.collapse();
+                        _editorFocus.dismiss();
+                      },
                       child: Focus(
                         onFocusChange: (focused) {
                           if (focused) _panels.collapse();
@@ -1013,7 +1059,8 @@ class _MobileContentAreaState extends State<MobileContentArea>
         !viewModel.draftSession.canWrite) {
       return;
     }
-    _panels.restoreFocus(_focusNode.requestFocus);
+    // Formatting keeps the retained selection; only an input gesture may
+    // start a new keyboard session after focus or the keyboard was dismissed.
   }
 
   QuillToolbarColorButtonOptions _getColorButtonOptions() {
@@ -1105,15 +1152,7 @@ class _MobileContentAreaState extends State<MobileContentArea>
               _readOnlyBeforeExport = !viewModel.draftSession.canWrite;
               viewModel.quillController.readOnly = true;
             }
-            final generation = viewModel.draftSession.generation;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted &&
-                  !viewModel.isLocked &&
-                  !_exporting &&
-                  generation == viewModel.draftSession.generation) {
-                _focusNode.requestFocus();
-              }
-            });
+            _editorFocus.dismiss();
           }
           return unlocked;
         },
@@ -1145,11 +1184,6 @@ class _MobileContentAreaState extends State<MobileContentArea>
                               await viewModel.formatHtml(
                                 expandTextBlocks: true,
                               );
-                              if (mounted &&
-                                  viewModel.isHtmlMode &&
-                                  !viewModel.isLocked) {
-                                _htmlFocusNode.requestFocus();
-                              }
                             },
                       icon: const Icon(Icons.format_align_left, size: 15),
                       label: Text(
@@ -1167,43 +1201,48 @@ class _MobileContentAreaState extends State<MobileContentArea>
                           : githubTheme,
                     ),
                     child: SingleChildScrollView(
-                      child: CodeField(
-                        key: _htmlEditorKey,
-                        controller: viewModel.htmlController,
-                        focusNode: _htmlFocusNode,
-                        wrap: false,
-                        horizontalScroll: true,
-                        keyboardType: TextInputType.multiline,
-                        smartQuotesType: SmartQuotesType.disabled,
-                        readOnly:
-                            _exporting ||
-                            viewModel.isLibraryCutover ||
-                            viewModel.isImportCutover ||
-                            viewModel.isDeletingCurrent ||
-                            !viewModel.draftSession.canWrite,
-                        textStyle: TextStyle(
-                          fontFamily: 'monospace',
-                          fontFamilyFallback: const [
-                            'Courier New',
-                            'monospace',
-                          ],
-                          fontSize: 12,
-                          height: 1.5,
-                          color: colors.textPrimary,
-                        ),
-                        expands: false,
-                        maxLines: null,
-                        minLines: 30,
-                        background: colors.background,
-                        lineNumberStyle: LineNumberStyle(
-                          width: 32,
-                          margin: 8,
-                          background: colors.background,
+                      child: MobileEditorInputRegion(
+                        focus: _editorFocus,
+                        node: _htmlFocusNode,
+                        enabled: _canEditBody,
+                        child: CodeField(
+                          key: _htmlEditorKey,
+                          controller: viewModel.htmlController,
+                          focusNode: _htmlFocusNode,
+                          wrap: false,
+                          horizontalScroll: true,
+                          keyboardType: TextInputType.multiline,
+                          smartQuotesType: SmartQuotesType.disabled,
+                          readOnly:
+                              _exporting ||
+                              viewModel.isLibraryCutover ||
+                              viewModel.isImportCutover ||
+                              viewModel.isDeletingCurrent ||
+                              !viewModel.draftSession.canWrite,
                           textStyle: TextStyle(
-                            color: colors.subtleGray,
+                            fontFamily: 'monospace',
+                            fontFamilyFallback: const [
+                              'Courier New',
+                              'monospace',
+                            ],
                             fontSize: 12,
                             height: 1.5,
-                            fontFamily: 'monospace',
+                            color: colors.textPrimary,
+                          ),
+                          expands: false,
+                          maxLines: null,
+                          minLines: 30,
+                          background: colors.background,
+                          lineNumberStyle: LineNumberStyle(
+                            width: 32,
+                            margin: 8,
+                            background: colors.background,
+                            textStyle: TextStyle(
+                              color: colors.subtleGray,
+                              fontSize: 12,
+                              height: 1.5,
+                              fontFamily: 'monospace',
+                            ),
                           ),
                         ),
                       ),
@@ -1213,11 +1252,16 @@ class _MobileContentAreaState extends State<MobileContentArea>
               ],
             )
           : RepaintBoundary(
-              child: QuillEditor.basic(
-                controller: viewModel.quillController,
-                config: _editorConfig,
-                focusNode: _focusNode,
-                scrollController: _scrollController,
+              child: MobileEditorInputRegion(
+                focus: _editorFocus,
+                node: _focusNode,
+                enabled: _canEditBody,
+                child: QuillEditor.basic(
+                  controller: viewModel.quillController,
+                  config: _editorConfig,
+                  focusNode: _focusNode,
+                  scrollController: _scrollController,
+                ),
               ),
             ),
     );

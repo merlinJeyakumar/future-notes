@@ -47,6 +47,25 @@ class MobileDraftBinding with WidgetsBindingObserver {
     model.draftSession.access,
     model.editorMode,
   );
+
+  Future<T?> _dialog<T>(
+    BuildContext ctx,
+    WidgetBuilder builder, {
+    bool barrierDismissible = true,
+  }) async {
+    final navigator = Navigator.of(ctx, rootNavigator: true);
+    final route = AppDialogRoute<T>(
+      context: ctx,
+      builder: builder,
+      themes: InheritedTheme.capture(from: ctx, to: navigator.context),
+      barrierDismissible: barrierDismissible,
+    );
+    final result = await navigator.push(route);
+    // The next prompt must not overlap the previous route's dismissal.
+    await route.completed;
+    return result;
+  }
+
   Future<void> _restore() async {
     try {
       final encoded = await _channel.invokeMethod<String>('read', {
@@ -54,13 +73,12 @@ class MobileDraftBinding with WidgetsBindingObserver {
       });
       if (encoded != null) {
         final draft = Map<String, dynamic>.from(jsonDecode(encoded) as Map);
-        while (!_closed) {
+        if (!_closed) {
           final ctx = context();
           if (!ctx.mounted) return;
-          final recover = await showAppDialog<bool>(
-            context: ctx,
-            barrierDismissible: false,
-            builder: (dialog) => AlertDialog(
+          final recover = await _dialog<bool>(
+            ctx,
+            (dialog) => AlertDialog(
               title: const Text('Recover unsaved draft?'),
               content: const Text(
                 'A private recovery copy is available. Recovering a new draft does not save it to the library.',
@@ -76,53 +94,67 @@ class MobileDraftBinding with WidgetsBindingObserver {
                 ),
               ],
             ),
+            barrierDismissible: false,
           );
           if (_closed) return;
-          if (recover != true) {
+          if (recover == false) {
             await clear();
-            break;
-          }
-          String? password;
-          if (draft['protected'] == true) {
-            final passwordContext = context();
-            if (!passwordContext.mounted) return;
-            password = await showAppDialog<String>(
-              context: passwordContext,
-              builder: (_) => PasswordDialog(
-                title: 'Unlock recovery draft',
-                onConfirm: (_) {},
-                onVerifyCurrent: (value) =>
-                    model.verifyPrivateRecoveryPassword(draft, value),
-              ),
-            );
-            if (password == null) continue;
-          }
-          final result = await model.recoverPrivateDraft(
-            draft,
-            password: password,
-          );
-          if (result.isSuccess) {
-            MobileDiagnostics.record(MobileDiagnostic.draftRecovered);
-            onRecovered();
-            break;
-          }
-          final errorContext = context();
-          if (!errorContext.mounted) return;
-          await showAppDialog<void>(
-            context: errorContext,
-            builder: (dialog) => AlertDialog(
-              title: const Text('Recovery retained'),
-              content: Text(result.message ?? 'Recovery could not be applied.'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialog),
-                  child: const Text('Done'),
+          } else if (recover == true) {
+            String? password;
+            if (draft['protected'] == true) {
+              final passwordContext = context();
+              if (!passwordContext.mounted) return;
+              password = await _dialog<String>(
+                passwordContext,
+                (_) => PasswordDialog(
+                  title: 'Unlock recovery draft',
+                  preventDuplicateSubmissions: true,
+                  onConfirm: (_) {},
+                  onVerifyCurrent: (value) => _closed
+                      ? Future.value(false)
+                      : model.verifyPrivateRecoveryPassword(draft, value),
                 ),
-              ],
-            ),
-          );
+              );
+              // Cancel leaves recovery encrypted and available next startup.
+              if (_closed || password == null) return;
+            }
+            final result = await model.recoverPrivateDraft(
+              draft,
+              password: password,
+            );
+            if (_closed) return;
+            if (result.isSuccess) {
+              MobileDiagnostics.record(MobileDiagnostic.draftRecovered);
+              onRecovered();
+            } else {
+              final errorContext = context();
+              if (!errorContext.mounted) return;
+              await _dialog<void>(
+                errorContext,
+                (dialog) => AlertDialog(
+                  title: const Text('Recovery retained'),
+                  content: Text(
+                    result.message ?? 'Recovery could not be applied.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialog),
+                      child: const Text('Done'),
+                    ),
+                  ],
+                ),
+              );
+              // A retained conflict is not permission to prompt again or
+              // replace the unresolved journal with the current editor.
+              return;
+            }
+          } else {
+            // System Back dismisses presentation; only Discard deletes a draft.
+            return;
+          }
         }
       }
+      if (_closed) return;
       _ready = true;
       _changed();
     } catch (_) {
@@ -189,6 +221,7 @@ class MobileDraftBinding with WidgetsBindingObserver {
   }
 
   Future<void> retireResolvedDraft() async {
+    if (!_ready) return; // An unresolved recovery copy is not the active draft.
     final ready = _ready;
     _ready = false;
     _timer?.cancel();

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_quill/flutter_quill.dart' show QuillEditor;
 import 'package:flutter_application_1/features/dashboard/mobile/content_area.dart';
 import 'package:flutter_application_1/features/dashboard/mobile/editor_panels.dart';
 import 'package:flutter_application_1/features/dashboard/mobile/expanding_formatting_bar.dart';
@@ -141,6 +142,11 @@ void main() {
       );
       await tester.pump();
       expect(find.byTooltip('Collapse formatting tools'), findsOneWidget);
+      await tester.tap(find.byType(QuillEditor));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Collapse formatting tools'), findsNothing);
+      await tester.tap(format);
+      await tester.pumpAndSettle();
       h.editor.quillController.replaceText(
         0,
         0,

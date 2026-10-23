@@ -29,6 +29,8 @@ Future<void> openAttachmentPreview(
   if (!current()) return;
   final intents = _intents[model] ??= <String>{};
   if (!intents.add(key)) return;
+  // Preview return must not reopen the editor keyboard through focus history.
+  restoreFocus?.unfocus();
   try {
     final result = await model.openAttachment(attachment, system: system);
     if (!context.mounted || !current() || !result.isSuccess || system) return;
@@ -41,11 +43,6 @@ Future<void> openAttachmentPreview(
         playerFactory: playerFactory,
       ),
     );
-    if (current() &&
-        restoreFocus?.context != null &&
-        restoreFocus!.canRequestFocus) {
-      restoreFocus.requestFocus();
-    }
   } finally {
     intents.remove(key);
   }

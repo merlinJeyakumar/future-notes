@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_quill/flutter_quill.dart' show ChangeSource;
+import 'package:flutter_quill/flutter_quill.dart'
+    show ChangeSource, QuillEditor;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:code_text_field/code_text_field.dart';
 import 'package:flutter_application_1/features/dashboard/models/attachment_job.dart';
@@ -35,7 +36,7 @@ void main() {
             ),
           ),
         );
-        h.editor.focusNode.requestFocus();
+        await tester.tap(find.byType(QuillEditor));
         controller.updateSelection(
           const TextSelection(baseOffset: 0, extentOffset: 9),
           ChangeSource.local,

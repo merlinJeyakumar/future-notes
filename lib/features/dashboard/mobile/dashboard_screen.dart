@@ -136,10 +136,8 @@ class _MobileDashboardScreenState extends State<MobileDashboardScreen> {
       _viewModel.focusNode.requestFocus();
       return;
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _phoneEditor && !_viewModel.isLocked)
-        _viewModel.focusNode.requestFocus();
-    });
+    // On touch devices navigation reveals content without opening the IME.
+    _viewModel.focusNode.unfocus();
   }
 
   void _queryChanged() => _viewModel.setSearchQuery(_searchController.text);

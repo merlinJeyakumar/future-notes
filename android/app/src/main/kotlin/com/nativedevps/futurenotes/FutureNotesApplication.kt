@@ -37,6 +37,7 @@ class FutureNotesApplication : Application() {
         attachmentDrop = AttachmentDrop(engine.dartExecutor.binaryMessenger, documents)
         incomingShares = IncomingShares(engine.dartExecutor.binaryMessenger, documents)
         files = AttachmentFiles(this, engine.dartExecutor.binaryMessenger)
+        AttachmentThumbnails(this, engine.dartExecutor.binaryMessenger, documents::acquireCipherSource)
         jobHost = AndroidJobHost(this, engine.dartExecutor.binaryMessenger)
         privateDrafts = PrivateDrafts(this, engine.dartExecutor.binaryMessenger)
         retained = engine

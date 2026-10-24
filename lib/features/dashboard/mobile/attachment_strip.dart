@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -15,6 +16,7 @@ import 'attachment_preview.dart';
 import 'attachment_progress.dart';
 import 'attachment_viewer.dart';
 import 'editor_panels.dart';
+import 'attachment_thumbnails.dart';
 
 class AttachmentStrip extends StatefulWidget {
   const AttachmentStrip({
@@ -23,16 +25,48 @@ class AttachmentStrip extends StatefulWidget {
     this.playerFactory,
     this.collapseRequests,
     this.panels,
+    this.thumbnailFactory,
   });
   final ContentViewModel viewModel;
   final AttachmentPlayerFactory? playerFactory;
   final Listenable? collapseRequests;
   final MobileEditorPanels? panels;
+  final MobileAttachmentThumbnails Function(
+    Future<Uint8List?> Function(AttachmentModel),
+  )?
+  thumbnailFactory;
   @override
   State<AttachmentStrip> createState() => _AttachmentStripState();
 }
 
 class _AttachmentStripState extends State<AttachmentStrip> {
+  late MobileAttachmentThumbnails _thumbnails;
+  void _bindThumbnails() {
+    final bound = model;
+    _thumbnails =
+        widget.thumbnailFactory?.call(bound.restoreAttachmentThumbnail) ??
+        MobileAttachmentThumbnails(restore: bound.restoreAttachmentThumbnail);
+    bound.attachmentsNotifier.addListener(_syncThumbnails);
+    bound.attachmentJobsNotifier.addListener(_syncThumbnails);
+    Future.microtask(() {
+      if (mounted) _syncThumbnails();
+    });
+  }
+
+  void _syncThumbnails() => _thumbnails.update(
+    owner: (
+      model.currentContentPath,
+      model.draftSession.generation,
+      model.draftSession.credentialGeneration,
+    ),
+    attachments: model.attachmentsNotifier.value,
+    refreshRevision: model.thumbnailRefreshRevision,
+    unlocked: !model.isLocked && model.draftSession.isPersisted,
+    defer:
+        model.hasAttachmentJobs ||
+        model.isDeletingCurrent ||
+        model.isLibraryCutover,
+  );
   bool expanded = false;
   late int _owner;
   late bool _locked;
@@ -61,12 +95,14 @@ class _AttachmentStripState extends State<AttachmentStrip> {
         _locked != model.isLocked;
     _rememberOwner();
     if (reset) _collapse();
+    _syncThumbnails();
   }
 
   @override
   void initState() {
     super.initState();
     _rememberOwner();
+    _bindThumbnails();
     model.addListener(_syncOwner);
     widget.collapseRequests?.addListener(_collapse);
     widget.panels?.addListener(_panelChanged);
@@ -84,7 +120,14 @@ class _AttachmentStripState extends State<AttachmentStrip> {
       oldWidget.collapseRequests?.removeListener(_collapse);
       widget.collapseRequests?.addListener(_collapse);
     }
-    if (oldWidget.viewModel != model) {
+    if (oldWidget.viewModel != model ||
+        oldWidget.thumbnailFactory != widget.thumbnailFactory) {
+      oldWidget.viewModel.attachmentsNotifier.removeListener(_syncThumbnails);
+      oldWidget.viewModel.attachmentJobsNotifier.removeListener(
+        _syncThumbnails,
+      );
+      _thumbnails.dispose();
+      _bindThumbnails();
       oldWidget.viewModel.removeListener(_syncOwner);
       expanded = false;
       _rememberOwner();
@@ -94,6 +137,9 @@ class _AttachmentStripState extends State<AttachmentStrip> {
 
   @override
   void dispose() {
+    model.attachmentsNotifier.removeListener(_syncThumbnails);
+    model.attachmentJobsNotifier.removeListener(_syncThumbnails);
+    _thumbnails.dispose();
     model.removeListener(_syncOwner);
     widget.collapseRequests?.removeListener(_collapse);
     widget.panels?.removeListener(_panelChanged);
@@ -131,6 +177,7 @@ class _AttachmentStripState extends State<AttachmentStrip> {
       context: context,
       useSafeArea: false,
       builder: (_) => _AttachmentGallery(
+        thumbnails: _thumbnails,
         model: model,
         owner: owner,
         credentials: credentials,
@@ -150,6 +197,7 @@ class _AttachmentStripState extends State<AttachmentStrip> {
               model.attachmentsNotifier,
               model.attachmentJobsNotifier,
               model.attachmentCacheNotifier,
+              _thumbnails,
             ]),
             builder: (context, _) {
               final entries = _entries(model);
@@ -271,6 +319,7 @@ class _AttachmentStripState extends State<AttachmentStrip> {
                                 endIndent: 12,
                               ),
                               itemBuilder: (_, index) => _AttachmentTile(
+                                thumbnails: _thumbnails,
                                 key: ValueKey(entries[index].id),
                                 model: model,
                                 entry: entries[index],
@@ -306,6 +355,7 @@ class _AttachmentStripState extends State<AttachmentStrip> {
                                         width: 48,
                                         height: 48,
                                         child: _AttachmentTile(
+                                          thumbnails: _thumbnails,
                                           key: ValueKey(entries[index].id),
                                           model: model,
                                           entry: entries[index],
@@ -369,6 +419,7 @@ class _CountBadge extends StatelessWidget {
 
 class _AttachmentTile extends StatefulWidget {
   const _AttachmentTile({
+    required this.thumbnails,
     super.key,
     required this.model,
     required this.entry,
@@ -380,6 +431,7 @@ class _AttachmentTile extends StatefulWidget {
     this.onToggleSelection,
   });
   final ContentViewModel model;
+  final MobileAttachmentThumbnails thumbnails;
   final _AttachmentEntry entry;
   final bool expanded;
   final bool disambiguate;
@@ -442,6 +494,7 @@ class _AttachmentTileState extends State<_AttachmentTile> {
     final colors = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
     final kind = attachmentVisualKind(name);
+    final thumbnail = widget.thumbnails.image(entry.id);
     final cached = attachment == null
         ? null
         : widget.model.cachedAttachment(attachment.id);
@@ -480,6 +533,33 @@ class _AttachmentTileState extends State<_AttachmentTile> {
               width: 22,
               height: 22,
               child: CircularProgressIndicator(value: fraction, strokeWidth: 2),
+            )
+          : thumbnail != null
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.memory(
+                    thumbnail,
+                    fit: BoxFit.cover,
+                    key: ValueKey('attachment-thumbnail-${entry.id}'),
+                    errorBuilder: (_, _, _) {
+                      widget.thumbnails.reportDecodeFailure(
+                        entry.id,
+                        thumbnail,
+                      );
+                      return Icon(icon, color: colors.primary, size: 25);
+                    },
+                  ),
+                  if (kind == AttachmentVisualKind.video)
+                    const Icon(
+                      Icons.play_circle_outline_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                ],
+              ),
             )
           : cached != null && kind == AttachmentVisualKind.image && !failed
           ? ClipRRect(
@@ -747,6 +827,7 @@ List<_AttachmentEntry> _entries(ContentViewModel model) {
 
 class _AttachmentGallery extends StatefulWidget {
   const _AttachmentGallery({
+    required this.thumbnails,
     required this.model,
     required this.owner,
     required this.credentials,
@@ -754,6 +835,7 @@ class _AttachmentGallery extends StatefulWidget {
     required this.onAction,
   });
   final ContentViewModel model;
+  final MobileAttachmentThumbnails thumbnails;
   final int owner;
   final int credentials;
   final String? contentPath;
@@ -921,6 +1003,7 @@ class _AttachmentGalleryState extends State<_AttachmentGallery> {
       widget.model.attachmentsNotifier,
       widget.model.attachmentJobsNotifier,
       widget.model.attachmentCacheNotifier,
+      widget.thumbnails,
     ]),
     builder: (context, _) {
       final model = widget.model;
@@ -1084,6 +1167,7 @@ class _AttachmentGalleryState extends State<_AttachmentGallery> {
                             separatorBuilder: (_, _) =>
                                 const Divider(height: 1, indent: 68),
                             itemBuilder: (_, index) => _AttachmentTile(
+                              thumbnails: widget.thumbnails,
                               key: ValueKey(
                                 'gallery/${widget.owner}/${remaining[index].id}',
                               ),

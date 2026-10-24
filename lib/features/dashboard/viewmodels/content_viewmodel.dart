@@ -11,6 +11,9 @@ import '../../../core/viewmodels/base_viewmodel.dart';
 import '../services/file_service.dart';
 import '../services/background_service.dart';
 import '../services/encryption_service.dart';
+import '../services/attachment_thumbnail_codec.dart';
+import '../../../core/platform/attachment_thumbnail_source.dart';
+import '../widgets/attachment_presentation.dart';
 import '../models/note_model.dart';
 import '../models/shared_attachment_target.dart';
 import '../models/attachment_mention.dart';
@@ -36,6 +39,7 @@ import '../services/pack_service.dart';
 import '../services/streaming_pack_service.dart';
 import '../../../core/storage/external_file_export.dart';
 import '../../../core/operations/operation_result.dart';
+import '../../../core/operations/file_operation_host.dart';
 import '../models/draft_session.dart';
 import '../models/save_ui_state.dart';
 import '../models/auto_save_policy.dart';
@@ -533,6 +537,299 @@ class ContentViewModel extends BaseViewModel {
     );
   }
 
+  bool get supportsStoredThumbnails =>
+      _fileService is AttachmentThumbnailSource &&
+      (_fileService as AttachmentThumbnailSource).supportsAttachmentThumbnails;
+
+  Future<Uint8List?> restoreAttachmentThumbnail(
+    AttachmentModel attachment,
+  ) async {
+    if (_disposed ||
+        _isLocked ||
+        !_attachments.any(
+          (a) =>
+              a.id == attachment.id &&
+              a.encryptedThumbnail == attachment.encryptedThumbnail,
+        ))
+      return null;
+    final generation = _session.generation;
+    final credential = _session.credentialGeneration;
+    final bytes = await AttachmentThumbnailCodec.open(
+      attachment.encryptedThumbnail,
+      _encryptionService,
+      _currentPassword,
+    );
+    return !_disposed &&
+            !_isLocked &&
+            generation == _session.generation &&
+            credential == _session.credentialGeneration &&
+            _attachments.any(
+              (a) =>
+                  a.id == attachment.id &&
+                  a.encryptedThumbnail == attachment.encryptedThumbnail,
+            )
+        ? bytes
+        : null;
+  }
+
+  final _thumbnailCancellations = <String, Future<void> Function()>{};
+  int _thumbnailRefreshRevision = 0;
+  int get thumbnailRefreshRevision => _thumbnailRefreshRevision;
+
+  Future<OperationResult<void>> refreshAttachmentThumbnails() =>
+      _runFileOperation(
+        FileOperationKind.processing,
+        () => _trackOwnedJob(_refreshAttachmentThumbnails()),
+      );
+
+  Future<OperationResult<void>> _refreshAttachmentThumbnails() async {
+    if (!supportsStoredThumbnails ||
+        !_usesOwnedMutations ||
+        _disposed ||
+        _isLocked ||
+        !_session.canWrite ||
+        !_session.isPersisted ||
+        hasAttachmentJobs ||
+        _deleting ||
+        _librarySwitching ||
+        _libraryResourcesClosing)
+      return _cancelledResult();
+    final media = _attachments
+        .where(
+          (a) => [
+            AttachmentVisualKind.image,
+            AttachmentVisualKind.video,
+          ].contains(attachmentVisualKind(a.fileName)),
+        )
+        .toList();
+    if (media.isEmpty)
+      return const OperationResult.failure(
+        OperationOutcome.rejectedInput,
+        'There are no image or video thumbnails to refresh.',
+      );
+    final generation = _session.generation;
+    final credential = _session.credentialGeneration;
+    final password = _currentPassword;
+    final reference = _noteReference!;
+    final source = _fileService as AttachmentThumbnailSource;
+    _bulkAttachmentJob = true;
+    final job = _newAttachmentJob(
+      const Uuid().v4(),
+      'Refresh thumbnails',
+      operation: AttachmentJobOperation.thumbnail,
+      captureRecoveryOwner: false,
+      attachmentIds: media.map((a) => a.id).toList(),
+    );
+    final id = job.progress.value.id;
+    bool current() =>
+        !_disposed &&
+        !_isLocked &&
+        generation == _session.generation &&
+        credential == _session.credentialGeneration &&
+        !_cancelledAttachmentJobs.contains(id);
+    OperationResult<void> result = _cancelledResult();
+    var completedBytes = 0;
+    var totalBytes = 0;
+    final selected = <AttachmentModel>[];
+    final replacements = <String, String>{};
+    var skipped = 0;
+    try {
+      _jobPhase(
+        job,
+        AttachmentJobPhase.preparing,
+        detail: 'Restoring stored thumbnails',
+      );
+      for (final attachment in media) {
+        if (!current()) throw const FileJobCancelled();
+        final stored = await AttachmentThumbnailCodec.open(
+          attachment.encryptedThumbnail,
+          _encryptionService,
+          password,
+        );
+        if (!current()) throw const FileJobCancelled();
+        if (stored == null ||
+            attachmentVisualKind(attachment.fileName) ==
+                AttachmentVisualKind.video) {
+          selected.add(attachment);
+        }
+      }
+      totalBytes = selected.fold<int>(0, (sum, a) => sum + a.size);
+      if (selected.isNotEmpty) await initializeAttachmentCache();
+      if (!current()) throw const FileJobCancelled();
+      final cache = _attachmentOpenCache;
+      if (selected.isNotEmpty && cache == null)
+        throw StateError('Attachment cache unavailable.');
+      for (var i = 0; i < selected.length; i++) {
+        final a = selected[i];
+        if (!current()) throw const FileJobCancelled();
+        _thumbnailCancellations[id] = () =>
+            cache!.cancel(reference, a.id, credential);
+        var processedBytes = 0;
+        void progress(String phase, int bytes, int total) {
+          processedBytes = bytes.clamp(0, a.size);
+          _jobPhase(
+            job,
+            phase == 'Verifying'
+                ? AttachmentJobPhase.verifying
+                : phase == 'Decrypting'
+                ? AttachmentJobPhase.decrypting
+                : AttachmentJobPhase.preparing,
+            bytes: bytes,
+            total: total,
+            detail:
+                'File ${i + 1} of ${selected.length} · ${a.fileName} · $phase',
+            originalAttachmentId: a.id,
+            fileProgress: FileOperationProgress(
+              stage: phase,
+              fileName: a.fileName,
+              fileIndex: i + 1,
+              fileCount: selected.length,
+              bytes: bytes,
+              total: total,
+              overallBytes: completedBytes + bytes,
+              overallTotal: totalBytes,
+            ),
+          );
+        }
+
+        progress('Preparing thumbnail', 0, a.size);
+        final opened = await cache!.prepare(
+          reference,
+          a,
+          credential,
+          password: password,
+          onProgress: progress,
+        );
+        if (!current()) throw const FileJobCancelled();
+        if (!opened.isSuccess) {
+          if (opened.outcome == OperationOutcome.cancelled)
+            throw const FileJobCancelled();
+          // Thumbnails are derived metadata: one unreadable source must not
+          // discard successful previews from other attachments in this batch.
+          skipped++;
+          completedBytes += processedBytes;
+          continue;
+        }
+        progress('Creating thumbnail', a.size, a.size);
+        final thumbnail = await AttachmentThumbnailCodec.seal(
+          await source.thumbnailFromCachedFile(opened.value!.path, a.fileName),
+          _encryptionService,
+          password,
+        );
+        if (!current()) throw const FileJobCancelled();
+        if (thumbnail != null) {
+          replacements[a.id] = thumbnail;
+        } else {
+          skipped++;
+        }
+        completedBytes += a.size;
+      }
+      if (selected.isNotEmpty && replacements.isEmpty) {
+        result = OperationResult.failure(
+          OperationOutcome.rejectedInput,
+          selected.length == 1
+              ? 'A thumbnail could not be created for this ${attachmentVisualKind(selected.single.fileName).name}. Existing thumbnails were kept.'
+              : '${selected.length} thumbnails could not be created. Existing thumbnails were kept.',
+        );
+      } else if (selected.isEmpty) {
+        result = const OperationResult.success();
+      } else {
+        result = await _mutate(() async {
+          if (!current() || !_tryBeginFinalization([job]))
+            return _cancelledResult();
+          if (replacements.isEmpty) return const OperationResult.success();
+          return _saveSnapshot(
+            _generationSnapshot(
+              [
+                for (final a in _attachments)
+                  if (replacements.containsKey(a.id))
+                    AttachmentModel(
+                      id: a.id,
+                      fileName: a.fileName,
+                      size: a.size,
+                      mimeType: a.mimeType,
+                      mentionId: a.mentionId,
+                      encryptedThumbnail: replacements[a.id],
+                    )
+                  else
+                    a,
+              ],
+              password,
+              changesProtection: false,
+            ),
+            true,
+            generationChange: true,
+          );
+        });
+      }
+    } on FileJobCancelled {
+      result = _cancelledResult();
+    } catch (_) {
+      result = const OperationResult.failure(
+        OperationOutcome.ioFailure,
+        'Thumbnails could not be refreshed; the note was retained.',
+      );
+    } finally {
+      _thumbnailCancellations.remove(id);
+      _bulkAttachmentJob = false;
+    }
+    if (result.isSuccess && skipped > 0) {
+      result = OperationResult.partial(
+        OperationOutcome.success,
+        '${replacements.length} thumbnails refreshed. $skipped could not be created.',
+        null,
+      );
+    }
+    if (result.isSuccess) _thumbnailRefreshRevision++;
+    _jobPhase(
+      job,
+      result.isSuccess
+          ? AttachmentJobPhase.completed
+          : result.outcome == OperationOutcome.cancelled
+          ? AttachmentJobPhase.cancelled
+          : AttachmentJobPhase.failed,
+      bytes: completedBytes,
+      total: totalBytes,
+      error: result.isSuccess ? null : result.message,
+      detail: result.isSuccess
+          ? (skipped == 0
+                ? (selected.isEmpty
+                      ? 'Stored thumbnails ready'
+                      : 'Thumbnails refreshed')
+                : '${replacements.length} thumbnails refreshed · $skipped could not be created')
+          : null,
+    );
+    return result;
+  }
+
+  Future<String?> prepareSharedAttachmentThumbnail(
+    SharedAttachmentTarget target,
+    String path,
+    String name,
+  ) async {
+    if (!sharedTargetCredentialCurrent(target)) return null;
+    final image = await _thumbnailFromPicked(path, name, target.password);
+    return sharedTargetCredentialCurrent(target) ? image : null;
+  }
+
+  Future<String?> _thumbnailFromPicked(
+    String path,
+    String name,
+    String? password,
+  ) async {
+    if (!supportsStoredThumbnails) return null;
+    try {
+      return await AttachmentThumbnailCodec.seal(
+        await (_fileService as AttachmentThumbnailSource)
+            .thumbnailFromPickedSource(path, name),
+        _encryptionService,
+        password,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<OperationResult<CachedAttachmentFile>> openAttachment(
     AttachmentModel attachment, {
     bool system = false,
@@ -748,6 +1045,13 @@ class ContentViewModel extends BaseViewModel {
   bool get mobileAttachmentExportPolicy => Platform.isAndroid || Platform.isIOS;
   bool get hasAttachmentJobs =>
       attachmentJobsNotifier.value.any((j) => j.progress.value.active);
+
+  Future<T> _runFileOperation<T>(
+    FileOperationKind kind,
+    Future<T> Function() action,
+  ) => _fileService is FileOperationHost
+      ? (_fileService as FileOperationHost).runFileOperation(kind, action)
+      : action();
 
   Future<T> _mutate<T>(Future<T> Function() action) {
     final queued = _mutationsPending != 0;
@@ -1457,6 +1761,7 @@ class ContentViewModel extends BaseViewModel {
     final state = job.progress.value;
     final id = state.id;
     _exportReadCancellations[id]?.cancel();
+    await _thumbnailCancellations[id]?.call();
     if (state.operation == AttachmentJobOperation.open) {
       final reference = _noteReference;
       final attachment = state.originalAttachmentId;
@@ -1695,6 +2000,8 @@ class ContentViewModel extends BaseViewModel {
           owner != _session.generation) {
         throw const FileJobCancelled();
       }
+      final thumbnail = await _thumbnailFromPicked(path, fileName, password);
+      if (_cancelledAttachmentJobs.contains(id)) throw const FileJobCancelled();
       operation = await files.createOperationDirectory(reference);
       _jobRecovery[id]!['staging'] = p.basename(operation.path);
       final target = files is AttachmentCandidateOwner
@@ -1738,6 +2045,7 @@ class ContentViewModel extends BaseViewModel {
             fileName: fileName,
             size: source.length,
             mimeType: 'application/octet-stream',
+            encryptedThumbnail: thumbnail,
           );
           return _saveSnapshot(
             _generationSnapshot(
@@ -1988,6 +2296,12 @@ class ContentViewModel extends BaseViewModel {
             size: attachment.size,
             mimeType: attachment.mimeType,
             mentionId: attachment.mentionId,
+            encryptedThumbnail: await AttachmentThumbnailCodec.rekey(
+              attachment.encryptedThumbnail,
+              _encryptionService,
+              previousPassword,
+              password,
+            ),
           ),
         );
       }
@@ -2014,6 +2328,7 @@ class ContentViewModel extends BaseViewModel {
                 size: a.size,
                 mimeType: a.mimeType,
                 mentionId: latest.single.mentionId,
+                encryptedThumbnail: a.encryptedThumbnail,
               );
             }
           }
@@ -2022,7 +2337,9 @@ class ContentViewModel extends BaseViewModel {
           if (oldFields is List &&
               oldFields.isNotEmpty &&
               oldFields.first is String &&
-              !replacement.any((a) => a.mentionId != null)) {
+              !replacement.any(
+                (a) => a.mentionId != null || a.encryptedThumbnail != null,
+              )) {
             metadata['attachments'] = replacement.map((a) => a.id).toList();
           } else {
             final byId = <String, Map<String, dynamic>>{};
@@ -3069,6 +3386,7 @@ class ContentViewModel extends BaseViewModel {
                 size: a.size,
                 mimeType: a.mimeType,
                 mentionId: a.id,
+                encryptedThumbnail: a.encryptedThumbnail,
               )
             else
               a,
@@ -4312,6 +4630,12 @@ class ContentViewModel extends BaseViewModel {
                 size: attachment.size,
                 mimeType: attachment.mimeType,
                 mentionId: attachment.mentionId,
+                encryptedThumbnail: await AttachmentThumbnailCodec.rekey(
+                  attachment.encryptedThumbnail,
+                  _encryptionService,
+                  effectivePassword,
+                  null,
+                ),
                 isLoading: false,
               ),
             );
@@ -4650,6 +4974,12 @@ class ContentViewModel extends BaseViewModel {
                 size: attachment.size,
                 mimeType: attachment.mimeType,
                 mentionId: attachment.mentionId,
+                encryptedThumbnail: await AttachmentThumbnailCodec.rekey(
+                  attachment.encryptedThumbnail,
+                  _encryptionService,
+                  effectiveOldPassword,
+                  newPassword,
+                ),
                 isLoading: false,
               ),
             );
@@ -5053,7 +5383,10 @@ class ContentViewModel extends BaseViewModel {
         final original = snapshot.metadata['attachments'];
         final legacy =
             original is List && original.isNotEmpty && original.first is String;
-        if (legacy && !snapshot.attachments.any((a) => a.mentionId != null)) {
+        if (legacy &&
+            !snapshot.attachments.any(
+              (a) => a.mentionId != null || a.encryptedThumbnail != null,
+            )) {
           metadata['attachments'] = snapshot.attachments
               .map((a) => a.id)
               .toList();
@@ -6356,6 +6689,7 @@ class ContentViewModel extends BaseViewModel {
           size: attachment.size,
           mimeType: attachment.mimeType,
           mentionId: attachment.mentionId,
+          encryptedThumbnail: attachment.encryptedThumbnail,
         );
         models.add(model);
         newFields.add(
@@ -6839,6 +7173,7 @@ class ContentViewModel extends BaseViewModel {
             size: entry.value.length,
             mimeType: original.mimeType,
             mentionId: original.mentionId,
+            encryptedThumbnail: original.encryptedThumbnail,
           ),
         );
       }

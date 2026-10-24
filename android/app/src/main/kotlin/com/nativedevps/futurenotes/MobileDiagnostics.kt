@@ -17,7 +17,7 @@ object MobileDiagnostics {
         DART_LIFECYCLE, DART_METRICS, DART_MEMORY_PRESSURE,
         DRAFT_READ_FAILED, DRAFT_WRITE_FAILED, DRAFT_RECOVERED,
         JOB_RECORD_FAILED, JOB_CHANNEL_FAILED, DART_JOB_PHASE, VIEWER_FAILED,
-        CIPHER_IO, CIPHER_FAILED, DISCOVERY_FAILED
+        CIPHER_IO, CIPHER_FAILED, DISCOVERY_FAILED, THUMBNAIL_READY, THUMBNAIL_FAILED
     }
     fun record(event: Event, vararg fields: Pair<String, Number>) {
         val value = JSONObject().put("event", event.name).put("uptime_ms", SystemClock.elapsedRealtime())

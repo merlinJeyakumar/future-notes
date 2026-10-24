@@ -239,6 +239,17 @@ class SharedAttachmentJobs implements AdditionalMobileJobs {
     try {
       if (cancelled()) throw const FileJobCancelled();
       await files.checkStagingCapacity(length);
+      String? thumbnail;
+      try {
+        thumbnail = await model.prepareSharedAttachmentThumbnail(
+          target,
+          path,
+          state.progress.value.fileName,
+        );
+      } catch (_) {
+        /* Unsupported derived media keeps its icon. */
+      }
+      if (cancelled()) throw const FileJobCancelled();
       stage = 2;
       operation = await files.createOperationDirectory(target.reference);
       _recoveries[id]!['staging'] = operation.path
@@ -287,6 +298,7 @@ class SharedAttachmentJobs implements AdditionalMobileJobs {
           fileName: state.progress.value.fileName,
           size: length,
           mimeType: 'application/octet-stream',
+          encryptedThumbnail: thumbnail,
         ),
         PreparedAttachmentFile(
           id,

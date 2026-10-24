@@ -4,6 +4,7 @@ class AttachmentModel {
   final int size;
   final String? mimeType;
   final String? mentionId;
+  final String? encryptedThumbnail;
   String get mentionIdentity => mentionId ?? id;
   final bool isLoading; // Transient
 
@@ -13,6 +14,7 @@ class AttachmentModel {
     this.size = 0,
     this.mimeType,
     this.mentionId,
+    this.encryptedThumbnail,
     this.isLoading = false,
   });
 
@@ -22,6 +24,7 @@ class AttachmentModel {
     'size': size,
     'mimeType': mimeType,
     if (mentionId != null) 'mentionId': mentionId,
+    if (encryptedThumbnail != null) 'encryptedThumbnail': encryptedThumbnail,
   };
 
   factory AttachmentModel.fromJson(Map<String, dynamic> json) {
@@ -31,6 +34,11 @@ class AttachmentModel {
       size: json['size'] as int? ?? 0,
       mimeType: json['mimeType'] as String?,
       mentionId: json['mentionId'] as String?,
+      encryptedThumbnail:
+          json['encryptedThumbnail'] is String &&
+              (json['encryptedThumbnail'] as String).length <= 48 * 1024
+          ? json['encryptedThumbnail'] as String
+          : null,
       isLoading: false,
     );
   }

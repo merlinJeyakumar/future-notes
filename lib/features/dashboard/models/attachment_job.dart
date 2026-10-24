@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../../../core/storage/file_operation_progress.dart';
 
-enum AttachmentJobOperation { add, open, protection, export, import }
+enum AttachmentJobOperation { add, open, protection, export, import, thumbnail }
 
 enum AttachmentJobPhase {
   queued,

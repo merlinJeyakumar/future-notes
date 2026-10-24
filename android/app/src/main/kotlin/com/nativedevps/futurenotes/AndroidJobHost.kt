@@ -36,19 +36,53 @@ class AndroidJobHost(private val context: Context, messenger: BinaryMessenger) {
     private var lastPhases: Map<String, Int> = emptyMap()
     private var lastServiceStart = 0L
     private var serviceCount = -1
-    var jobs: List<Map<String, Any?>> = emptyList()
-        private set
+    private var backgroundTimedOut = false
+    private var progressJobs: List<Map<String, Any?>> = emptyList()
+    private val fileOperations = linkedMapOf<String, Map<String, Any?>>()
+    // A lease keeps the runtime alive after a progress job settles, but never
+    // adds a second notification for that same active processing pipeline.
+    val jobs: List<Map<String, Any?>>
+        get() = if (progressJobs.isNotEmpty()) progressJobs else fileOperations.values.toList()
     fun attach(host: Activity) { activity = host }
     fun detach(host: Activity) { if (activity === host) activity = null }
     init {
         channel.setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
+                    "beginFileOperation" -> {
+                        val id = call.argument<String>("id") ?: throw IllegalArgumentException()
+                        require(Regex("^[a-f0-9-]{36}$").matches(id))
+                        val operation = call.argument<String>("operation")
+                        require(operation in listOf("processing", "opening", "saving", "deleting", "recovery"))
+                        val key = "file:$id"
+                        fileOperations[key] = mapOf("id" to key, "operation" to operation,
+                            "fileName" to fileOperationLabel(operation), "detail" to "In progress", "phase" to "preparing", "cancellable" to false)
+                        try {
+                            updateService()
+                            result.success(null)
+                        } catch (error: Exception) {
+                            fileOperations.remove(key)
+                            try { updateService() } catch (_: Exception) { }
+                            throw error
+                        }
+                    }
+                    "fileOperationHeartbeat" -> {
+                        val id = call.argument<String>("id") ?: throw IllegalArgumentException()
+                        require(fileOperations.containsKey("file:$id"))
+                        updateService()
+                        result.success(null)
+                    }
+                    "endFileOperation" -> {
+                        val id = call.argument<String>("id") ?: throw IllegalArgumentException()
+                        fileOperations.remove("file:$id")
+                        updateService()
+                        result.success(null)
+                    }
                     "capacity" -> result.success(capacity())
                     "update" -> {
                         val incoming = call.argument<List<Map<String, Any?>>>("jobs") ?: emptyList()
                         if (incoming.size > 10000 || incoming.any { it["id"] !is String || (it["id"] as String).length > 128 || it["phase"] !is String }) throw IllegalArgumentException()
-                        jobs = incoming.map { mapOf("id" to it["id"], "phase" to it["phase"], "detail" to (it["detail"] as? String)?.take(256), "cancellable" to (it["cancellable"] == true), "operation" to it["operation"], "fileName" to it["fileName"], "bytes" to it["bytes"], "total" to it["total"], "currentBytes" to it["currentBytes"], "currentTotal" to it["currentTotal"], "recovery" to it["recovery"]) }
+                        progressJobs = incoming.map { mapOf("id" to it["id"], "phase" to it["phase"], "detail" to (it["detail"] as? String)?.take(256), "cancellable" to (it["cancellable"] == true), "operation" to it["operation"], "fileName" to it["fileName"], "bytes" to it["bytes"], "total" to it["total"], "currentBytes" to it["currentBytes"], "currentTotal" to it["currentTotal"], "recovery" to it["recovery"]) }
                         val phases = jobs.groupingBy { it["phase"] as String }.eachCount()
                         if (phases != lastPhases) {
                             lastPhases = phases
@@ -57,7 +91,7 @@ class AndroidJobHost(private val context: Context, messenger: BinaryMessenger) {
                                 *known.map { it to (phases[it] ?: 0) }.toTypedArray())
                         }
                         persist()
-                        if (jobs.isNotEmpty() && Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                        if (progressJobs.isNotEmpty() && Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                             val host = activity
                             if (pending != null || host == null) { result.error("notification_permission", "Enable notifications to continue attachment work in the background.", null) }
                             else { pending = result; host.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATION) }
@@ -105,10 +139,12 @@ class AndroidJobHost(private val context: Context, messenger: BinaryMessenger) {
         }
     }
     private fun persist() {
-        val data = JSONArray(jobs).toString()
+        // File-operation leases are transient lifetimes, not resumable commands.
+        // Interrupted mutations remain governed by their existing storage journals.
+        val data = JSONArray(progressJobs).toString()
         if (data.toByteArray(Charsets.UTF_8).size > 2 * 1024 * 1024) throw IllegalStateException()
         val now = android.os.SystemClock.elapsedRealtime()
-        val control = JSONArray(jobs.map { mapOf("id" to it["id"], "phase" to it["phase"], "recovery" to it["recovery"]) }).toString()
+        val control = JSONArray(progressJobs.map { mapOf("id" to it["id"], "phase" to it["phase"], "recovery" to it["recovery"]) }).toString()
         if (control == lastControl && now - lastWrite < 5000) return
         val output = ledger.startWrite()
         try { output.write(data.toByteArray(Charsets.UTF_8)); ledger.finishWrite(output); lastLedger = data; lastControl = control; lastWrite = now }
@@ -124,6 +160,9 @@ class AndroidJobHost(private val context: Context, messenger: BinaryMessenger) {
     private fun updateService() {
         val intent = Intent(context, AttachmentJobService::class.java)
         val now = android.os.SystemClock.elapsedRealtime()
+        // A heartbeat must not restart a service after Android's dataSync
+        // budget expires. Returning to the foreground opens a new work window.
+        if (backgroundTimedOut && jobs.isNotEmpty()) throw IllegalStateException("background_timeout")
         if (jobs.isEmpty()) {
             if (serviceCount != -1 || AttachmentJobService.running) context.stopService(intent)
             serviceCount = -1
@@ -142,6 +181,11 @@ class AndroidJobHost(private val context: Context, messenger: BinaryMessenger) {
         val id = intent.getStringExtra(JobNotifications.JOB_ID) ?: return
         if (id.isBlank() || id.length > 128) return
         // IDs select existing coordinator records, never filesystem paths.
+        if (id.startsWith("file:")) {
+            intent.action = null
+            intent.removeExtra(JobNotifications.JOB_ID)
+            return // Reveal the existing operation UI, never an empty job panel.
+        }
         pendingNotification = id
         intent.removeExtra(JobNotifications.JOB_ID)
         intent.action = null
@@ -167,7 +211,15 @@ class AndroidJobHost(private val context: Context, messenger: BinaryMessenger) {
         return true
     }
     fun cancelSafeJobs() { channel.invokeMethod("cancelSafeJobs", null) }
-    fun timeout() { channel.invokeMethod("timeout", null) }
+    fun timeout() { backgroundTimedOut = true; channel.invokeMethod("timeout", null) }
+    fun resumed() { backgroundTimedOut = false }
+    private fun fileOperationLabel(operation: String?): String = when (operation) {
+        "opening" -> "Opening note"
+        "saving" -> "Saving files"
+        "deleting" -> "Deleting note"
+        "recovery" -> "Recovering files"
+        else -> "Processing files"
+    }
     fun memoryPressure(level: Int) {
         val tier = when (level) {
             15, 80 -> 2

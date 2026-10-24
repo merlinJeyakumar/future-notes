@@ -110,8 +110,8 @@ class JobNotifications(private val context: Context) {
     }
 
     private fun postJob(id: String, job: Map<String, Any?>, running: Boolean) {
-        val title = (job["fileName"] as? String)?.take(256)?.takeIf { it.isNotBlank() } ?: "Attachment operation"
-        val detail = (job["detail"] as? String)?.take(256)?.takeIf { it.isNotBlank() }
+        val title = if (job["operation"] == "thumbnail") "Thumbnails" else (job["fileName"] as? String)?.take(256)?.takeIf { it.isNotBlank() } ?: "Attachment operation"
+        val detail = if (job["operation"] == "thumbnail") phase(job["phase"]) else (job["detail"] as? String)?.take(256)?.takeIf { it.isNotBlank() }
         val notification = builder().setContentTitle(title)
             .setContentText(if (running) "${operation(job["operation"])} · ${detail ?: phase(job["phase"])}" else "Interrupted · Tap to review recovery")
             .setContentIntent(open(id)).setOngoing(running).setAutoCancel(false)
@@ -148,7 +148,7 @@ class JobNotifications(private val context: Context) {
 
     private fun operation(value: Any?): String = when (value) {
         "add" -> "Attach"; "open" -> "Open"; "protection" -> "Protection"
-        "export" -> "Export"; "import" -> "Import"; else -> "Attachment"
+        "export" -> "Export"; "import" -> "Import"; "thumbnail" -> "Thumbnails"; else -> "Attachment"
     }
     private fun phase(value: Any?): String = when (value) {
         "queued" -> "Queued"; "preparing" -> "Preparing"; "decrypting" -> "Decrypting"

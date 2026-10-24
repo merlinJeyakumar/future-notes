@@ -42,6 +42,7 @@ class _MobileAttachmentProgressState extends State<MobileAttachmentProgress> {
                       job.active &&
                       (job.operation == AttachmentJobOperation.add ||
                           job.operation == AttachmentJobOperation.open ||
+                          job.operation == AttachmentJobOperation.thumbnail ||
                           job.operation == AttachmentJobOperation.export);
                 }).toList();
                 if (jobs.isEmpty) return const SizedBox.shrink();

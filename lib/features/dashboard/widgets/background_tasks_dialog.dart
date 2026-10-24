@@ -223,6 +223,7 @@ class _BackgroundTasksDialogState extends State<BackgroundTasksDialog> {
     AttachmentJobOperation.protection => 'Protection',
     AttachmentJobOperation.export => 'Export',
     AttachmentJobOperation.import => 'Import',
+    AttachmentJobOperation.thumbnail => 'Thumbnails',
   };
 
   String _phase(AttachmentJobPhase phase) => switch (phase) {

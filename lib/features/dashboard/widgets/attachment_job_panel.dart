@@ -63,6 +63,8 @@ class _AttachmentJobPanelState extends State<AttachmentJobPanel> {
               (job) =>
                   job.progress.value.operation != AttachmentJobOperation.add &&
                   job.progress.value.operation != AttachmentJobOperation.open &&
+                  job.progress.value.operation !=
+                      AttachmentJobOperation.thumbnail &&
                   job.progress.value.owner ==
                       widget.viewModel.draftSession.generation,
             )

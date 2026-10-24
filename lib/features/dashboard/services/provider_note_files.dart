@@ -25,6 +25,10 @@ import '../../../core/storage/storage_owner_worker.dart';
 import '../../../core/storage/owned_write.dart';
 import 'package:uuid/uuid.dart';
 import 'file_service.dart';
+import '../../../core/operations/file_operation_host.dart';
+import '../../../core/platform/android_file_operations.dart';
+import '../../../core/platform/attachment_thumbnail_source.dart';
+import 'android_attachment_thumbnails.dart';
 
 /// Live provider-backed notes. Private files are operation staging only; note
 /// reads and acknowledgements always come from the selected provider.
@@ -44,7 +48,9 @@ class ProviderNoteFiles
         NativeDropSourceOwner,
         AttachmentStagingCapacity,
         InterruptedStagingOwner,
-        AttachmentCandidateOwner {
+        AttachmentCandidateOwner,
+        FileOperationHost,
+        AttachmentThumbnailSource {
   ProviderNoteFiles({
     required this.documents,
     required this.location,
@@ -65,6 +71,44 @@ class ProviderNoteFiles
     owner = StorageOwnerRoot(1, binding.root, libraryId);
   }
   final MobileLibraryDocuments documents;
+  @override
+  bool get supportsAttachmentThumbnails => Platform.isAndroid;
+
+  Future<Uint8List?> _thumbnail(String method, String path, String name) async {
+    if (!Platform.isAndroid) return null;
+    final ext = p.extension(name).toLowerCase();
+    final kind =
+        ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].contains(ext)
+        ? 'image'
+        : [
+            '.mp4',
+            '.mkv',
+            '.mov',
+            '.webm',
+            '.avi',
+            '.wmv',
+            '.m4v',
+            '.mpg',
+            '.mpeg',
+            '.3gp',
+          ].contains(ext)
+        ? 'video'
+        : null;
+    if (kind == null) return null;
+    return AndroidAttachmentThumbnails().generate(method, path, kind);
+  }
+
+  @override
+  Future<Uint8List?> thumbnailFromPickedSource(String path, String fileName) =>
+      _thumbnail('picked', path, fileName);
+  @override
+  Future<Uint8List?> thumbnailFromCachedFile(String path, String fileName) =>
+      _thumbnail('cached', path, fileName);
+  @override
+  Future<T> runFileOperation<T>(
+    FileOperationKind kind,
+    Future<T> Function() action,
+  ) => AndroidFileOperations.shared.runFileOperation(kind, action);
   final LibraryLocation location;
   final String libraryId;
   final String privateRoot;

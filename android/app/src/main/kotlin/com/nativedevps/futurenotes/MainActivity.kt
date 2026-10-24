@@ -53,6 +53,7 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         MobileDiagnostics.record(MobileDiagnostics.Event.ACTIVITY_RESUMED)
+        (application as FutureNotesApplication).jobHost.resumed()
         (application as FutureNotesApplication).libraryEvents.resumed()
     }
 

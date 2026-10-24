@@ -1,4 +1,5 @@
 import '../../../core/theme/app_motion.dart';
+import '../../../core/operations/operation_result.dart';
 import '../../../core/theme/app_dialog.dart';
 import '../models/save_ui_state.dart';
 import '../models/attachment_job.dart';
@@ -1333,6 +1334,35 @@ class _MobileContentAreaState extends State<MobileContentArea>
                   onTap: () {
                     Navigator.pop(context);
                     unawaited(widget.onExport!());
+                  },
+                ),
+              if (viewModel.supportsStoredThumbnails)
+                _buildSettingsTile(
+                  icon: Icons.image_outlined,
+                  title: 'Refresh thumbnails',
+                  enabled:
+                      !_exporting &&
+                      !viewModel.isLocked &&
+                      viewModel.draftSession.isPersisted &&
+                      !viewModel.hasAttachmentJobs,
+                  onTap: () {
+                    Navigator.pop(context);
+                    unawaited(() async {
+                      final result = await viewModel
+                          .refreshAttachmentThumbnails();
+                      if (!mounted ||
+                          result.outcome == OperationOutcome.cancelled ||
+                          (result.isSuccess && result.message == null))
+                        return;
+                      ScaffoldMessenger.of(this.context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            result.message ??
+                                'Thumbnails could not be refreshed.',
+                          ),
+                        ),
+                      );
+                    }());
                   },
                 ),
               // Change/Set Password
